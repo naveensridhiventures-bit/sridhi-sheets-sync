@@ -366,6 +366,171 @@ function Stars({ value, onChange, max=5 }) {
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────
+// ─── TODAY'S TASKS ────────────────────────────────────────────────────────────
+function TodayTasks() {
+  const [leads] = useSheetSynced("leads","leads",[]);
+  const [samples] = useSheetSynced("samples","samples",[]);
+  const [repeatCustomers] = useSheetSynced("repeatCustomers","repeatCustomers",[]);
+
+  const todayStr = new Date().toISOString().slice(0,10);
+  const todayDisplay = new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long"});
+
+  // Scheduled samples for today
+  const samplesScheduledToday = samples.filter(s =>
+    s.status === "Pending" && s.scheduledDate === todayStr
+  );
+
+  // Scheduled samples for future dates
+  const upcomingSamples = samples.filter(s =>
+    s.status === "Pending" && s.scheduledDate && s.scheduledDate > todayStr
+  ).sort((a,b) => a.scheduledDate.localeCompare(b.scheduledDate));
+
+  // Callback leads
+  const callbackLeads = leads.filter(l => l.stage === "Callback Requested");
+
+  // Sample requested leads
+  const sampleRequestedLeads = leads.filter(l => l.stage === "Sample Requested");
+
+  // Repeat orders due today
+  const dueToday = repeatCustomers.filter(c => c.status === "Due Today");
+
+  // Pending samples (no date set)
+  const pendingNoDate = samples.filter(s => s.status === "Pending" && !s.scheduledDate);
+
+  const totalTasks = samplesScheduledToday.length + callbackLeads.length + sampleRequestedLeads.length + dueToday.length;
+
+  function Section({ icon, title, color, count, children }) {
+    const [open, setOpen] = useState(true);
+    if (count === 0) return null;
+    return (
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:16, overflow:"hidden" }}>
+        <div onClick={() => setOpen(!open)}
+          style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+            padding:"12px 14px", cursor:"pointer", borderBottom: open ? `1px solid ${T.border}` : "none" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:16 }}>{icon}</span>
+            <span style={{ fontSize:13, fontWeight:800, color:T.t1 }}>{title}</span>
+            <div style={{ background:color+"22", border:`1px solid ${color}44`, borderRadius:20,
+              padding:"2px 8px", fontSize:11, fontWeight:800, color }}>{count}</div>
+          </div>
+          <span style={{ color:T.t3, fontSize:12 }}>{open ? "▲" : "▼"}</span>
+        </div>
+        {open && <div style={{ padding:"10px 14px", display:"flex", flexDirection:"column", gap:8 }}>{children}</div>}
+      </div>
+    );
+  }
+
+  function TaskCard({ lead, extra, callAction, whatsappAction }) {
+    return (
+      <div style={{ background:T.surface, borderRadius:12, padding:"10px 12px" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{lead.name || lead.customer}</div>
+            {lead.area && <div style={{ fontSize:11, color:T.t3, marginTop:1 }}>📍 {lead.area}</div>}
+            {lead.contact && <div style={{ fontSize:11, color:T.t2, marginTop:1 }}>📞 {lead.contact}</div>}
+            {lead.telecaller && <div style={{ fontSize:11, color:T.accent, marginTop:1 }}>👤 {lead.telecaller}</div>}
+            {extra && <div style={{ fontSize:11, color:T.amber, marginTop:3, fontWeight:600 }}>{extra}</div>}
+          </div>
+        </div>
+        {(callAction || whatsappAction) && (
+          <div style={{ display:"flex", gap:6, marginTop:8 }}>
+            {callAction && (
+              <button onClick={callAction}
+                style={{ flex:1, background:T.emerald+"22", border:`1px solid ${T.emerald}44`, borderRadius:8,
+                  color:T.emerald, padding:"6px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:FONT }}>
+                📞 Call
+              </button>
+            )}
+            {whatsappAction && (
+              <button onClick={whatsappAction}
+                style={{ flex:1, background:"#25D36622", border:"1px solid #25D36644", borderRadius:8,
+                  color:"#25D366", padding:"6px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:FONT }}>
+                💬 WhatsApp
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      <div style={{ background:`linear-gradient(135deg, ${T.card}, ${T.cardHigh})`,
+        border:`1px solid ${T.borderHi}`, borderRadius:16, padding:16 }}>
+        <div style={{ fontSize:11, color:T.accent, fontWeight:700, letterSpacing:"0.1em", marginBottom:4 }}>TODAY</div>
+        <div style={{ fontSize:15, fontWeight:800, color:T.t1 }}>{todayDisplay}</div>
+        <div style={{ fontSize:13, color:T.t3, marginTop:4 }}>
+          {totalTasks > 0
+            ? <span style={{color:T.rose, fontWeight:700}}>{totalTasks} tasks pending</span>
+            : <span style={{color:T.emerald, fontWeight:700}}>All clear! No pending tasks 🎉</span>}
+        </div>
+      </div>
+
+      <Section icon="🧪" title="Sample Deliveries Today" color={T.amber} count={samplesScheduledToday.length}>
+        {samplesScheduledToday.map((s,i) => (
+          <TaskCard key={i} lead={{ name:s.customer, contact:"", area:"" }}
+            extra={`${s.qty} KG ${s.type}${s.scheduledTime ? " · " + s.scheduledTime : ""} · Exec: ${s.exec}`} />
+        ))}
+      </Section>
+
+      <Section icon="📅" title="Upcoming Samples" color={T.sky} count={upcomingSamples.length}>
+        {upcomingSamples.map((s,i) => (
+          <TaskCard key={i} lead={{ name:s.customer }}
+            extra={`${s.qty} KG ${s.type} · ${new Date(s.scheduledDate).toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})}${s.scheduledTime ? " " + s.scheduledTime : ""}`} />
+        ))}
+      </Section>
+
+      <Section icon="📞" title="Callback Requested" color={T.rose} count={callbackLeads.length}>
+        {callbackLeads.map((l,i) => (
+          <TaskCard key={i} lead={l}
+            extra={l.remarks?.[l.remarks.length-1] || ""}
+            callAction={() => { const p=(l.contact||"").replace(/[^0-9]/g,""); if(p) window.location.href="tel:+91"+p; }}
+            whatsappAction={() => { const p=(l.contact||"").replace(/[^0-9]/g,""); window.open("https://wa.me/91"+p,"_blank"); }}
+          />
+        ))}
+      </Section>
+
+      <Section icon="🎁" title="Sample Requested" color={T.orange} count={sampleRequestedLeads.length}>
+        {sampleRequestedLeads.map((l,i) => (
+          <TaskCard key={i} lead={l}
+            extra={l.remarks?.[l.remarks.length-1] || ""}
+            callAction={() => { const p=(l.contact||"").replace(/[^0-9]/g,""); if(p) window.location.href="tel:+91"+p; }}
+            whatsappAction={() => { const p=(l.contact||"").replace(/[^0-9]/g,""); window.open("https://wa.me/91"+p,"_blank"); }}
+          />
+        ))}
+      </Section>
+
+      <Section icon="🔁" title="Repeat Orders Due Today" color={T.accent} count={dueToday.length}>
+        {dueToday.map((c,i) => (
+          <TaskCard key={i} lead={{ name:c.name, contact:c.contact, area:c.area }}
+            extra={`${c.qty} KG ${c.product} · ${c.frequency}`}
+            callAction={() => { const p=(c.contact||"").replace(/[^0-9]/g,""); if(p) window.location.href="tel:+91"+p; }}
+            whatsappAction={() => { const p=(c.contact||"").replace(/[^0-9]/g,""); window.open("https://wa.me/91"+p,"_blank"); }}
+          />
+        ))}
+      </Section>
+
+      {pendingNoDate.length > 0 && (
+        <Section icon="⏳" title="Pending Samples (No Date Set)" color={T.t3} count={pendingNoDate.length}>
+          {pendingNoDate.map((s,i) => (
+            <TaskCard key={i} lead={{ name:s.customer }}
+              extra={`${s.qty} KG ${s.type} · No schedule set`} />
+          ))}
+        </Section>
+      )}
+
+      {totalTasks === 0 && pendingNoDate.length === 0 && (
+        <div style={{ textAlign:"center", padding:40, color:T.t3 }}>
+          <div style={{ fontSize:40, marginBottom:12 }}>✅</div>
+          <div style={{ fontSize:14, fontWeight:700, color:T.t1 }}>All tasks done for today!</div>
+          <div style={{ fontSize:12, marginTop:6 }}>Check back tomorrow for new tasks</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Dashboard() {
   const salesData = [
     { label:"Jan", val:0 }, { label:"Feb", val:0 }, { label:"Mar", val:0 },
@@ -2321,6 +2486,7 @@ const MORE_MENU = [
   { id:"expenses",  label:"Expenses",      icon:"💸" },
   { id:"marketing", label:"Marketing",     icon:"📢" },
   { id:"reports",   label:"Reports",       icon:"📈" },
+  { id:"today",     label:"Today Tasks",    icon:"📅"  },
   { id:"hrleads",   label:"HR Leads",       icon:"📋"  },
   { id:"whatsapp",  label:"WA Templates",  icon:"💬"  },
   { id:"ai",        label:"AI Assistant",  icon:"✦"  },
@@ -2364,7 +2530,7 @@ export default function App() {
 
   useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; }, [activeTab]);
 
-  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads" };
+  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads", today:"Today Tasks" };
 
   // ── INSTALL BANNER ──
   const InstallBanner = () => showInstall ? (
@@ -2461,6 +2627,7 @@ export default function App() {
       case "expenses":  return <Expenses />;
       case "marketing": return <Marketing />;
       case "reports":   return <Reports />;
+      case "today":     return <TodayTasks />;
       case "hrleads":   return <HRLeads />;
       case "whatsapp":  return <WhatsAppTemplates />;
       case "ai":        return <AIAssistant />;
