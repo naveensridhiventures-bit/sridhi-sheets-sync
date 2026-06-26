@@ -36,18 +36,7 @@ const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 // Sync auto-enables once VITE_API_KEY is set. (See SETUP.md)
 
 // ─── SEED DATA ────────────────────────────────────────────────────────────
-const INITIAL_LEADS = [
-  { id:1,  name:"Anand Tiffin Center",  contact:"9876543210", business:"Anand Foods",         type:"Restaurant",   area:"Koramangala",    address:"12, 5th Block, Koramangala", stage:"Interested",        source:"Instagram",  telecaller:"Priya", lastContact:"Today",     priority:"High",   remarks:["Interested in dosa batter, wants 10 KG trial"] },
-  { id:2,  name:"Sri Lakshmi Mess",     contact:"9845671234", business:"Lakshmi Enterprises", type:"Mess",         area:"BTM Layout",     address:"34, 2nd Stage, BTM",         stage:"Sample Requested",  source:"Facebook",   telecaller:"Ravi",  lastContact:"Yesterday", priority:"High",   remarks:["Needs 5 KG idli batter sample urgently"] },
-  { id:3,  name:"Balaji Hotel",         contact:"9900112233", business:"Balaji Hotels Pvt",   type:"Hotel",        area:"Jayanagar",      address:"8, 4th T Block, Jayanagar",  stage:"Callback Requested",source:"Referral",   telecaller:"Priya", lastContact:"2 days ago",priority:"Medium", remarks:["Owner travels weekdays — call Saturday"] },
-  { id:4,  name:"Udupi Garden",         contact:"9712345678", business:"Udupi Garden Pvt",    type:"Restaurant",   area:"Indiranagar",    address:"100 Feet Road, Indiranagar", stage:"Positive Feedback", source:"WhatsApp",   telecaller:"Kavya", lastContact:"Today",     priority:"High",   remarks:["Loved the texture, comparing price with vendor"] },
-  { id:5,  name:"Morning Star Bakery",  contact:"9988776655", business:"Morning Star Foods",  type:"Bakery",       area:"HSR Layout",     address:"Sector 4, HSR Layout",       stage:"Negotiation",       source:"Google",     telecaller:"Ravi",  lastContact:"Today",     priority:"Medium", remarks:["Wants 20 KG/week, needs ₹2/KG discount"] },
-  { id:6,  name:"Chennai Express",      contact:"8877665544", business:"CE Restaurants",      type:"Restaurant",   area:"Whitefield",     address:"EPIP Zone, Whitefield",      stage:"Order Received",    source:"Field Sales",telecaller:"Kavya", lastContact:"Yesterday", priority:"Low",    remarks:["First order placed: 50 KG dosa batter"] },
-  { id:7,  name:"Shree Annapoorna",     contact:"7766554433", business:"Annapoorna Group",    type:"Mess",         area:"Electronic City",address:"Phase 2, Electronic City",   stage:"Active Customer",   source:"Referral",   telecaller:"Priya", lastContact:"3 days ago",priority:"Low",    remarks:["Regular 30 KG/week — very happy customer"] },
-  { id:8,  name:"Royal Kitchen",        contact:"9123456789", business:"Royal Cloud Foods",   type:"Cloud Kitchen",area:"Marathahalli",   address:"Outer Ring Road, Marathahalli",stage:"New Lead",        source:"Instagram",  telecaller:"Ravi",  lastContact:"Today",     priority:"Medium", remarks:[] },
-  { id:9,  name:"Meenakshi Mess",       contact:"9234567890", business:"Meenakshi Foods",     type:"Mess",         area:"JP Nagar",       address:"Phase 6, JP Nagar",          stage:"Contacted",         source:"Facebook",   telecaller:"Kavya", lastContact:"Today",     priority:"Medium", remarks:["Call connected, interested in pricing"] },
-  { id:10, name:"Hotel Saravana",       contact:"9345678901", business:"Saravana Hotels",     type:"Hotel",        area:"Rajajinagar",    address:"2nd Block, Rajajinagar",     stage:"Lost Customer",     source:"WhatsApp",   telecaller:"Priya", lastContact:"1 week ago",priority:"Low",    remarks:["Went with competitor — price issue"] },
-];
+const INITIAL_LEADS = [];
 
 const PIPELINE_STAGES = [
   { id:"New Lead",               color:T.t3,      count:23 },
@@ -68,41 +57,20 @@ const PIPELINE_STAGES = [
 ];
 
 const INITIAL_SAMPLES = [
-  { id:1, customer:"Sri Lakshmi Mess",    leadId:2, qty:5, unit:"KG", type:"Idli Batter",  date:"Jun 24", exec:"Arjun P.",  deliveryCost:320, productionCost:250, status:"Delivered", feedback:"Positive", converted:false },
-  { id:2, customer:"Balaji Hotel",        leadId:3, qty:3, unit:"KG", type:"Dosa Batter",  date:"Jun 23", exec:"Suresh R.", deliveryCost:210, productionCost:150, status:"Delivered", feedback:"Positive", converted:true  },
-  { id:3, customer:"Royal Kitchen",       leadId:8, qty:8, unit:"KG", type:"Dosa Batter",  date:"Jun 22", exec:"Arjun P.",  deliveryCost:480, productionCost:400, status:"Pending",   feedback:null,       converted:false },
-  { id:4, customer:"Udupi Garden",        leadId:4, qty:4, unit:"KG", type:"Idli Batter",  date:"Jun 21", exec:"Suresh R.", deliveryCost:260, productionCost:200, status:"Delivered", feedback:"Positive", converted:true  },
-  { id:5, customer:"Morning Star Bakery", leadId:5, qty:6, unit:"KG", type:"Dosa Batter",  date:"Jun 20", exec:"Arjun P.",  deliveryCost:380, productionCost:300, status:"Delivered", feedback:"Neutral",  converted:false },
-  { id:6, customer:"Meenakshi Mess",      leadId:9, qty:4, unit:"KG", type:"Idli Batter",  date:"Jun 19", exec:"Suresh R.", deliveryCost:220, productionCost:180, status:"Delivered", feedback:"Positive", converted:false },
 ];
+
 
 const INITIAL_EXPENSES = [
-  { id:1,  category:"Facebook Ads",              amount:12500, date:"Jun 24", type:"Marketing",  subtype:"Facebook"   },
-  { id:2,  category:"Porter Delivery Charges",   amount:3200,  date:"Jun 24", type:"Delivery",   subtype:"Porter"     },
-  { id:3,  category:"Sample Production — Batter",amount:8400,  date:"Jun 23", type:"Sample",     subtype:"Production" },
-  { id:4,  category:"Instagram Boost Campaign",  amount:5000,  date:"Jun 23", type:"Marketing",  subtype:"Instagram"  },
-  { id:5,  category:"Driver Charges",            amount:2800,  date:"Jun 22", type:"Delivery",   subtype:"Driver"     },
-  { id:6,  category:"Packaging Materials",       amount:1600,  date:"Jun 22", type:"Sample",     subtype:"Packaging"  },
-  { id:7,  category:"Banner Printing",           amount:2200,  date:"Jun 21", type:"Marketing",  subtype:"Banner"     },
-  { id:8,  category:"Fuel Expenses",             amount:1800,  date:"Jun 20", type:"Delivery",   subtype:"Fuel"       },
-  { id:9,  category:"Employee Incentive — Priya",amount:3000,  date:"Jun 19", type:"Employee",   subtype:"Incentive"  },
-  { id:10, category:"WhatsApp Promotions",       amount:800,   date:"Jun 18", type:"Marketing",  subtype:"WhatsApp"   },
 ];
+
 
 const REPEAT_CUSTOMERS = [
-  { id:1, name:"Shree Annapoorna",  area:"Electronic City", contact:"7766554433", product:"Dosa Batter", qty:30, frequency:"Weekly",    lastOrder:"Jun 18", nextDue:"Jun 25", status:"Due Today", revenue:28800 },
-  { id:2, name:"Chennai Express",   area:"Whitefield",      contact:"8877665544", product:"Dosa Batter", qty:50, frequency:"Bi-Weekly", lastOrder:"Jun 15", nextDue:"Jun 29", status:"Upcoming",  revenue:48000 },
-  { id:3, name:"Hotel Regal",       area:"MG Road",         contact:"9988001122", product:"Idli Batter", qty:20, frequency:"Daily",     lastOrder:"Jun 24", nextDue:"Jun 25", status:"Due Today", revenue:192000},
-  { id:4, name:"Taste of South",    area:"Bellandur",       contact:"9876001234", product:"Dosa Batter", qty:15, frequency:"Weekly",    lastOrder:"Jun 19", nextDue:"Jun 26", status:"Tomorrow",  revenue:14400 },
-  { id:5, name:"Green Leaf Mess",   area:"Hebbal",          contact:"9988112233", product:"Idli Batter", qty:25, frequency:"Weekly",    lastOrder:"Jun 18", nextDue:"Jun 25", status:"Due Today", revenue:24000 },
 ];
 
+
 const FIELD_TASKS = [
-  { id:1, customer:"Sri Lakshmi Mess", area:"BTM Layout",  address:"34, 2nd Stage, BTM",    task:"Sample Delivery", product:"Idli Batter", qty:"5 KG",  priority:"High",   assignedTo:"Arjun P.",  status:"Pending",     createdBy:"Ravi",  notes:"Owner available 10 AM–1 PM" },
-  { id:2, customer:"Royal Kitchen",    area:"Marathahalli", address:"ORR, Marathahalli",     task:"Sample Delivery", product:"Dosa Batter", qty:"8 KG",  priority:"Medium", assignedTo:"Suresh R.", status:"In Progress", createdBy:"Ravi",  notes:"Call before visiting" },
-  { id:3, customer:"Balaji Hotel",     area:"Jayanagar",    address:"8, 4th T Block",        task:"Customer Visit",  product:"—",           qty:"—",     priority:"Medium", assignedTo:"Arjun P.",  status:"Completed",   createdBy:"Priya", notes:"Feedback collection visit" },
-  { id:4, customer:"Udupi Garden",     area:"Indiranagar",  address:"100 Feet Road",         task:"Order Collection",product:"Idli Batter", qty:"30 KG", priority:"High",   assignedTo:"Arjun P.",  status:"Pending",     createdBy:"Kavya", notes:"First bulk order — handle carefully" },
 ];
+
 
 const TEAM_DATA = [
   { name:"Priya S.",  role:"Telecaller",  calls:47, connected:38, followups:22, conversions:12, samples:8, score:94, color:T.accent  },
