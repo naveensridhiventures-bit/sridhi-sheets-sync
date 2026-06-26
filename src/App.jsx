@@ -413,13 +413,11 @@ function ProspectFinder() {
       const radius = 2000; // 2km radius
 
       // Use Overpass API to find businesses
-      const query = \`[out:json][timeout:25];
-(
-  node["amenity"="\${type}"](around:\${radius},\${lat},\${lon});
-  node["shop"="bakery"](around:\${radius},\${lat},\${lon});
-  node["tourism"="hotel"](around:\${radius},\${lat},\${lon});
-);
-out body 30;\`;
+      const query = "[out:json][timeout:25];(" +
+        "node[\"amenity\"=\"" + type + "\"](around:" + radius + "," + lat + "," + lon + ");" +
+        "node[\"shop\"=\"bakery\"](around:" + radius + "," + lat + "," + lon + ");" +
+        "node[\"tourism\"=\"hotel\"](around:" + radius + "," + lat + "," + lon + ");" +
+        ");out body 30;";
 
       const overpassRes = await fetch("https://overpass-api.de/api/interpreter", {
         method: "POST",
@@ -2373,18 +2371,33 @@ function AIAssistant() {
   const [loading, setLoading] = useState(false);
   const endRef = useRef(null);
 
-  const CONTEXT = `You are an AI assistant for Sridhi Ventures, a specialty food ingredient distributor in Bengaluru, India that sells dosa and idli batter to restaurants, mess halls, hotels, bakeries, and cloud kitchens.
+  const activeCustomers = leads.filter(l=>l.stage==="Active Customer").length;
+  const callbackLeads = leads.filter(l=>l.stage==="Callback Requested");
+  const sampleReqLeads = leads.filter(l=>l.stage==="Sample Requested");
+  const negotiationLeads = leads.filter(l=>l.stage==="Negotiation");
+  const pendingSamples = samples.filter(s=>s.status==="Pending");
+  const dueToday = repeatCustomers.filter(c=>c.status==="Due Today");
+  const totalExpenses = expenses.reduce((a,b)=>a+(Number(b.amount)||0),0);
+  const converted2 = leads.filter(l=>["Order Received","Active Customer","Repeat Order Follow-up"].includes(l.stage)).length;
+  const convRate2 = leads.length>0?Math.round(converted2/leads.length*100):0;
+  const todayStr2 = new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
 
-Current business data (June 2025):
-- Monthly sales: 1,650 KG (↑37.5% vs last month)
-- Monthly revenue: ₹1,98,000 | Active customers: 87 | Total leads: 274 | Conversion: 34%
-- Team: Telecallers — Thulasi, Ramya; Field Sales — Arjun P., Suresh R.
-- Top lead sources: Referral (43% conv), Instagram (26%), Facebook (23%)
-- Marketing spend: ₹20,500 | Current price: ~₹120/KG
-- Due today: Hotel Regal (20 KG/day), Shree Annapoorna (30 KG/week), Green Leaf Mess (25 KG/week)
-- Key leads: Sri Lakshmi Mess (sample requested), Udupi Garden (positive feedback, negotiating), Morning Star Bakery (wants ₹2/KG discount)
-
-Help with: call scripts, follow-up strategies, pricing, retention, marketing ROI, business decisions. Be concise and actionable. Use Indian business context.`;
+  const CONTEXT = "You are an AI business assistant for Sridhi Ventures, a fresh dosa and idli batter distributor in Bengaluru, India. Answer questions using the LIVE data below. Be specific, use actual names." +
+    "\n\nTODAY: " + todayStr2 +
+    "\nTotal Leads: " + leads.length + " | Active Customers: " + activeCustomers + " | Conversion: " + convRate2 + "%" +
+    "\nTotal Expenses: Rs." + totalExpenses.toLocaleString("en-IN") +
+    "\n\nPENDING SAMPLES (" + pendingSamples.length + "):" +
+    (pendingSamples.length ? "\n" + pendingSamples.map(s=>s.customer+" - "+s.qty+"KG "+s.type+(s.scheduledDate?" on "+s.scheduledDate:"")).join("\n") : " None") +
+    "\n\nCALLBACK REQUESTED (" + callbackLeads.length + "):" +
+    (callbackLeads.length ? "\n" + callbackLeads.slice(0,8).map(l=>l.name+" ("+l.contact+") - "+l.area).join("\n") : " None") +
+    "\n\nSAMPLE REQUESTED (" + sampleReqLeads.length + "):" +
+    (sampleReqLeads.length ? "\n" + sampleReqLeads.slice(0,8).map(l=>l.name+" - "+l.area).join("\n") : " None") +
+    "\n\nNEGOTIATION (" + negotiationLeads.length + "):" +
+    (negotiationLeads.length ? "\n" + negotiationLeads.slice(0,5).map(l=>l.name+" - "+l.remarks?.slice(-1)[0]||"").join("\n") : " None") +
+    "\n\nDUE TODAY REPEAT ORDERS (" + dueToday.length + "):" +
+    (dueToday.length ? "\n" + dueToday.map(c=>c.name+" - "+c.qty+"KG "+c.product).join("\n") : " None") +
+    "\n\nALL LEADS (recent 15):\n" + leads.slice(0,15).map(l=>l.name+" | "+l.stage+" | "+l.telecaller+" | "+l.contact).join("\n") +
+    "\n\nINSTRUCTIONS: Answer in English. Be specific and actionable. For who to call today - prioritize Callback Requested, then Sample Requested, then Negotiation. Keep answers concise.";
 
   const send = async () => {
     if (!input.trim() || loading) return;
