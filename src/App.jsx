@@ -368,11 +368,11 @@ function Stars({ value, onChange, max=5 }) {
 // ─── DASHBOARD ────────────────────────────────────────────────────────────
 function Dashboard() {
   const salesData = [
-    { label:"Jan", val:980 }, { label:"Feb", val:1050 }, { label:"Mar", val:1120 },
+    { label:"Jan", val:0 }, { label:"Feb", val:0 }, { label:"Mar", val:0 },
     { label:"Apr", val:0 }, { label:"May", val:0 }, { label:"Jun", val:0 },
   ];
   const expSegs = [
-    { label:"Marketing", value:20500, color:T.indigo },
+    { label:"Marketing", value:0, color:T.indigo },
     { label:"Delivery",  value:7800,  color:T.amber  },
     { label:"Samples",   value:10000, color:T.accent  },
     { label:"Staff",     value:3000,  color:T.sky    },
@@ -389,9 +389,9 @@ function Dashboard() {
         <KPI label="Active customers" value={0}                change={0}  color={T.indigo}  icon="🏪" />
         <KPI label="Leads this month" value={0}               change={0} color={T.amber}   icon="📋" />
         <KPI label="Conversion"       value="0%"               change={0}  color={T.accent}  icon="🎯" />
-        <KPI label="Samples sent"     value={112}    unit="KG"  change={-3.2} color={T.orange}  icon="🧪" />
-        <KPI label="Ad spend"         value={20500}  unit="₹"  change={12}   color={T.rose}    icon="📢" />
-        <KPI label="Est. profit"      value={54000}  unit="₹"  change={18.7} color={T.emerald} icon="📈" />
+        <KPI label="Samples sent"     value={0}    unit="KG"  change={0} color={T.orange}  icon="🧪" />
+        <KPI label="Ad spend"         value={0}  unit="₹"  change={0}   color={T.rose}    icon="📢" />
+        <KPI label="Est. profit"      value={0}  unit="₹"  change={0} color={T.emerald} icon="📈" />
       </div>
 
       {/* Sales chart */}
@@ -399,8 +399,8 @@ function Dashboard() {
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
           <Label sub="Monthly KG dispatched">Sales Trend</Label>
           <div style={{ textAlign:"right" }}>
-            <div style={{ fontSize:20, fontWeight:800, color:T.accent, letterSpacing:"-0.02em" }}>+450 KG</div>
-            <div style={{ fontSize:10, color:T.emerald, fontWeight:600 }}>↑ 37.5% vs May</div>
+            <div style={{ fontSize:20, fontWeight:800, color:T.accent, letterSpacing:"-0.02em" }}>0 KG</div>
+            <div style={{ fontSize:10, color:T.emerald, fontWeight:600 }}>↑ 0% vs May</div>
           </div>
         </div>
         <BarChart data={salesData} color={T.accent} height={72} />
@@ -1393,7 +1393,7 @@ function Reports() {
         <Label sub={`${period} breakdown`}>Revenue Overview</Label>
         <BarChart data={weeklyRev} color={T.emerald} height={72} />
         <div style={{ display:"flex", justifyContent:"space-around", marginTop:16 }}>
-          {[["₹1,98,000","Revenue",T.emerald],["₹75,300","Expenses",T.rose],["₹54,000","Est. Profit",T.accent]].map(([v,l,c]) => (
+          {[["₹0","Revenue",T.emerald],["₹0","Expenses",T.rose],["₹0","Est. Profit",T.accent]].map(([v,l,c]) => (
             <div key={l} style={{ textAlign:"center" }}>
               <div style={{ fontSize:18, fontWeight:800, color:c, letterSpacing:"-0.02em" }}>{v}</div>
               <div style={{ fontSize:10, color:T.t3, fontWeight:500, marginTop:3 }}>{l}</div>
