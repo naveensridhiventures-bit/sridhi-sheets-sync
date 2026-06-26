@@ -633,9 +633,7 @@ function HRLeads() {
           <div style={{ fontSize:32, marginBottom:8 }}>📋</div>
           <div style={{ fontSize:14, fontWeight:700, color:T.t1, marginBottom:4 }}>No HR Leads Yet</div>
           <div style={{ fontSize:12, color:T.t3, lineHeight:1.6 }}>
-            Ask HR to add leads in the <b style={{color:T.accent}}>HRLeads</b> tab in Google Sheet.{"
-"}
-            Columns: name, contact, business, type, area, address, telecaller, remarks
+            Ask HR to add leads in the HRLeads tab in Google Sheet. Columns: name, contact, business, type, area, address, telecaller, remarks
           </div>
         </div>
       )}
@@ -678,12 +676,7 @@ function HRLeads() {
       <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14, padding:14, marginTop:4 }}>
         <div style={{ fontSize:12, fontWeight:700, color:T.accent, marginBottom:8 }}>📋 Google Sheet Setup</div>
         <div style={{ fontSize:11, color:T.t3, lineHeight:1.8 }}>
-          Create a tab named <b style={{color:T.t1}}>HRLeads</b> in your Google Sheet with columns:{"
-"}
-          <b style={{color:T.t1}}>name · contact · business · type · area · address · telecaller · remarks</b>{"
-
-"}
-          HR can enter numbers in any format: +91 98765 43210, 091-9876543210, 9876543210 — all normalized automatically.
+          Create a tab named HRLeads in your Google Sheet with these columns: name, contact, business, type, area, address, telecaller, remarks. HR can enter numbers in any format: +91 98765 43210, 091-9876543210, 9876543210 — all normalized automatically.
         </div>
       </div>
     </div>
