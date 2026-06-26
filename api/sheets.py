@@ -16,7 +16,6 @@ except ImportError:
     pass
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-MAX_ROWS = 500
 
 TAB_CONFIG = {
     "leads": {
@@ -44,10 +43,8 @@ _cache = {}
 CACHE_TTL = 60
 _creds = None
 
-def get_creds():
+def get_token():
     global _creds
-    if _creds and _creds.valid:
-        return _creds
     email = os.environ.get("GOOGLE_SERVICE_ACCOUNT_EMAIL", "")
     raw_key = os.environ.get("GOOGLE_PRIVATE_KEY", "").replace("\\n", "\n")
     _creds = service_account.Credentials.from_service_account_info(
@@ -55,27 +52,28 @@ def get_creds():
          "token_uri": "https://oauth2.googleapis.com/token"},
         scopes=SCOPES,
     )
-    req = google.auth.transport.requests.Request()
-    _creds.refresh(req)
-    return _creds
+    _creds.refresh(google.auth.transport.requests.Request())
+    return _creds.token
 
 def sheets_get(sheet_id, tab_name):
-    creds = get_creds()
-    range_str = tab_name + "!A1:Z" + str(MAX_ROWS)
-    encoded = urllib.parse.quote(range_str, safe="!:")
-    url = "https://sheets.googleapis.com/v4/spreadsheets/{}/values/{}".format(sheet_id, encoded)
-    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + creds.token})
+    token = get_token()
+    # Use query parameter instead of path to avoid encoding issues
+    params = urllib.parse.urlencode({"range": tab_name + "!A1:Z500", "alt": "json"})
+    url = "https://sheets.googleapis.com/v4/spreadsheets/{}/values?{}".format(sheet_id, params)
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read())
 
 def sheets_update(sheet_id, tab_name, values):
-    creds = get_creds()
-    range_str = tab_name + "!A1"
-    encoded = urllib.parse.quote(range_str, safe="!:")
-    url = "https://sheets.googleapis.com/v4/spreadsheets/{}/values/{}?valueInputOption=RAW".format(sheet_id, encoded)
-    payload = json.dumps({"values": values}).encode()
-    req = urllib.request.Request(url, data=payload, method="PUT",
-        headers={"Authorization": "Bearer " + creds.token, "Content-Type": "application/json"})
+    token = get_token()
+    params = urllib.parse.urlencode({"range": tab_name + "!A1", "valueInputOption": "RAW", "alt": "json"})
+    url = "https://sheets.googleapis.com/v4/spreadsheets/{}/values:batchUpdate".format(sheet_id)
+    payload = json.dumps({
+        "valueInputOption": "RAW",
+        "data": [{"range": tab_name + "!A1", "values": values}]
+    }).encode()
+    req = urllib.request.Request(url, data=payload, method="POST",
+        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read())
 
