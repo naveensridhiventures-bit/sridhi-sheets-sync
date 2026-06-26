@@ -544,12 +544,15 @@ function WATemplatePicker({ lead, onClose }) {
 
 function Leads() {
   const [leads, setLeads, leadsSyncStatus] = useSheetSynced("leads", "leads", INITIAL_LEADS);
+  const [expenses, setExpenses] = useSheetSynced("expenses", "expenses", INITIAL_EXPENSES);
   const [search, setSearch] = useState("");
   const [filterStage, setFilterStage] = useState("All");
   const [selected, setSelected] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [remark, setRemark] = useState("");
   const [showWAForLead, setShowWAForLead] = useState(null);
+  const [deliveryDialog, setDeliveryDialog] = useState(null); // { lead, targetStage }
+  const [porterAmt, setPorterAmt] = useState("");
   const [newLead, setNewLead] = useState({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Thulasi" });
 
   const filtered = leads.filter(l =>
@@ -564,13 +567,116 @@ function Leads() {
     setLeads(leads.map(l => l.id===id ? { ...l, remarks:[...(l.remarks||[]),remark.trim()], lastContact:"Today" } : l));
     setRemark("");
   };
-  const updateStage = (id, stage) => setLeads(leads.map(l => l.id===id ? { ...l, stage, lastContact:"Today" } : l));
+  const updateStage = (id, stage) => {
+    const lead = leads.find(l => l.id === id);
+    if ((stage === "Sample Requested" || stage === "Order Received") && lead) {
+      setDeliveryDialog({ lead, targetStage: stage });
+      setPorterAmt("");
+    } else {
+      setLeads(leads.map(l => l.id===id ? { ...l, stage, lastContact:"Today" } : l));
+    }
+  };
+
+  const confirmDelivery = (method) => {
+    if (!deliveryDialog) return;
+    const { lead, targetStage } = deliveryDialog;
+    // Update lead stage
+    setLeads(leads.map(l => l.id===lead.id ? { ...l, stage:targetStage, lastContact:"Today" } : l));
+    // Log expense if Porter
+    if (method === "porter" && porterAmt) {
+      const today = new Date();
+      const dateStr = today.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
+      const newExp = {
+        id: expenses.length + Date.now(),
+        category: "Porter Delivery — " + lead.name,
+        amount: parseInt(porterAmt) || 0,
+        date: dateStr,
+        type: "Delivery",
+        subtype: "Porter"
+      };
+      setExpenses([newExp, ...expenses]);
+    }
+    setDeliveryDialog(null);
+    setPorterAmt("");
+  };
   const addLead = () => {
     if (!newLead.name || !newLead.contact) return;
     setLeads([{ ...newLead, id:leads.length+1, stage:"New Lead", lastContact:"Today", priority:"Medium", remarks:[] }, ...leads]);
     setShowAdd(false);
     setNewLead({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Priya" });
   };
+
+  // ── Delivery method dialog ──
+  if (deliveryDialog) {
+    const { lead, targetStage } = deliveryDialog;
+    const isPorter = porterAmt !== "";
+    return (
+      <div style={{ padding:"0 0 80px" }}>
+        <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:18, padding:20, margin:"16px 0" }}>
+          <div style={{ fontSize:15, fontWeight:800, color:T.t1, marginBottom:4 }}>
+            {targetStage === "Sample Requested" ? "🧪 Sample Delivery" : "📦 Order Delivery"}
+          </div>
+          <div style={{ fontSize:12, color:T.t3, marginBottom:20 }}>
+            Moving <b style={{color:T.t1}}>{lead.name}</b> → <b style={{color:T.accent}}>{targetStage}</b>
+          </div>
+
+          <div style={{ fontSize:11, color:T.t3, fontWeight:700, marginBottom:12 }}>SELECT DELIVERY METHOD</div>
+
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            {/* Porter option */}
+            <div style={{ background:T.surface, border:`1px solid ${T.borderHi}`, borderRadius:14, padding:16 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+                <div style={{ fontSize:24 }}>🛵</div>
+                <div>
+                  <div style={{ fontSize:14, fontWeight:800, color:T.t1 }}>Porter</div>
+                  <div style={{ fontSize:11, color:T.t3 }}>3rd party delivery — cost logged as expense</div>
+                </div>
+              </div>
+              <input
+                type="number"
+                value={porterAmt}
+                onChange={e => setPorterAmt(e.target.value)}
+                placeholder="Enter Porter cost (₹)"
+                style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:10,
+                  color:T.t1, padding:"10px 12px", fontSize:14, fontFamily:FONT,
+                  outline:"none", width:"100%", boxSizing:"border-box", marginBottom:10 }}
+              />
+              <button onClick={() => confirmDelivery("porter")}
+                disabled={!porterAmt}
+                style={{ background: porterAmt ? T.amber : T.border, border:"none", borderRadius:12,
+                  color: porterAmt ? "#060B16" : T.t3, padding:"12px", fontSize:13, fontWeight:800,
+                  cursor: porterAmt ? "pointer" : "default", fontFamily:FONT, width:"100%" }}>
+                🛵 Confirm Porter — ₹{porterAmt || "0"} (logged to expenses)
+              </button>
+            </div>
+
+            {/* Company Vehicle option */}
+            <div style={{ background:T.surface, border:`1px solid ${T.borderHi}`, borderRadius:14, padding:16 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+                <div style={{ fontSize:24 }}>🚗</div>
+                <div>
+                  <div style={{ fontSize:14, fontWeight:800, color:T.t1 }}>Company Vehicle</div>
+                  <div style={{ fontSize:11, color:T.t3 }}>Own vehicle — no delivery cost logged</div>
+                </div>
+              </div>
+              <button onClick={() => confirmDelivery("company")}
+                style={{ background:T.emerald, border:"none", borderRadius:12,
+                  color:"#060B16", padding:"12px", fontSize:13, fontWeight:800,
+                  cursor:"pointer", fontFamily:FONT, width:"100%" }}>
+                🚗 Confirm Company Vehicle
+              </button>
+            </div>
+
+            <button onClick={() => setDeliveryDialog(null)}
+              style={{ background:"transparent", border:`1px solid ${T.border}`, borderRadius:12,
+                color:T.t3, padding:"10px", fontSize:12, cursor:"pointer", fontFamily:FONT }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (selected) {
     const lead = leads.find(l => l.id===selected);
