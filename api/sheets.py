@@ -28,6 +28,7 @@ try:
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
     from googleapiclient.errors import HttpError
+    import google.auth.transport.requests
     GOOGLE_AVAILABLE = True
 except ImportError:
     GOOGLE_AVAILABLE = False
@@ -105,15 +106,20 @@ def get_sheets_service():
 
 # ── low-level read/write ────────────────────────────────────────────────────
 def read_tab(tab_name: str) -> list[dict]:
+    import urllib.request as urlreq
+    import urllib.parse
     sheet_id = os.environ["GOOGLE_SHEET_ID"]
     svc = get_sheets_service()
-    range_str = tab_name + "!A1:Z" + str(MAX_ROWS)
-    result = (
-        svc.spreadsheets()
-        .values()
-        .get(spreadsheetId=sheet_id, range=range_str)
-        .execute()
-    )
+    # Build the range manually and call via requests to avoid client URL encoding bug
+    range_str = "{}!A1:Z{}".format(tab_name, MAX_ROWS)
+    encoded_range = urllib.parse.quote(range_str, safe="")
+    url = "https://sheets.googleapis.com/v4/spreadsheets/{}/values/{}".format(sheet_id, encoded_range)
+    creds = svc._http.credentials
+    creds.refresh(google.auth.transport.requests.Request())
+    token = creds.token
+    req = urlreq.Request(url, headers={"Authorization": "Bearer " + token})
+    with urlreq.urlopen(req) as resp:
+        result = json.loads(resp.read())
     values = result.get("values", [])
     if not values:
         return []
