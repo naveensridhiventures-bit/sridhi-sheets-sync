@@ -107,10 +107,11 @@ def get_sheets_service():
 def read_tab(tab_name: str) -> list[dict]:
     sheet_id = os.environ["GOOGLE_SHEET_ID"]
     svc = get_sheets_service()
+    range_str = tab_name + "!A1:Z" + str(MAX_ROWS)
     result = (
         svc.spreadsheets()
         .values()
-        .get(spreadsheetId=sheet_id, range=f"{tab_name}!A1:Z{MAX_ROWS}")
+        .get(spreadsheetId=sheet_id, range=range_str)
         .execute()
     )
     values = result.get("values", [])
