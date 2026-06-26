@@ -542,6 +542,154 @@ function WATemplatePicker({ lead, onClose }) {
   );
 }
 
+// ─── HR LEADS IMPORT ─────────────────────────────────────────────────────────
+function HRLeads() {
+  const [hrLeads] = useSheetSynced("hrLeads","hrLeads",[]);
+  const [leads, setLeads] = useSheetSynced("leads","leads",[]);
+  const [imported, setImported] = useState({});
+  const [search, setSearch] = useState("");
+
+  // Load already-imported contacts
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("hr_imported");
+      if (saved) setImported(JSON.parse(saved));
+    } catch {}
+  }, []);
+
+  function markImported(contact) {
+    const updated = { ...imported, [contact]: true };
+    setImported(updated);
+    try { localStorage.setItem("hr_imported", JSON.stringify(updated)); } catch {}
+  }
+
+  function importLead(hr) {
+    const alreadyExists = leads.some(l => l.contact === hr.contact);
+    if (alreadyExists) { markImported(hr.contact); return; }
+    const newLead = {
+      id: leads.length + Date.now(),
+      name: hr.name || "",
+      contact: hr.contact || "",
+      business: hr.business || "",
+      type: hr.type || "Restaurant",
+      area: hr.area || "",
+      address: hr.address || "",
+      stage: "New Lead",
+      source: "HR Assignment",
+      telecaller: hr.telecaller || "",
+      lastContact: "Today",
+      priority: "Medium",
+      remarks: hr.remarks ? [hr.remarks] : [],
+    };
+    setLeads([newLead, ...leads]);
+    markImported(hr.contact);
+  }
+
+  function importAll() {
+    const toImport = filtered.filter(hr => !imported[hr.contact] && !leads.some(l => l.contact === hr.contact));
+    let updatedLeads = [...leads];
+    const newImported = { ...imported };
+    toImport.forEach(hr => {
+      updatedLeads = [{ id: updatedLeads.length + Date.now() + Math.random(), name:hr.name||"", contact:hr.contact||"", business:hr.business||"", type:hr.type||"Restaurant", area:hr.area||"", address:hr.address||"", stage:"New Lead", source:"HR Assignment", telecaller:hr.telecaller||"", lastContact:"Today", priority:"Medium", remarks:hr.remarks?[hr.remarks]:[] }, ...updatedLeads];
+      newImported[hr.contact] = true;
+    });
+    setLeads(updatedLeads);
+    setImported(newImported);
+    try { localStorage.setItem("hr_imported", JSON.stringify(newImported)); } catch {}
+  }
+
+  const filtered = hrLeads.filter(hr =>
+    search === "" ||
+    (hr.name||"").toLowerCase().includes(search.toLowerCase()) ||
+    (hr.contact||"").includes(search) ||
+    (hr.telecaller||"").toLowerCase().includes(search.toLowerCase())
+  );
+
+  const pendingCount = filtered.filter(hr => !imported[hr.contact] && !leads.some(l => l.contact === hr.contact)).length;
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div>
+          <div style={{ fontSize:16, fontWeight:800, color:T.t1 }}>HR Assigned Leads</div>
+          <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>{hrLeads.length} total · {pendingCount} pending import</div>
+        </div>
+        {pendingCount > 0 && (
+          <button onClick={importAll}
+            style={{ background:T.accent, border:"none", borderRadius:12, color:"#060B16",
+              padding:"8px 14px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
+            Import All ({pendingCount})
+          </button>
+        )}
+      </div>
+
+      <input value={search} onChange={e => setSearch(e.target.value)}
+        placeholder="Search by name, contact, telecaller..."
+        style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1,
+          padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
+
+      {hrLeads.length === 0 && (
+        <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:24, textAlign:"center" }}>
+          <div style={{ fontSize:32, marginBottom:8 }}>📋</div>
+          <div style={{ fontSize:14, fontWeight:700, color:T.t1, marginBottom:4 }}>No HR Leads Yet</div>
+          <div style={{ fontSize:12, color:T.t3, lineHeight:1.6 }}>
+            Ask HR to add leads in the <b style={{color:T.accent}}>HRLeads</b> tab in Google Sheet.{"
+"}
+            Columns: name, contact, business, type, area, address, telecaller, remarks
+          </div>
+        </div>
+      )}
+
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {filtered.map((hr, i) => {
+          const isImported = imported[hr.contact] || leads.some(l => l.contact === hr.contact);
+          return (
+            <div key={i} style={{ background:T.card, border:`1px solid ${isImported ? T.border : T.accentGlow}`, borderRadius:16, padding:14 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:14, fontWeight:800, color:T.t1 }}>{hr.name}</div>
+                  <div style={{ fontSize:12, color:T.t2, marginTop:2 }}>📞 {hr.contact}</div>
+                  {hr.area && <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>📍 {hr.area}</div>}
+                  {hr.telecaller && (
+                    <div style={{ fontSize:11, color:T.accent, marginTop:4, fontWeight:600 }}>
+                      👤 Assigned to: {hr.telecaller}
+                    </div>
+                  )}
+                  {hr.remarks && <div style={{ fontSize:11, color:T.t3, marginTop:4, fontStyle:"italic" }}>"{hr.remarks}"</div>}
+                </div>
+                <div>
+                  {isImported ? (
+                    <div style={{ background:T.accentSub, border:`1px solid ${T.accentGlow}`, borderRadius:8,
+                      color:T.accent, padding:"4px 10px", fontSize:11, fontWeight:700 }}>✓ Imported</div>
+                  ) : (
+                    <button onClick={() => importLead(hr)}
+                      style={{ background:T.accent, border:"none", borderRadius:8, color:"#060B16",
+                        padding:"6px 12px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
+                      + Import
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14, padding:14, marginTop:4 }}>
+        <div style={{ fontSize:12, fontWeight:700, color:T.accent, marginBottom:8 }}>📋 Google Sheet Setup</div>
+        <div style={{ fontSize:11, color:T.t3, lineHeight:1.8 }}>
+          Create a tab named <b style={{color:T.t1}}>HRLeads</b> in your Google Sheet with columns:{"
+"}
+          <b style={{color:T.t1}}>name · contact · business · type · area · address · telecaller · remarks</b>{"
+
+"}
+          HR can enter numbers in any format: +91 98765 43210, 091-9876543210, 9876543210 — all normalized automatically.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Leads() {
   const [leads, setLeads, leadsSyncStatus] = useSheetSynced("leads", "leads", INITIAL_LEADS);
   const [expenses, setExpenses] = useSheetSynced("expenses", "expenses", INITIAL_EXPENSES);
@@ -2133,6 +2281,7 @@ const MORE_MENU = [
   { id:"expenses",  label:"Expenses",      icon:"💸" },
   { id:"marketing", label:"Marketing",     icon:"📢" },
   { id:"reports",   label:"Reports",       icon:"📈" },
+  { id:"hrleads",   label:"HR Leads",       icon:"📋"  },
   { id:"whatsapp",  label:"WA Templates",  icon:"💬"  },
   { id:"ai",        label:"AI Assistant",  icon:"✦"  },
 ];
@@ -2175,7 +2324,7 @@ export default function App() {
 
   useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; }, [activeTab]);
 
-  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates" };
+  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads" };
 
   // ── INSTALL BANNER ──
   const InstallBanner = () => showInstall ? (
@@ -2272,6 +2421,7 @@ export default function App() {
       case "expenses":  return <Expenses />;
       case "marketing": return <Marketing />;
       case "reports":   return <Reports />;
+      case "hrleads":   return <HRLeads />;
       case "whatsapp":  return <WhatsAppTemplates />;
       case "ai":        return <AIAssistant />;
       default:          return <Dashboard />;

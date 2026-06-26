@@ -22,6 +22,7 @@ TAB_CONFIG = {
     "samples":         {"tab": "Samples",          "headers": ["id","customer","leadId","qty","unit","type","date","exec","deliveryCost","productionCost","status","feedback","converted"]},
     "expenses":        {"tab": "Expenses",         "headers": ["id","category","amount","date","type","subtype"]},
     "repeatCustomers": {"tab": "RepeatCustomers",  "headers": ["id","name","area","contact","product","qty","frequency","lastOrder","nextDue","status","revenue"]},
+    "hrLeads": {"tab": "HRLeads", "headers": ["name","contact","business","type","area","address","telecaller","remarks"]},
 }
 
 _cache = {}
@@ -81,7 +82,20 @@ def write_tab(tab_name, headers, records, token):
     data_rows = [[str(r.get(h, "") or "") for h in headers] for r in records]
     sheets_update(sheet_id, tab_name, [headers] + data_rows, token)
 
+def _normalize_phone(phone):
+    """Normalize phone numbers to 10 digits: strip +91, 091, spaces, dashes."""
+    import re
+    digits = re.sub(r"[^0-9]", "", str(phone or ""))
+    if digits.startswith("91") and len(digits) == 12:
+        digits = digits[2:]
+    elif digits.startswith("091") and len(digits) == 13:
+        digits = digits[3:]
+    return digits[-10:] if len(digits) >= 10 else digits
+
 def _coerce(tab_key, row):
+    if tab_key == "hrLeads":
+        row["contact"] = _normalize_phone(row.get("contact",""))
+        return row
     if tab_key == "leads":
         row["id"] = int(row["id"]) if str(row.get("id","")).isdigit() else row.get("id","")
         row["remarks"] = [r for r in row.get("remarks","").split(" || ") if r] if row.get("remarks") else []
