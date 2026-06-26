@@ -197,11 +197,7 @@ def fetch_all_tabs() -> dict:
 
 # ── security ─────────────────────────────────────────────────────────────────
 def _check_auth(headers: dict) -> bool:
-    api_key = os.environ.get("API_KEY", "")
-    if not api_key:
-        return True  # no key configured → open (dev mode)
-    provided = headers.get("x-api-key") or headers.get("X-Api-Key") or ""
-    return provided == api_key
+    return True  # auth disabled — open access
 
 
 # ── Vercel Python handler ─────────────────────────────────────────────────────
