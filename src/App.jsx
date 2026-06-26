@@ -1086,7 +1086,7 @@ function Samples() {
   const [showAdd, setShowAdd] = useState(false);
   const [showFeedback, setShowFeedback] = useState(null);
   const [ratings, setRatings] = useState({ taste:0, texture:0, quality:0, pricing:"", competitor:"", interest:"Yes", comments:"" });
-  const [newSample, setNewSample] = useState({ customer:"", qty:"", type:"Dosa Batter", exec:"Arjun P.", deliveryCost:"" });
+  const [newSample, setNewSample] = useState({ customer:"", qty:"", type:"Dosa Batter", exec:"Arjun P.", deliveryCost:"", scheduledDate:"", scheduledTime:"" });
 
   const totalKG = samples.reduce((a,b) => a+b.qty, 0);
   const converted = samples.filter(s => s.converted).length;
@@ -1100,7 +1100,8 @@ function Samples() {
 
   const addSample = () => {
     if (!newSample.customer || !newSample.qty) return;
-    setSamples([{ ...newSample, id:samples.length+1, qty:parseInt(newSample.qty), unit:"KG", date:"Jun 25", deliveryCost:parseInt(newSample.deliveryCost)||0, productionCost:parseInt(newSample.qty)*50, status:"Pending", feedback:null, converted:false }, ...samples]);
+    const today2 = new Date(); const dateStr = today2.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
+    setSamples([{ ...newSample, id:samples.length+1, qty:parseInt(newSample.qty), unit:"KG", date:dateStr, deliveryCost:parseInt(newSample.deliveryCost)||0, productionCost:parseInt(newSample.qty)*50, status:"Pending", feedback:null, converted:false }, ...samples]);
     setShowAdd(false);
     setNewSample({ customer:"", qty:"", type:"Dosa Batter", exec:"Arjun P.", deliveryCost:"" });
   };
@@ -1175,6 +1176,16 @@ function Samples() {
         <Dropdown label="Product Type" value={newSample.type} onChange={e => setNewSample({...newSample,type:e.target.value})} options={["Dosa Batter","Idli Batter","Mixed Batter"]} />
         <Dropdown label="Delivery Executive" value={newSample.exec} onChange={e => setNewSample({...newSample,exec:e.target.value})} options={["Arjun P.","Suresh R."]} />
         <Field label="Delivery Cost (₹)" value={newSample.deliveryCost} onChange={e => setNewSample({...newSample,deliveryCost:e.target.value})} type="number" />
+        <div>
+          <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>SCHEDULED DATE (optional)</div>
+          <input type="date" value={newSample.scheduledDate} onChange={e => setNewSample({...newSample,scheduledDate:e.target.value})}
+            style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
+        </div>
+        <div>
+          <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>SCHEDULED TIME (optional)</div>
+          <input type="time" value={newSample.scheduledTime} onChange={e => setNewSample({...newSample,scheduledTime:e.target.value})}
+            style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
+        </div>
         <div style={{ display:"flex", gap:10 }}>
           <Btn label="Cancel" color={T.t2} ghost full onClick={() => setShowAdd(false)} />
           <Btn label="Log Sample" full onClick={addSample} />
