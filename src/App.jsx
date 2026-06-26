@@ -367,24 +367,23 @@ function Stars({ value, onChange, max=5 }) {
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────
 // ─── PROSPECT FINDER ─────────────────────────────────────────────────────────
-// Finds hotels, restaurants, catering in Chennai using Google Places API
-// Uses free Nominatim/Overpass API — no API key needed
 function ProspectFinder() {
   const [leads, setLeads] = useSheetSynced("leads","leads",[]);
-  const [area, setArea] = useState("Koramangala, Bengaluru");
+  const [area, setArea] = useState("T Nagar, Chennai");
   const [type, setType] = useState("restaurant");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [added, setAdded] = useState({});
+  const [filling, setFilling] = useState(null); // prospect being filled
+  const [form, setForm] = useState({ name:"", business:"", type2:"Restaurant", area2:"", address:"", telecaller:"Thulasi", notes:"" });
 
   const AREAS = [
-    "Koramangala, Bengaluru","BTM Layout, Bengaluru","Indiranagar, Bengaluru",
-    "HSR Layout, Bengaluru","Whitefield, Bengaluru","Marathahalli, Bengaluru",
-    "JP Nagar, Bengaluru","Jayanagar, Bengaluru","Rajajinagar, Bengaluru",
-    "Electronic City, Bengaluru","Anna Nagar, Chennai","T Nagar, Chennai",
-    "Adyar, Chennai","Velachery, Chennai","Porur, Chennai","Tambaram, Chennai",
-    "Mylapore, Chennai","Nungambakkam, Chennai","Guindy, Chennai","Vadapalani, Chennai",
+    "T Nagar, Chennai","Anna Nagar, Chennai","Adyar, Chennai","Velachery, Chennai",
+    "Porur, Chennai","Tambaram, Chennai","Mylapore, Chennai","Nungambakkam, Chennai",
+    "Guindy, Chennai","Vadapalani, Chennai","Koramangala, Bengaluru","BTM Layout, Bengaluru",
+    "Indiranagar, Bengaluru","HSR Layout, Bengaluru","Whitefield, Bengaluru",
+    "JP Nagar, Bengaluru","Jayanagar, Bengaluru","Marathahalli, Bengaluru",
   ];
 
   const TYPES = [
@@ -393,98 +392,152 @@ function ProspectFinder() {
     { val:"catering", label:"🎪 Catering" },
     { val:"hotel", label:"🏨 Hotels" },
     { val:"bakery", label:"🥐 Bakeries" },
-    { val:"food", label:"🥘 All Food Businesses" },
+    { val:"food", label:"🥘 All Food" },
   ];
 
   async function search() {
-    setLoading(true);
-    setError("");
-    setResults([]);
+    setLoading(true); setError(""); setResults([]);
     try {
-      // Use Nominatim to geocode the area first
-      const geoRes = await fetch(
-        "https://nominatim.openstreetmap.org/search?q=" + encodeURIComponent(area) + "&format=json&limit=1",
-        { headers: { "User-Agent": "SridhiVenturesBOS/1.0" } }
-      );
-      const geoData = await geoRes.json();
-      if (!geoData.length) { setError("Area not found. Try a different area name."); setLoading(false); return; }
-
-      const { lat, lon } = geoData[0];
-      const radius = 2000; // 2km radius
-
-      // Use Overpass API to find businesses
-      const query = "[out:json][timeout:25];(" +
-        "node[\"amenity\"=\"" + type + "\"](around:" + radius + "," + lat + "," + lon + ");" +
-        "node[\"shop\"=\"bakery\"](around:" + radius + "," + lat + "," + lon + ");" +
-        "node[\"tourism\"=\"hotel\"](around:" + radius + "," + lat + "," + lon + ");" +
-        ");out body 30;";
-
-      const overpassRes = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        body: "data=" + encodeURIComponent(query),
-      });
-      const overpassData = await overpassRes.json();
-      const elements = (overpassData.elements || []).filter(e => e.tags?.name);
-
-      if (elements.length === 0) {
-        setError("No results found. Try a different area or type.");
-        setLoading(false); return;
-      }
-
-      setResults(elements.slice(0, 25).map(e => ({
-        name: e.tags.name,
-        phone: e.tags.phone || e.tags["contact:phone"] || "",
-        address: [e.tags["addr:street"], e.tags["addr:city"]].filter(Boolean).join(", ") || area,
-        type: e.tags.amenity || e.tags.shop || e.tags.tourism || type,
-        lat: e.lat, lon: e.lon,
-      })));
-    } catch(err) {
-      setError("Search failed. Check your internet connection.");
+      const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+      const res = await fetch(API_BASE + "/api/prospects?area=" + encodeURIComponent(area) + "&type=" + type);
+      const data = await res.json();
+      if (data.error) { setError(data.error); setLoading(false); return; }
+      setResults(data.results || []);
+      if ((data.results||[]).length === 0) setError("No results found. Try a different area or type.");
+    } catch(e) {
+      setError("Search failed: " + e.message);
     }
     setLoading(false);
   }
 
-  function addAsLead(r) {
-    const newLead = {
-      id: Date.now() + Math.random(),
+  function startFill(r) {
+    setFilling(r);
+    setForm({
       name: r.name,
-      contact: r.phone || "",
       business: r.name,
-      type: r.type === "restaurant" ? "Restaurant" : r.type === "hotel" ? "Hotel" : r.type === "bakery" ? "Bakery" : "Restaurant",
-      area: area.split(",")[0],
+      type2: r.type === "hotel" ? "Hotel" : r.type === "bakery" ? "Bakery" : "Restaurant",
+      area2: area.split(",")[0],
       address: r.address,
-      stage: "New Lead",
-      source: "Prospect Finder",
       telecaller: "Thulasi",
-      lastContact: "Not contacted",
-      priority: "Medium",
-      remarks: [],
-    };
-    setLeads([newLead, ...leads]);
-    setAdded({ ...added, [r.name]: true });
+      notes: "",
+    });
   }
 
+  function confirmAdd() {
+    if (!filling || !form.name) return;
+    const newLead = {
+      id: Date.now() + Math.random(),
+      name: form.name,
+      contact: filling.phone || "",
+      business: form.business,
+      type: form.type2,
+      area: form.area2,
+      address: form.address,
+      stage: "New Lead",
+      source: "Prospect Finder",
+      telecaller: form.telecaller,
+      lastContact: "Not contacted",
+      priority: "Medium",
+      remarks: form.notes ? ["[Prospect Finder] " + form.notes] : [],
+    };
+    setLeads([newLead, ...leads]);
+    setAdded({ ...added, [filling.name]: true });
+    setFilling(null);
+  }
+
+  // ── Fill details view ──
+  if (filling) {
+    return (
+      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <button onClick={() => setFilling(null)}
+            style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:10, color:T.t2, padding:"6px 12px", fontSize:12, cursor:"pointer", fontFamily:FONT }}>← Back</button>
+          <div style={{ fontSize:14, fontWeight:700, color:T.t1 }}>Add to Pipeline</div>
+        </div>
+
+        <div style={{ background:T.card, border:`1px solid ${T.accentGlow}`, borderRadius:14, padding:14 }}>
+          <div style={{ fontSize:13, fontWeight:800, color:T.t1 }}>{filling.name}</div>
+          <div style={{ fontSize:11, color:T.t3, marginTop:3 }}>📍 {filling.address}</div>
+          {filling.phone && <div style={{ fontSize:12, color:T.accent, marginTop:3 }}>📞 {filling.phone}</div>}
+        </div>
+
+        <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:14, display:"flex", flexDirection:"column", gap:12 }}>
+          {[
+            ["Customer Name *", "name", "text", "e.g. Anand Tiffin Center"],
+            ["Business Name", "business", "text", "e.g. Anand Foods Pvt Ltd"],
+            ["Area", "area2", "text", "e.g. T Nagar"],
+            ["Address", "address", "text", "Full address"],
+          ].map(([label, key, inputType, placeholder]) => (
+            <div key={key}>
+              <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>{label.toUpperCase()}</div>
+              <input type={inputType} value={form[key]} onChange={e => setForm({...form, [key]: e.target.value})}
+                placeholder={placeholder}
+                style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1,
+                  padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
+            </div>
+          ))}
+          <div>
+            <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>BUSINESS TYPE</div>
+            <select value={form.type2} onChange={e => setForm({...form, type2:e.target.value})}
+              style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
+              {["Restaurant","Mess","Hotel","Bakery","Cloud Kitchen","Catering","Other"].map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>ASSIGN TELECALLER</div>
+            <select value={form.telecaller} onChange={e => setForm({...form, telecaller:e.target.value})}
+              style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
+              {["Thulasi","Ramya"].map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>FIRST NOTES (optional)</div>
+            <textarea value={form.notes} onChange={e => setForm({...form, notes:e.target.value})}
+              placeholder="e.g. Found via prospect search, needs 20 KG/week..."
+              rows={3}
+              style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1,
+                padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box", resize:"none" }} />
+          </div>
+        </div>
+
+        <div style={{ display:"flex", gap:8 }}>
+          {filling.phone && (
+            <button onClick={() => { const p=filling.phone.replace(/[^0-9]/g,""); if(p) window.location.href="tel:+"+p; }}
+              style={{ flex:1, background:T.emerald+"22", border:`1px solid ${T.emerald}44`, borderRadius:12,
+                color:T.emerald, padding:"12px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:FONT }}>
+              📞 Call First
+            </button>
+          )}
+          <button onClick={confirmAdd} disabled={!form.name}
+            style={{ flex:2, background: form.name ? T.accent : T.border, border:"none", borderRadius:12,
+              color: form.name ? "#060B16" : T.t3, padding:"12px", fontSize:14, fontWeight:800,
+              cursor: form.name ? "pointer" : "default", fontFamily:FONT }}>
+            ✓ Add to CRM Pipeline
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Search & results view ──
   const existingNames = new Set(leads.map(l => l.name.toLowerCase()));
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
       <div>
         <div style={{ fontSize:16, fontWeight:800, color:T.t1 }}>Prospect Finder</div>
-        <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>Find hotels, restaurants & caterers near you</div>
+        <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>Find hotels, restaurants & caterers — add to CRM instantly</div>
       </div>
 
       <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:14, display:"flex", flexDirection:"column", gap:10 }}>
         <div>
           <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>AREA / LOCATION</div>
           <select value={area} onChange={e => setArea(e.target.value)}
-            style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1,
-              padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
+            style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box", marginBottom:6 }}>
             {AREAS.map(a => <option key={a}>{a}</option>)}
           </select>
-          <input value={area} onChange={e => setArea(e.target.value)}
-            placeholder="Or type any area..."
-            style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1,
-              padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box", marginTop:6 }} />
+          <input value={area} onChange={e => setArea(e.target.value)} placeholder="Or type any area..."
+            style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
         </div>
         <div>
           <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>BUSINESS TYPE</div>
@@ -494,8 +547,7 @@ function ProspectFinder() {
                 style={{ background: type===t.val ? T.accentSub : T.surface,
                   border:`1px solid ${type===t.val ? T.accent : T.border}`,
                   borderRadius:20, color: type===t.val ? T.accent : T.t2,
-                  padding:"5px 12px", fontSize:11, fontWeight:700, cursor:"pointer",
-                  fontFamily:FONT, whiteSpace:"nowrap" }}>
+                  padding:"5px 12px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:FONT }}>
                 {t.label}
               </button>
             ))}
@@ -503,19 +555,18 @@ function ProspectFinder() {
         </div>
         <button onClick={search} disabled={loading}
           style={{ background: loading ? T.border : T.accent, border:"none", borderRadius:12,
-            color: loading ? T.t3 : "#060B16", padding:"12px", fontSize:14, fontWeight:800,
+            color: loading ? T.t3 : "#060B16", padding:"13px", fontSize:14, fontWeight:800,
             cursor: loading ? "default" : "pointer", fontFamily:FONT }}>
           {loading ? "🔍 Searching..." : "🔍 Find Prospects"}
         </button>
       </div>
 
       {error && (
-        <div style={{ background:"rgba(244,63,94,0.1)", border:"1px solid rgba(244,63,94,0.3)",
-          borderRadius:12, padding:12, fontSize:12, color:T.rose }}>{error}</div>
+        <div style={{ background:"rgba(244,63,94,0.1)", border:"1px solid rgba(244,63,94,0.3)", borderRadius:12, padding:12, fontSize:12, color:T.rose }}>{error}</div>
       )}
 
       {results.length > 0 && (
-        <div style={{ fontSize:11, color:T.t3, fontWeight:600 }}>{results.length} PROSPECTS FOUND · {Object.keys(added).length} ADDED TO CRM</div>
+        <div style={{ fontSize:11, color:T.t3, fontWeight:600 }}>{results.length} FOUND · {Object.keys(added).length} ADDED TO CRM</div>
       )}
 
       <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
@@ -523,32 +574,30 @@ function ProspectFinder() {
           const isExisting = existingNames.has(r.name.toLowerCase());
           const isAdded = added[r.name] || isExisting;
           return (
-            <div key={i} style={{ background:T.card, border:`1px solid ${isAdded ? T.border : T.accentGlow}`,
-              borderRadius:14, padding:"12px 14px" }}>
+            <div key={i} style={{ background:T.card, border:`1px solid ${isAdded ? T.border : T.accentGlow}`, borderRadius:14, padding:"12px 14px" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
                 <div style={{ flex:1 }}>
                   <div style={{ fontSize:13, fontWeight:800, color:T.t1 }}>{r.name}</div>
                   <div style={{ fontSize:11, color:T.t3, marginTop:3 }}>📍 {r.address}</div>
-                  {r.phone && <div style={{ fontSize:11, color:T.accent, marginTop:2 }}>📞 {r.phone}</div>}
+                  {r.phone
+                    ? <div style={{ fontSize:12, color:T.accent, marginTop:3, fontWeight:600 }}>📞 {r.phone}</div>
+                    : <div style={{ fontSize:11, color:T.t3, marginTop:3 }}>📞 No number listed</div>}
                   <div style={{ fontSize:10, color:T.t3, marginTop:2, textTransform:"capitalize" }}>{r.type}</div>
                 </div>
-                <div style={{ display:"flex", flexDirection:"column", gap:6, marginLeft:8 }}>
+                <div style={{ display:"flex", flexDirection:"column", gap:6, marginLeft:8, flexShrink:0 }}>
                   {isAdded ? (
-                    <div style={{ background:T.accentSub, border:`1px solid ${T.accentGlow}`, borderRadius:8,
-                      color:T.accent, padding:"4px 10px", fontSize:11, fontWeight:700 }}>
+                    <div style={{ background:T.accentSub, border:`1px solid ${T.accentGlow}`, borderRadius:8, color:T.accent, padding:"5px 10px", fontSize:11, fontWeight:700 }}>
                       {isExisting ? "In CRM" : "✓ Added"}
                     </div>
                   ) : (
-                    <button onClick={() => addAsLead(r)}
-                      style={{ background:T.accent, border:"none", borderRadius:8, color:"#060B16",
-                        padding:"6px 12px", fontSize:11, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
+                    <button onClick={() => startFill(r)}
+                      style={{ background:T.accent, border:"none", borderRadius:8, color:"#060B16", padding:"6px 12px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
                       + Add Lead
                     </button>
                   )}
                   {r.phone && (
                     <button onClick={() => { const p=r.phone.replace(/[^0-9]/g,""); if(p) window.location.href="tel:+"+p; }}
-                      style={{ background:T.emerald+"22", border:`1px solid ${T.emerald}44`, borderRadius:8,
-                        color:T.emerald, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:FONT }}>
+                      style={{ background:T.emerald+"22", border:`1px solid ${T.emerald}44`, borderRadius:8, color:T.emerald, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:FONT }}>
                       📞 Call
                     </button>
                   )}
@@ -563,14 +612,13 @@ function ProspectFinder() {
         <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:24, textAlign:"center" }}>
           <div style={{ fontSize:40, marginBottom:8 }}>🗺️</div>
           <div style={{ fontSize:14, fontWeight:700, color:T.t1, marginBottom:6 }}>Find New Customers</div>
-          <div style={{ fontSize:12, color:T.t3, lineHeight:1.7 }}>
-            Search for hotels, restaurants, mess and catering businesses in any area. Add them directly to your CRM pipeline with one tap.
-          </div>
+          <div style={{ fontSize:12, color:T.t3, lineHeight:1.7 }}>Search hotels, restaurants, mess and catering in any Chennai or Bengaluru area. One tap to add to your CRM pipeline.</div>
         </div>
       )}
     </div>
   );
 }
+
 
 // ─── TODAY'S TASKS ────────────────────────────────────────────────────────────
 function TodayTasks() {
