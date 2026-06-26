@@ -1617,16 +1617,16 @@ function WhatsAppTemplates() {
 
   function saveTemplate(t) {
     if (t.id) {
-      setTemplates(templates.map(x => x.id === t.id ? t : x));
+      saveTemplates(templates.map(x => x.id === t.id ? t : x));
     } else {
-      setTemplates([...templates, { ...t, id: Date.now() }]);
+      saveTemplates([...templates, { ...t, id: Date.now() }]);
     }
     setView("list");
     setEditing(null);
   }
 
   function deleteTemplate(id) {
-    setTemplates(templates.filter(t => t.id !== id));
+    saveTemplates(templates.filter(t => t.id !== id));
   }
 
   const filtered = templates.filter(t =>
@@ -1874,7 +1874,7 @@ export default function App() {
 
   useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; }, [activeTab]);
 
-  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant" };
+  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates" };
 
   // ── INSTALL BANNER ──
   const InstallBanner = () => showInstall ? (
