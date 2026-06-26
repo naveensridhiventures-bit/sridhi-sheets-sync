@@ -482,6 +482,66 @@ function Dashboard() {
 }
 
 // ─── LEADS CRM ────────────────────────────────────────────────────────────
+
+// ── WATemplatePicker — shown when WhatsApp tapped on a lead ──────────────────
+function WATemplatePicker({ lead, onClose }) {
+  const templates = (() => {
+    try { const s = localStorage.getItem("wa_templates"); return s ? JSON.parse(s) : DEFAULT_TEMPLATES; } catch { return DEFAULT_TEMPLATES; }
+  })();
+  const [selected, setSelected] = useState(null);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    if (selected) setMsg(fillTemplate(selected.message, lead));
+  }, [selected]);
+
+  function send() {
+    const phone = (lead.contact||"").replace(/[^0-9]/g,"");
+    const number = phone.startsWith("91") ? phone : "91"+phone;
+    window.open("https://wa.me/"+number+"?text="+encodeURIComponent(msg), "_blank");
+    onClose();
+  }
+
+  return (
+    <Sheet open={true} onClose={onClose} title={"WhatsApp: " + lead.name}>
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        <div style={{ fontSize:11, color:T.t3, fontWeight:600 }}>SELECT TEMPLATE</div>
+        <div style={{ display:"flex", flexDirection:"column", gap:8, maxHeight:200, overflowY:"auto" }}>
+          {templates.map(t => (
+            <div key={t.id} onClick={() => setSelected(t)}
+              style={{ background: selected?.id===t.id ? T.accentSub : T.surface,
+                border:`1px solid ${selected?.id===t.id ? T.accent : T.border}`,
+                borderRadius:12, padding:"10px 14px", cursor:"pointer" }}>
+              <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{t.name}</div>
+              <div style={{ fontSize:11, color:T.accent, marginTop:2 }}>{t.stage}</div>
+            </div>
+          ))}
+        </div>
+        {selected && (
+          <>
+            <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginTop:4 }}>EDIT MESSAGE</div>
+            <textarea value={msg} onChange={e => setMsg(e.target.value)} rows={5}
+              style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10,
+                color:T.t1, padding:"10px 12px", fontSize:13, fontFamily:FONT,
+                outline:"none", width:"100%", boxSizing:"border-box", resize:"vertical" }} />
+            <button onClick={send}
+              style={{ background:"#25D366", border:"none", borderRadius:14, color:"white",
+                padding:"13px", fontSize:14, fontWeight:800, cursor:"pointer", fontFamily:FONT,
+                display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+              📲 Send on WhatsApp
+            </button>
+          </>
+        )}
+        <button onClick={() => { window.open("https://wa.me/"+(lead.contact||"").replace(/[^0-9]/g,"").replace(/^(?!91)/,"91"), "_blank"); onClose(); }}
+          style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12,
+            color:T.t2, padding:"10px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:FONT }}>
+          Open WhatsApp without template
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
 function Leads() {
   const [leads, setLeads, leadsSyncStatus] = useSheetSynced("leads", "leads", INITIAL_LEADS);
   const [search, setSearch] = useState("");
@@ -489,7 +549,8 @@ function Leads() {
   const [selected, setSelected] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [remark, setRemark] = useState("");
-  const [newLead, setNewLead] = useState({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Priya" });
+  const [showWAForLead, setShowWAForLead] = useState(null);
+  const [newLead, setNewLead] = useState({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Thulasi" });
 
   const filtered = leads.filter(l =>
     (filterStage==="All" || l.stage===filterStage) &&
@@ -539,10 +600,19 @@ function Leads() {
             ))}
           </div>
           <div style={{ display:"flex", gap:8, marginTop:16 }}>
-            <Btn label="Call" color={T.emerald} ghost full onClick={() => {}} />
-            <Btn label="WhatsApp" color={T.accent} ghost full onClick={() => {}} />
+            <Btn label="📞 Call" color={T.emerald} ghost full onClick={() => {
+              const phone = (lead.contact||"").replace(/[^0-9]/g,"");
+              if (phone) window.location.href = "tel:+" + (phone.startsWith("91") ? phone : "91"+phone);
+            }} />
+            <Btn label="💬 WhatsApp" color={T.accent} ghost full onClick={() => {
+              setShowWAForLead(lead);
+            }} />
           </div>
         </Card>
+
+        {showWAForLead && (
+          <WATemplatePicker lead={showWAForLead} onClose={() => setShowWAForLead(null)} />
+        )}
 
         <Card>
           <Label>Update Stage</Label>
@@ -1002,7 +1072,7 @@ function RepeatOrders() {
                 <span style={{ color:T.emerald, fontWeight:700 }}>₹{(c.revenue/12).toLocaleString("en-IN")}/mo</span>
               </div>
               <div style={{ display:"flex", gap:8 }}>
-                <Btn label="Call" color={T.emerald} ghost full onClick={() => {}} />
+                <Btn label="📞 Call" color={T.emerald} ghost full onClick={() => { const p = (c.contact||"").replace(/[^0-9]/g,""); if(p) window.location.href="tel:+91"+p; }} />
                 <Btn label="Remind" color={T.accent} ghost full onClick={() => {}} />
                 {group==="Due Today" && <Btn label="Confirm Order" color={T.rose} ghost full onClick={() => {}} />}
               </div>
