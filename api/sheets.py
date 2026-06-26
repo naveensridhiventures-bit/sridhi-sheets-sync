@@ -132,15 +132,10 @@ def write_tab(tab_name: str, headers: list[str], records: list[dict]):
         [str(r.get(h, "") or "") for h in headers]
         for r in records
     ]
-    # Clear then rewrite (last-write-wins, same as original Node impl)
-    clear_range = "{tab}!A1:{col}{rows}".format(tab=tab_name, col=last_col, rows=MAX_ROWS)
-    svc.spreadsheets().values().batchClear(
-        spreadsheetId=sheet_id,
-        body={"ranges": [clear_range]},
-    ).execute()
+    update_range = tab_name + "!A1"
     svc.spreadsheets().values().update(
         spreadsheetId=sheet_id,
-        range=f"{tab_name}!A1",
+        range=update_range,
         valueInputOption="RAW",
         body={"values": [headers, *data_rows]},
     ).execute()
