@@ -1548,72 +1548,222 @@ function Marketing() {
 
 // ─── REPORTS ──────────────────────────────────────────────────────────────
 function Reports() {
-  const [period, setPeriod] = useState("Monthly");
+  const [leads] = useSheetSynced("leads","leads",[]);
+  const [expenses] = useSheetSynced("expenses","expenses",[]);
+  const [samples] = useSheetSynced("samples","samples",[]);
+  const [repeatCustomers] = useSheetSynced("repeatCustomers","repeatCustomers",[]);
   const [exporting, setExporting] = useState(false);
-  const weeklyRev = [{ label:"Wk 1",val:42000 },{ label:"Wk 2",val:51000 },{ label:"Wk 3",val:48000 },{ label:"Wk 4",val:57000 }];
-  const handleExport = fmt => { setExporting(true); setTimeout(() => setExporting(false), 1500); };
+
+  // ── Compute real metrics from data ──
+  const totalLeads = leads.length;
+  const activeCustomers = leads.filter(l => l.stage === "Active Customer").length;
+  const ordersReceived = leads.filter(l => l.stage === "Order Received").length;
+  const converted = leads.filter(l => ["Order Received","Active Customer","Repeat Order Follow-up"].includes(l.stage)).length;
+  const convRate = totalLeads > 0 ? Math.round((converted/totalLeads)*100) : 0;
+  const totalExpenses = expenses.reduce((a,b) => a+(Number(b.amount)||0), 0);
+  const porterExp = expenses.filter(e=>e.subtype==="Porter").reduce((a,b)=>a+(Number(b.amount)||0),0);
+  const marketingExp = expenses.filter(e=>e.type==="Marketing").reduce((a,b)=>a+(Number(b.amount)||0),0);
+  const samplesCost = expenses.filter(e=>e.type==="Sample").reduce((a,b)=>a+(Number(b.amount)||0),0);
+  const samplesDelivered = samples.filter(s=>s.status==="Delivered").length;
+  const samplesConverted = samples.filter(s=>s.converted).length;
+  const stageCount = stage => leads.filter(l=>l.stage===stage).length;
+  const today = new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
+
+  // ── PDF Generator ──
+  const downloadPDF = () => {
+    setExporting(true);
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, sans-serif; background:#fff; color:#1a1a2e; padding:40px; }
+  .header { background:linear-gradient(135deg,#060B16,#0F1C33); color:white; padding:32px; border-radius:16px; margin-bottom:28px; display:flex; justify-content:space-between; align-items:center; }
+  .logo { font-size:28px; font-weight:900; color:#00C9A7; letter-spacing:-1px; }
+  .sub { font-size:12px; color:#7B9DC4; margin-top:4px; text-transform:uppercase; letter-spacing:2px; }
+  .date { font-size:12px; color:#7B9DC4; text-align:right; }
+  .section { margin-bottom:24px; }
+  .section-title { font-size:14px; font-weight:700; color:#060B16; background:#f0f6ff; padding:8px 14px; border-radius:8px; border-left:4px solid #00C9A7; margin-bottom:14px; text-transform:uppercase; letter-spacing:1px; }
+  .kpi-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:20px; }
+  .kpi { background:#f8faff; border:1px solid #e0eaff; border-radius:12px; padding:16px; text-align:center; }
+  .kpi-val { font-size:22px; font-weight:900; color:#00C9A7; }
+  .kpi-val.red { color:#F43F5E; }
+  .kpi-val.blue { color:#818CF8; }
+  .kpi-val.amber { color:#F59E0B; }
+  .kpi-label { font-size:10px; color:#666; margin-top:4px; font-weight:600; text-transform:uppercase; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th { background:#060B16; color:#00C9A7; padding:10px 12px; text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; }
+  td { padding:9px 12px; border-bottom:1px solid #f0f0f0; }
+  tr:nth-child(even) td { background:#f8faff; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:20px; font-size:10px; font-weight:700; }
+  .badge-green { background:#d1fae5; color:#065f46; }
+  .badge-amber { background:#fef3c7; color:#92400e; }
+  .badge-red { background:#fee2e2; color:#991b1b; }
+  .footer { margin-top:32px; padding-top:16px; border-top:2px solid #00C9A7; display:flex; justify-content:space-between; color:#999; font-size:10px; }
+  .highlight { color:#00C9A7; font-weight:700; }
+  .bar-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+  .bar-label { width:120px; font-size:11px; color:#444; flex-shrink:0; }
+  .bar-bg { flex:1; height:8px; background:#f0f0f0; border-radius:4px; overflow:hidden; }
+  .bar-fill { height:100%; border-radius:4px; }
+  .bar-val { width:60px; font-size:11px; font-weight:700; text-align:right; color:#060B16; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="logo">⚡ Sridhi Ventures</div>
+    <div class="sub">Business Operating System — Monthly Report</div>
+  </div>
+  <div class="date">
+    <div style="font-size:20px;font-weight:900;color:#00C9A7">${today}</div>
+    <div style="margin-top:4px">Bengaluru · Food Distribution</div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">📊 Key Metrics</div>
+  <div class="kpi-grid">
+    <div class="kpi"><div class="kpi-val">${totalLeads}</div><div class="kpi-label">Total Leads</div></div>
+    <div class="kpi"><div class="kpi-val blue">${activeCustomers}</div><div class="kpi-label">Active Customers</div></div>
+    <div class="kpi"><div class="kpi-val">${convRate}%</div><div class="kpi-label">Conversion Rate</div></div>
+    <div class="kpi"><div class="kpi-val amber">${samplesDelivered}</div><div class="kpi-label">Samples Delivered</div></div>
+    <div class="kpi"><div class="kpi-val">${samplesConverted}</div><div class="kpi-label">Samples Converted</div></div>
+    <div class="kpi"><div class="kpi-val red">₹${totalExpenses.toLocaleString("en-IN")}</div><div class="kpi-label">Total Expenses</div></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">🔄 Pipeline Breakdown</div>
+  <table>
+    <tr><th>Stage</th><th>Count</th><th>Status</th></tr>
+    ${["New Lead","Contacted","Interested","Sample Requested","Sample Delivered","Positive Feedback","Negotiation","Order Received","Active Customer","Lost Customer"].map(s => {
+      const count = stageCount(s);
+      const badge = s==="Active Customer"||s==="Order Received" ? "badge-green" : s==="Lost Customer" ? "badge-red" : "badge-amber";
+      return `<tr><td>${s}</td><td><strong>${count}</strong></td><td><span class="badge ${badge}">${count > 0 ? "Active" : "Empty"}</span></td></tr>`;
+    }).join("")}
+  </table>
+</div>
+
+<div class="section">
+  <div class="section-title">💸 Expense Breakdown</div>
+  <table>
+    <tr><th>Category</th><th>Amount</th><th>Type</th></tr>
+    ${expenses.slice(0,15).map(e => `<tr><td>${e.category||""}</td><td><strong>₹${Number(e.amount||0).toLocaleString("en-IN")}</strong></td><td>${e.type||""}</td></tr>`).join("")}
+    ${expenses.length === 0 ? "<tr><td colspan='3' style='text-align:center;color:#999'>No expenses recorded</td></tr>" : ""}
+    <tr style="background:#f0f6ff"><td><strong>TOTAL</strong></td><td><strong class="highlight">₹${totalExpenses.toLocaleString("en-IN")}</strong></td><td></td></tr>
+  </table>
+  <div style="margin-top:16px">
+    <div class="bar-row"><div class="bar-label">Marketing</div><div class="bar-bg"><div class="bar-fill" style="width:${totalExpenses?Math.round(marketingExp/totalExpenses*100):0}%;background:#818CF8"></div></div><div class="bar-val">₹${marketingExp.toLocaleString("en-IN")}</div></div>
+    <div class="bar-row"><div class="bar-label">Porter Delivery</div><div class="bar-bg"><div class="bar-fill" style="width:${totalExpenses?Math.round(porterExp/totalExpenses*100):0}%;background:#F59E0B"></div></div><div class="bar-val">₹${porterExp.toLocaleString("en-IN")}</div></div>
+    <div class="bar-row"><div class="bar-label">Samples</div><div class="bar-bg"><div class="bar-fill" style="width:${totalExpenses?Math.round(samplesCost/totalExpenses*100):0}%;background:#00C9A7"></div></div><div class="bar-val">₹${samplesCost.toLocaleString("en-IN")}</div></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">👥 Recent Leads</div>
+  <table>
+    <tr><th>Name</th><th>Area</th><th>Stage</th><th>Telecaller</th></tr>
+    ${leads.slice(0,10).map(l => `<tr><td><strong>${l.name||""}</strong></td><td>${l.area||""}</td><td>${l.stage||""}</td><td>${l.telecaller||""}</td></tr>`).join("")}
+    ${leads.length === 0 ? "<tr><td colspan='4' style='text-align:center;color:#999'>No leads recorded</td></tr>" : ""}
+  </table>
+</div>
+
+<div class="footer">
+  <div>Generated by <strong>Sridhi Ventures BOS v3.0</strong></div>
+  <div>Confidential · Internal Use Only</div>
+  <div>${today}</div>
+</div>
+
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type:"text/html" });
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url, "_blank");
+    if (w) {
+      w.onload = () => { w.print(); };
+    }
+    setTimeout(() => { URL.revokeObjectURL(url); setExporting(false); }, 3000);
+  };
+
+  // ── CSV Export ──
+  const downloadCSV = () => {
+    setExporting(true);
+    const rows = [
+      ["Name","Contact","Business","Area","Stage","Source","Telecaller","Last Contact","Priority"],
+      ...leads.map(l => [l.name,l.contact,l.business,l.area,l.stage,l.source,l.telecaller,l.lastContact,l.priority])
+    ];
+    const csv = rows.map(r => r.map(c => `"${c||""}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type:"text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "sridhi-leads-" + new Date().toISOString().slice(0,10) + ".csv";
+    a.click();
+    setTimeout(() => setExporting(false), 1000);
+  };
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-      <div style={{ display:"flex", gap:7 }}>
-        {["Daily","Weekly","Monthly","Yearly"].map(p => (
-          <button key={p} onClick={() => setPeriod(p)} style={{
-            flex:1, padding:"8px 4px", borderRadius:10, fontSize:11, fontWeight:700,
-            border:`1px solid ${period===p ? T.accent : T.border}`,
-            background: period===p ? T.accentSub : "transparent",
-            color: period===p ? T.accent : T.t2,
-            cursor:"pointer", fontFamily:FONT,
-          }}>{p}</button>
-        ))}
-      </div>
       <Card accent={T.emerald}>
-        <Label sub={`${period} breakdown`}>Revenue Overview</Label>
-        <BarChart data={weeklyRev} color={T.emerald} height={72} />
-        <div style={{ display:"flex", justifyContent:"space-around", marginTop:16 }}>
-          {[["₹0","Revenue",T.emerald],["₹0","Expenses",T.rose],["₹0","Est. Profit",T.accent]].map(([v,l,c]) => (
-            <div key={l} style={{ textAlign:"center" }}>
-              <div style={{ fontSize:18, fontWeight:800, color:c, letterSpacing:"-0.02em" }}>{v}</div>
-              <div style={{ fontSize:10, color:T.t3, fontWeight:500, marginTop:3 }}>{l}</div>
+        <Label sub="Live data from Google Sheets">Business Summary</Label>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginTop:8 }}>
+          {[
+            ["Leads", totalLeads, T.amber],
+            ["Customers", activeCustomers, T.emerald],
+            ["Conv %", convRate+"%", T.accent],
+            ["Samples", samplesDelivered, T.sky],
+            ["Converted", samplesConverted, T.indigo],
+            ["Expenses", "₹"+totalExpenses.toLocaleString("en-IN"), T.rose],
+          ].map(([l,v,c]) => (
+            <div key={l} style={{ textAlign:"center", background:T.surface, borderRadius:12, padding:"12px 4px" }}>
+              <div style={{ fontSize:18, fontWeight:900, color:c }}>{v}</div>
+              <div style={{ fontSize:10, color:T.t3, marginTop:3, fontWeight:600 }}>{l}</div>
             </div>
           ))}
         </div>
       </Card>
+
       <Card>
-        <Label>Sales Report</Label>
-        {[["Total KG Dispatched","1,650 KG",T.accent],["Dosa Batter","980 KG",T.sky],["Idli Batter","670 KG",T.indigo],["New Customers","23",T.emerald],["Repeat Orders","64",T.amber],["Avg Order Size","28 KG",T.accent]].map(([k,v,c]) => (
-          <div key={k} style={{ display:"flex", justifyContent:"space-between", padding:"10px 0", borderBottom:`1px solid ${T.border}` }}>
-            <span style={{ fontSize:12, color:T.t2, fontWeight:500 }}>{k}</span>
-            <span style={{ fontSize:13, fontWeight:700, color:c }}>{v}</span>
+        <Label>Pipeline Status</Label>
+        {["New Lead","Contacted","Interested","Sample Requested","Order Received","Active Customer","Lost Customer"].map(s => {
+          const count = stageCount(s);
+          const color = s==="Active Customer"||s==="Order Received" ? T.emerald : s==="Lost Customer" ? T.rose : T.sky;
+          return (
+            <div key={s} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:`1px solid ${T.border}` }}>
+              <span style={{ fontSize:12, color:T.t2 }}>{s}</span>
+              <span style={{ fontSize:13, fontWeight:800, color }}>{count}</span>
+            </div>
+          );
+        })}
+      </Card>
+
+      <Card>
+        <Label>Expense Summary</Label>
+        {[["Marketing", marketingExp, T.indigo],["Porter Delivery", porterExp, T.amber],["Samples", samplesCost, T.accent],["Total", totalExpenses, T.rose]].map(([l,v,c]) => (
+          <div key={l} style={{ display:"flex", justifyContent:"space-between", padding:"9px 0", borderBottom:`1px solid ${T.border}` }}>
+            <span style={{ fontSize:12, color:T.t2, fontWeight: l==="Total"?700:400 }}>{l}</span>
+            <span style={{ fontSize:13, fontWeight:800, color:c }}>₹{v.toLocaleString("en-IN")}</span>
           </div>
         ))}
       </Card>
+
       <Card>
-        <Label>Employee Performance</Label>
-        {[...TEAM_DATA].sort((a,b) => b.score-a.score).map((m,i) => (
-          <div key={i} style={{ padding:"11px 0", borderBottom:i<TEAM_DATA.length-1?`1px solid ${T.border}`:"none", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <div>
-              <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{m.name}</div>
-              <div style={{ fontSize:11, color:T.t3, fontWeight:500 }}>
-                {m.role==="Telecaller" ? `${m.calls} calls · ${m.connected} connected · ${m.conversions} converted` : `${m.visits} visits · ${m.orders} orders · ₹${m.revenue.toLocaleString("en-IN")}`}
-              </div>
-            </div>
-            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-              <div style={{ width:52, height:4, borderRadius:3, background:T.border, overflow:"hidden" }}>
-                <div style={{ width:`${m.score}%`, height:"100%", background:m.color, borderRadius:3 }} />
-              </div>
-              <span style={{ fontSize:14, fontWeight:800, color:m.color }}>{m.score}</span>
-            </div>
-          </div>
-        ))}
-      </Card>
-      <Card>
-        <Label>Export Report</Label>
-        <div style={{ display:"flex", gap:10 }}>
-          {["Excel","CSV","PDF"].map(fmt => (
-            <button key={fmt} onClick={() => handleExport(fmt)} style={{
-              flex:1, background:T.surface, border:`1px solid ${T.border}`, borderRadius:12,
-              color:T.t2, padding:12, fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:FONT,
-            }}>{exporting?"⏳":fmt==="Excel"?"📊":fmt==="CSV"?"📄":"📑"} {fmt}</button>
-          ))}
+        <Label sub="Downloads real data">Export Report</Label>
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          <button onClick={downloadPDF} disabled={exporting}
+            style={{ background:"linear-gradient(135deg,#00C9A7,#10B981)", border:"none", borderRadius:14,
+              color:"#060B16", padding:"14px", fontSize:14, fontWeight:800, cursor:"pointer", fontFamily:FONT,
+              display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+            {exporting ? "⏳ Generating..." : "📑 Download PDF Report"}
+          </button>
+          <button onClick={downloadCSV} disabled={exporting}
+            style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14,
+              color:T.t1, padding:"12px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:FONT,
+              display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+            📄 Download Leads CSV
+          </button>
         </div>
       </Card>
     </div>
