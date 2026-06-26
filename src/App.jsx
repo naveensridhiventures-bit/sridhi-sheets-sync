@@ -366,6 +366,214 @@ function Stars({ value, onChange, max=5 }) {
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────
+// ─── PROSPECT FINDER ─────────────────────────────────────────────────────────
+// Finds hotels, restaurants, catering in Chennai using Google Places API
+// Uses free Nominatim/Overpass API — no API key needed
+function ProspectFinder() {
+  const [leads, setLeads] = useSheetSynced("leads","leads",[]);
+  const [area, setArea] = useState("Koramangala, Bengaluru");
+  const [type, setType] = useState("restaurant");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [added, setAdded] = useState({});
+
+  const AREAS = [
+    "Koramangala, Bengaluru","BTM Layout, Bengaluru","Indiranagar, Bengaluru",
+    "HSR Layout, Bengaluru","Whitefield, Bengaluru","Marathahalli, Bengaluru",
+    "JP Nagar, Bengaluru","Jayanagar, Bengaluru","Rajajinagar, Bengaluru",
+    "Electronic City, Bengaluru","Anna Nagar, Chennai","T Nagar, Chennai",
+    "Adyar, Chennai","Velachery, Chennai","Porur, Chennai","Tambaram, Chennai",
+    "Mylapore, Chennai","Nungambakkam, Chennai","Guindy, Chennai","Vadapalani, Chennai",
+  ];
+
+  const TYPES = [
+    { val:"restaurant", label:"🍽️ Restaurants" },
+    { val:"meal_provider", label:"🍱 Mess / Tiffin" },
+    { val:"catering", label:"🎪 Catering" },
+    { val:"hotel", label:"🏨 Hotels" },
+    { val:"bakery", label:"🥐 Bakeries" },
+    { val:"food", label:"🥘 All Food Businesses" },
+  ];
+
+  async function search() {
+    setLoading(true);
+    setError("");
+    setResults([]);
+    try {
+      // Use Nominatim to geocode the area first
+      const geoRes = await fetch(
+        "https://nominatim.openstreetmap.org/search?q=" + encodeURIComponent(area) + "&format=json&limit=1",
+        { headers: { "User-Agent": "SridhiVenturesBOS/1.0" } }
+      );
+      const geoData = await geoRes.json();
+      if (!geoData.length) { setError("Area not found. Try a different area name."); setLoading(false); return; }
+
+      const { lat, lon } = geoData[0];
+      const radius = 2000; // 2km radius
+
+      // Use Overpass API to find businesses
+      const query = \`[out:json][timeout:25];
+(
+  node["amenity"="\${type}"](around:\${radius},\${lat},\${lon});
+  node["shop"="bakery"](around:\${radius},\${lat},\${lon});
+  node["tourism"="hotel"](around:\${radius},\${lat},\${lon});
+);
+out body 30;\`;
+
+      const overpassRes = await fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        body: "data=" + encodeURIComponent(query),
+      });
+      const overpassData = await overpassRes.json();
+      const elements = (overpassData.elements || []).filter(e => e.tags?.name);
+
+      if (elements.length === 0) {
+        setError("No results found. Try a different area or type.");
+        setLoading(false); return;
+      }
+
+      setResults(elements.slice(0, 25).map(e => ({
+        name: e.tags.name,
+        phone: e.tags.phone || e.tags["contact:phone"] || "",
+        address: [e.tags["addr:street"], e.tags["addr:city"]].filter(Boolean).join(", ") || area,
+        type: e.tags.amenity || e.tags.shop || e.tags.tourism || type,
+        lat: e.lat, lon: e.lon,
+      })));
+    } catch(err) {
+      setError("Search failed. Check your internet connection.");
+    }
+    setLoading(false);
+  }
+
+  function addAsLead(r) {
+    const newLead = {
+      id: Date.now() + Math.random(),
+      name: r.name,
+      contact: r.phone || "",
+      business: r.name,
+      type: r.type === "restaurant" ? "Restaurant" : r.type === "hotel" ? "Hotel" : r.type === "bakery" ? "Bakery" : "Restaurant",
+      area: area.split(",")[0],
+      address: r.address,
+      stage: "New Lead",
+      source: "Prospect Finder",
+      telecaller: "Thulasi",
+      lastContact: "Not contacted",
+      priority: "Medium",
+      remarks: [],
+    };
+    setLeads([newLead, ...leads]);
+    setAdded({ ...added, [r.name]: true });
+  }
+
+  const existingNames = new Set(leads.map(l => l.name.toLowerCase()));
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      <div>
+        <div style={{ fontSize:16, fontWeight:800, color:T.t1 }}>Prospect Finder</div>
+        <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>Find hotels, restaurants & caterers near you</div>
+      </div>
+
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:14, display:"flex", flexDirection:"column", gap:10 }}>
+        <div>
+          <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>AREA / LOCATION</div>
+          <select value={area} onChange={e => setArea(e.target.value)}
+            style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1,
+              padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
+            {AREAS.map(a => <option key={a}>{a}</option>)}
+          </select>
+          <input value={area} onChange={e => setArea(e.target.value)}
+            placeholder="Or type any area..."
+            style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1,
+              padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box", marginTop:6 }} />
+        </div>
+        <div>
+          <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>BUSINESS TYPE</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {TYPES.map(t => (
+              <button key={t.val} onClick={() => setType(t.val)}
+                style={{ background: type===t.val ? T.accentSub : T.surface,
+                  border:`1px solid ${type===t.val ? T.accent : T.border}`,
+                  borderRadius:20, color: type===t.val ? T.accent : T.t2,
+                  padding:"5px 12px", fontSize:11, fontWeight:700, cursor:"pointer",
+                  fontFamily:FONT, whiteSpace:"nowrap" }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <button onClick={search} disabled={loading}
+          style={{ background: loading ? T.border : T.accent, border:"none", borderRadius:12,
+            color: loading ? T.t3 : "#060B16", padding:"12px", fontSize:14, fontWeight:800,
+            cursor: loading ? "default" : "pointer", fontFamily:FONT }}>
+          {loading ? "🔍 Searching..." : "🔍 Find Prospects"}
+        </button>
+      </div>
+
+      {error && (
+        <div style={{ background:"rgba(244,63,94,0.1)", border:"1px solid rgba(244,63,94,0.3)",
+          borderRadius:12, padding:12, fontSize:12, color:T.rose }}>{error}</div>
+      )}
+
+      {results.length > 0 && (
+        <div style={{ fontSize:11, color:T.t3, fontWeight:600 }}>{results.length} PROSPECTS FOUND · {Object.keys(added).length} ADDED TO CRM</div>
+      )}
+
+      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+        {results.map((r, i) => {
+          const isExisting = existingNames.has(r.name.toLowerCase());
+          const isAdded = added[r.name] || isExisting;
+          return (
+            <div key={i} style={{ background:T.card, border:`1px solid ${isAdded ? T.border : T.accentGlow}`,
+              borderRadius:14, padding:"12px 14px" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:13, fontWeight:800, color:T.t1 }}>{r.name}</div>
+                  <div style={{ fontSize:11, color:T.t3, marginTop:3 }}>📍 {r.address}</div>
+                  {r.phone && <div style={{ fontSize:11, color:T.accent, marginTop:2 }}>📞 {r.phone}</div>}
+                  <div style={{ fontSize:10, color:T.t3, marginTop:2, textTransform:"capitalize" }}>{r.type}</div>
+                </div>
+                <div style={{ display:"flex", flexDirection:"column", gap:6, marginLeft:8 }}>
+                  {isAdded ? (
+                    <div style={{ background:T.accentSub, border:`1px solid ${T.accentGlow}`, borderRadius:8,
+                      color:T.accent, padding:"4px 10px", fontSize:11, fontWeight:700 }}>
+                      {isExisting ? "In CRM" : "✓ Added"}
+                    </div>
+                  ) : (
+                    <button onClick={() => addAsLead(r)}
+                      style={{ background:T.accent, border:"none", borderRadius:8, color:"#060B16",
+                        padding:"6px 12px", fontSize:11, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
+                      + Add Lead
+                    </button>
+                  )}
+                  {r.phone && (
+                    <button onClick={() => { const p=r.phone.replace(/[^0-9]/g,""); if(p) window.location.href="tel:+"+p; }}
+                      style={{ background:T.emerald+"22", border:`1px solid ${T.emerald}44`, borderRadius:8,
+                        color:T.emerald, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:FONT }}>
+                      📞 Call
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {results.length === 0 && !loading && !error && (
+        <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:24, textAlign:"center" }}>
+          <div style={{ fontSize:40, marginBottom:8 }}>🗺️</div>
+          <div style={{ fontSize:14, fontWeight:700, color:T.t1, marginBottom:6 }}>Find New Customers</div>
+          <div style={{ fontSize:12, color:T.t3, lineHeight:1.7 }}>
+            Search for hotels, restaurants, mess and catering businesses in any area. Add them directly to your CRM pipeline with one tap.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── TODAY'S TASKS ────────────────────────────────────────────────────────────
 function TodayTasks() {
   const [leads] = useSheetSynced("leads","leads",[]);
@@ -904,9 +1112,12 @@ function Leads() {
      l.contact.includes(search))
   );
 
-  const addRemark = id => {
+  const addRemark = (id, role) => {
     if (!remark.trim()) return;
-    setLeads(leads.map(l => l.id===id ? { ...l, remarks:[...(l.remarks||[]),remark.trim()], lastContact:"Today" } : l));
+    const now = new Date();
+    const stamp = now.toLocaleDateString("en-IN",{day:"2-digit",month:"short"}) + " " + now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",hour12:true});
+    const remarkWithStamp = "[" + stamp + " · " + (role||"Team") + "] " + remark.trim();
+    setLeads(leads.map(l => l.id===id ? { ...l, remarks:[...(l.remarks||[]),remarkWithStamp], lastContact:"Today" } : l));
     setRemark("");
   };
   const updateStage = (id, stage) => {
@@ -1080,12 +1291,27 @@ function Leads() {
         <Card>
           <Label sub={`${(lead.remarks||[]).length} entries`}>Remarks</Label>
           {(lead.remarks||[]).length===0 && <div style={{ fontSize:12, color:T.t3, marginBottom:12 }}>No remarks yet.</div>}
-          {(lead.remarks||[]).map((r,i) => (
-            <div key={i} style={{
-              background:T.surface, borderRadius:10, padding:"10px 12px", marginBottom:8,
-              fontSize:12, color:T.t1, borderLeft:`3px solid ${T.accent}`, lineHeight:1.5,
-            }}>{r}</div>
-          ))}
+          {(lead.remarks||[]).slice().reverse().map((r,i) => {
+            const match = r.match(/^\[(.+?) · (.+?)\] (.+)$/);
+            const timestamp = match ? match[1] : null;
+            const who = match ? match[2] : null;
+            const text = match ? match[3] : r;
+            return (
+              <div key={i} style={{
+                background:T.surface, borderRadius:10, padding:"10px 12px", marginBottom:8,
+                borderLeft:`3px solid ${T.accent}`,
+              }}>
+                {timestamp && (
+                  <div style={{ display:"flex", gap:6, marginBottom:4 }}>
+                    <span style={{ fontSize:10, color:T.accent, fontWeight:700 }}>🕐 {timestamp}</span>
+                    <span style={{ fontSize:10, color:T.t3 }}>·</span>
+                    <span style={{ fontSize:10, color:T.indigo, fontWeight:600 }}>👤 {who}</span>
+                  </div>
+                )}
+                <div style={{ fontSize:12, color:T.t1, lineHeight:1.5 }}>{text}</div>
+              </div>
+            );
+          })}
           <textarea value={remark} onChange={e => setRemark(e.target.value)}
             placeholder="Add a remark..."
             style={{
@@ -1093,7 +1319,7 @@ function Leads() {
               padding:12, color:T.t1, fontSize:13, resize:"none", outline:"none",
               boxSizing:"border-box", height:72, fontFamily:FONT,
             }} />
-          <div style={{ marginTop:8 }}><Btn label="Save Remark" full onClick={() => addRemark(lead.id)} /></div>
+          <div style={{ marginTop:8 }}><Btn label="Save Remark" full onClick={() => addRemark(lead.id, lead.telecaller)} /></div>
         </Card>
       </div>
     );
@@ -1248,6 +1474,7 @@ function Pipeline() {
 // ─── SAMPLES ──────────────────────────────────────────────────────────────
 function Samples() {
   const [samples, setSamples, samplesSyncStatus] = useSheetSynced("samples", "samples", INITIAL_SAMPLES);
+  const [leads, setLeads] = useSheetSynced("leads","leads",[]);
   const [showAdd, setShowAdd] = useState(false);
   const [showFeedback, setShowFeedback] = useState(null);
   const [ratings, setRatings] = useState({ taste:0, texture:0, quality:0, pricing:"", competitor:"", interest:"Yes", comments:"" });
@@ -1258,7 +1485,21 @@ function Samples() {
   const totalCost = samples.reduce((a,b) => a+b.deliveryCost+b.productionCost, 0);
 
   const saveFeedback = id => {
-    setSamples(samples.map(s => s.id===id ? { ...s, feedback:ratings.taste>=4?"Positive":ratings.taste>=3?"Neutral":"Negative", converted:ratings.interest==="Yes" } : s));
+    const sample = samples.find(s => s.id === id);
+    const isConverted = ratings.interest === "Yes";
+    const feedbackVal = ratings.taste>=4?"Positive":ratings.taste>=3?"Neutral":"Negative";
+    setSamples(samples.map(s => s.id===id ? { ...s, feedback:feedbackVal, converted:isConverted, status:"Delivered" } : s));
+    // Auto update lead stage based on feedback
+    if (sample) {
+      const matchedLead = leads.find(l => l.name === sample.customer || l.contact === sample.customer);
+      if (matchedLead) {
+        const newStage = isConverted ? "Order Received" : feedbackVal === "Positive" ? "Positive Feedback" : feedbackVal === "Neutral" ? "Feedback Pending" : "Lost Customer";
+        const now = new Date();
+        const stamp = now.toLocaleDateString("en-IN",{day:"2-digit",month:"short"}) + " " + now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",hour12:true});
+        const autoRemark = "[" + stamp + " · System] Sample feedback: " + feedbackVal + (isConverted ? " — Converted to Order! 🎉" : "");
+        setLeads(leads.map(l => l.id===matchedLead.id ? { ...l, stage:newStage, lastContact:"Today", remarks:[...(l.remarks||[]), autoRemark] } : l));
+      }
+    }
     setShowFeedback(null);
     setRatings({ taste:0, texture:0, quality:0, pricing:"", competitor:"", interest:"Yes", comments:"" });
   };
@@ -2487,6 +2728,7 @@ const MORE_MENU = [
   { id:"marketing", label:"Marketing",     icon:"📢" },
   { id:"reports",   label:"Reports",       icon:"📈" },
   { id:"today",     label:"Today Tasks",    icon:"📅"  },
+  { id:"prospects",  label:"Find Prospects", icon:"🗺️"  },
   { id:"hrleads",   label:"HR Leads",       icon:"📋"  },
   { id:"whatsapp",  label:"WA Templates",  icon:"💬"  },
   { id:"ai",        label:"AI Assistant",  icon:"✦"  },
@@ -2530,7 +2772,7 @@ export default function App() {
 
   useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; }, [activeTab]);
 
-  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads", today:"Today Tasks" };
+  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads", today:"Today Tasks", prospects:"Find Prospects" };
 
   // ── INSTALL BANNER ──
   const InstallBanner = () => showInstall ? (
@@ -2628,6 +2870,7 @@ export default function App() {
       case "marketing": return <Marketing />;
       case "reports":   return <Reports />;
       case "today":     return <TodayTasks />;
+      case "prospects":  return <ProspectFinder />;
       case "hrleads":   return <HRLeads />;
       case "whatsapp":  return <WhatsAppTemplates />;
       case "ai":        return <AIAssistant />;
