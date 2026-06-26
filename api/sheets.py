@@ -62,7 +62,7 @@ def get_creds():
 def sheets_get(sheet_id, tab_name):
     creds = get_creds()
     range_str = tab_name + "!A1:Z" + str(MAX_ROWS)
-    encoded = urllib.parse.quote(range_str)
+    encoded = urllib.parse.quote(range_str, safe="!:")
     url = "https://sheets.googleapis.com/v4/spreadsheets/{}/values/{}".format(sheet_id, encoded)
     req = urllib.request.Request(url, headers={"Authorization": "Bearer " + creds.token})
     with urllib.request.urlopen(req, timeout=15) as resp:
@@ -71,7 +71,7 @@ def sheets_get(sheet_id, tab_name):
 def sheets_update(sheet_id, tab_name, values):
     creds = get_creds()
     range_str = tab_name + "!A1"
-    encoded = urllib.parse.quote(range_str)
+    encoded = urllib.parse.quote(range_str, safe="!:")
     url = "https://sheets.googleapis.com/v4/spreadsheets/{}/values/{}?valueInputOption=RAW".format(sheet_id, encoded)
     payload = json.dumps({"values": values}).encode()
     req = urllib.request.Request(url, data=payload, method="PUT",
