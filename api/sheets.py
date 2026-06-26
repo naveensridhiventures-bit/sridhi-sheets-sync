@@ -225,7 +225,12 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             if tab == "all":
-                data = fetch_all_tabs()
+                try:
+                    data = fetch_all_tabs()
+                except Exception as inner:
+                    import traceback
+                    self._send(500, {"error": str(inner), "trace": traceback.format_exc()})
+                    return
                 self._send(200, data, {"Cache-Control": "public, max-age=30"})
             elif tab in TAB_CONFIG:
                 cached = _cache_get(tab)
