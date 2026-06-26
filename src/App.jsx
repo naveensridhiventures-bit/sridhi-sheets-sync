@@ -546,142 +546,178 @@ function WATemplatePicker({ lead, onClose }) {
 function HRLeads() {
   const [hrLeads] = useSheetSynced("hrLeads","hrLeads",[]);
   const [leads, setLeads] = useSheetSynced("leads","leads",[]);
-  const [imported, setImported] = useState({});
-  const [search, setSearch] = useState("");
+  const [imported, setImported] = useState(() => {
+    try { const s = localStorage.getItem("hr_imported"); return s ? JSON.parse(s) : {}; } catch { return {}; }
+  });
+  const [editingLead, setEditingLead] = useState(null); // contact number being filled in
+  const [form, setForm] = useState({ name:"", business:"", type:"Restaurant", area:"", address:"", telecaller:"Thulasi" });
 
-  // Load already-imported contacts
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("hr_imported");
-      if (saved) setImported(JSON.parse(saved));
-    } catch {}
-  }, []);
-
-  function markImported(contact) {
-    const updated = { ...imported, [contact]: true };
-    setImported(updated);
-    try { localStorage.setItem("hr_imported", JSON.stringify(updated)); } catch {}
+  function saveImported(obj) {
+    setImported(obj);
+    try { localStorage.setItem("hr_imported", JSON.stringify(obj)); } catch {}
   }
 
-  function importLead(hr) {
-    const alreadyExists = leads.some(l => l.contact === hr.contact);
-    if (alreadyExists) { markImported(hr.contact); return; }
-    const newLead = {
-      id: leads.length + Date.now(),
-      name: hr.name || "",
-      contact: hr.contact || "",
-      business: hr.business || "",
-      type: hr.type || "Restaurant",
-      area: hr.area || "",
-      address: hr.address || "",
-      stage: "New Lead",
-      source: "HR Assignment",
-      telecaller: hr.telecaller || "",
-      lastContact: "Today",
-      priority: "Medium",
-      remarks: hr.remarks ? [hr.remarks] : [],
-    };
-    setLeads([newLead, ...leads]);
-    markImported(hr.contact);
+  function normalizePhone(raw) {
+    const digits = (raw||"").replace(/[^0-9]/g,"");
+    if (digits.startsWith("91") && digits.length === 12) return digits.slice(2);
+    if (digits.startsWith("091") && digits.length === 13) return digits.slice(3);
+    return digits.slice(-10);
   }
 
-  function importAll() {
-    const toImport = filtered.filter(hr => !imported[hr.contact] && !leads.some(l => l.contact === hr.contact));
-    let updatedLeads = [...leads];
-    const newImported = { ...imported };
-    toImport.forEach(hr => {
-      updatedLeads = [{ id: updatedLeads.length + Date.now() + Math.random(), name:hr.name||"", contact:hr.contact||"", business:hr.business||"", type:hr.type||"Restaurant", area:hr.area||"", address:hr.address||"", stage:"New Lead", source:"HR Assignment", telecaller:hr.telecaller||"", lastContact:"Today", priority:"Medium", remarks:hr.remarks?[hr.remarks]:[] }, ...updatedLeads];
-      newImported[hr.contact] = true;
-    });
-    setLeads(updatedLeads);
-    setImported(newImported);
-    try { localStorage.setItem("hr_imported", JSON.stringify(newImported)); } catch {}
+  function startImport(contact) {
+    setEditingLead(contact);
+    setForm({ name:"", business:"", type:"Restaurant", area:"", address:"", telecaller:"Thulasi" });
   }
 
-  const filtered = hrLeads.filter(hr =>
-    search === "" ||
-    (hr.name||"").toLowerCase().includes(search.toLowerCase()) ||
-    (hr.contact||"").includes(search) ||
-    (hr.telecaller||"").toLowerCase().includes(search.toLowerCase())
-  );
+  function confirmImport() {
+    if (!form.name || !editingLead) return;
+    const phone = normalizePhone(editingLead);
+    const alreadyExists = leads.some(l => normalizePhone(l.contact) === phone);
+    if (!alreadyExists) {
+      setLeads([{
+        id: Date.now(),
+        name: form.name,
+        contact: phone,
+        business: form.business,
+        type: form.type,
+        area: form.area,
+        address: form.address,
+        stage: "New Lead",
+        source: "HR Assignment",
+        telecaller: form.telecaller,
+        lastContact: "Today",
+        priority: "Medium",
+        remarks: [],
+      }, ...leads]);
+    }
+    saveImported({ ...imported, [editingLead]: true });
+    setEditingLead(null);
+  }
 
-  const pendingCount = filtered.filter(hr => !imported[hr.contact] && !leads.some(l => l.contact === hr.contact)).length;
+  // ── Edit form view ──
+  if (editingLead) {
+    return (
+      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <button onClick={() => setEditingLead(null)}
+            style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:10, color:T.t2, padding:"6px 12px", fontSize:12, cursor:"pointer", fontFamily:FONT }}>← Back</button>
+          <div style={{ fontSize:14, fontWeight:700, color:T.t1 }}>Fill Lead Details</div>
+        </div>
+        <div style={{ background:T.card, border:`1px solid ${T.accentGlow}`, borderRadius:14, padding:14 }}>
+          <div style={{ fontSize:11, color:T.accent, fontWeight:700, marginBottom:4 }}>HR NUMBER</div>
+          <div style={{ fontSize:16, fontWeight:800, color:T.t1 }}>📞 {editingLead}</div>
+          <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>Normalized: {normalizePhone(editingLead)}</div>
+        </div>
+        <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:14, display:"flex", flexDirection:"column", gap:12 }}>
+          {[
+            ["Customer Name *", "name", "text", "e.g. Anand Tiffin Center"],
+            ["Business Name", "business", "text", "e.g. Anand Foods Pvt Ltd"],
+            ["Area / Location", "area", "text", "e.g. Koramangala"],
+            ["Full Address", "address", "text", "e.g. 12, 5th Block, Koramangala"],
+          ].map(([label, key, type, placeholder]) => (
+            <div key={key}>
+              <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>{label.toUpperCase()}</div>
+              <input type={type} value={form[key]} onChange={e => setForm({...form, [key]: e.target.value})}
+                placeholder={placeholder}
+                style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1,
+                  padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
+            </div>
+          ))}
+          <div>
+            <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>BUSINESS TYPE</div>
+            <select value={form.type} onChange={e => setForm({...form, type:e.target.value})}
+              style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1,
+                padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
+              {["Restaurant","Mess","Hotel","Bakery","Cloud Kitchen","Other"].map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>ASSIGN TELECALLER</div>
+            <select value={form.telecaller} onChange={e => setForm({...form, telecaller:e.target.value})}
+              style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1,
+                padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
+              {["Thulasi","Ramya"].map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+        </div>
+        <button onClick={confirmImport} disabled={!form.name}
+          style={{ background: form.name ? T.accent : T.border, border:"none", borderRadius:14,
+            color: form.name ? "#060B16" : T.t3, padding:"14px", fontSize:14, fontWeight:800,
+            cursor: form.name ? "pointer" : "default", fontFamily:FONT }}>
+          ✓ Add to CRM Pipeline
+        </button>
+      </div>
+    );
+  }
+
+  // ── List view ──
+  const numbers = hrLeads.map(r => r.contact || r[Object.keys(r)[0]] || "").filter(Boolean);
+  const pending = numbers.filter(n => !imported[n] && !leads.some(l => normalizePhone(l.contact) === normalizePhone(n)));
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div>
-          <div style={{ fontSize:16, fontWeight:800, color:T.t1 }}>HR Assigned Leads</div>
-          <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>{hrLeads.length} total · {pendingCount} pending import</div>
+          <div style={{ fontSize:16, fontWeight:800, color:T.t1 }}>HR Assigned Numbers</div>
+          <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>{numbers.length} total · {pending.length} pending</div>
         </div>
-        {pendingCount > 0 && (
-          <button onClick={importAll}
-            style={{ background:T.accent, border:"none", borderRadius:12, color:"#060B16",
-              padding:"8px 14px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
-            Import All ({pendingCount})
-          </button>
+        {pending.length > 0 && (
+          <div style={{ background:T.rose, borderRadius:20, padding:"4px 10px", fontSize:12, fontWeight:800, color:"white" }}>
+            {pending.length} New
+          </div>
         )}
       </div>
 
-      <input value={search} onChange={e => setSearch(e.target.value)}
-        placeholder="Search by name, contact, telecaller..."
-        style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1,
-          padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
-
-      {hrLeads.length === 0 && (
+      {numbers.length === 0 && (
         <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:24, textAlign:"center" }}>
           <div style={{ fontSize:32, marginBottom:8 }}>📋</div>
-          <div style={{ fontSize:14, fontWeight:700, color:T.t1, marginBottom:4 }}>No HR Leads Yet</div>
-          <div style={{ fontSize:12, color:T.t3, lineHeight:1.6 }}>
-            Ask HR to add leads in the HRLeads tab in Google Sheet. Columns: name, contact, business, type, area, address, telecaller, remarks
+          <div style={{ fontSize:14, fontWeight:700, color:T.t1, marginBottom:8 }}>No Numbers Yet</div>
+          <div style={{ fontSize:12, color:T.t3, lineHeight:1.7 }}>
+            Ask HR to create a tab named HRLeads in the Google Sheet and add phone numbers in column A — one number per row. Any format works.
           </div>
         </div>
       )}
 
-      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        {filtered.map((hr, i) => {
-          const isImported = imported[hr.contact] || leads.some(l => l.contact === hr.contact);
+      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+        {numbers.map((num, i) => {
+          const isImported = imported[num] || leads.some(l => normalizePhone(l.contact) === normalizePhone(num));
+          const normalized = normalizePhone(num);
+          const existingLead = leads.find(l => normalizePhone(l.contact) === normalized);
           return (
-            <div key={i} style={{ background:T.card, border:`1px solid ${isImported ? T.border : T.accentGlow}`, borderRadius:16, padding:14 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
-                <div style={{ flex:1 }}>
-                  <div style={{ fontSize:14, fontWeight:800, color:T.t1 }}>{hr.name}</div>
-                  <div style={{ fontSize:12, color:T.t2, marginTop:2 }}>📞 {hr.contact}</div>
-                  {hr.area && <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>📍 {hr.area}</div>}
-                  {hr.telecaller && (
-                    <div style={{ fontSize:11, color:T.accent, marginTop:4, fontWeight:600 }}>
-                      👤 Assigned to: {hr.telecaller}
-                    </div>
-                  )}
-                  {hr.remarks && <div style={{ fontSize:11, color:T.t3, marginTop:4, fontStyle:"italic" }}>"{hr.remarks}"</div>}
-                </div>
-                <div>
-                  {isImported ? (
-                    <div style={{ background:T.accentSub, border:`1px solid ${T.accentGlow}`, borderRadius:8,
-                      color:T.accent, padding:"4px 10px", fontSize:11, fontWeight:700 }}>✓ Imported</div>
-                  ) : (
-                    <button onClick={() => importLead(hr)}
-                      style={{ background:T.accent, border:"none", borderRadius:8, color:"#060B16",
-                        padding:"6px 12px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
-                      + Import
-                    </button>
-                  )}
-                </div>
+            <div key={i} style={{ background:T.card, border:`1px solid ${isImported ? T.border : T.accentGlow}`,
+              borderRadius:14, padding:"12px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              <div>
+                <div style={{ fontSize:15, fontWeight:700, color:T.t1 }}>📞 {normalized}</div>
+                <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>HR format: {num}</div>
+                {existingLead && (
+                  <div style={{ fontSize:11, color:T.accent, marginTop:3, fontWeight:600 }}>✓ {existingLead.name} · {existingLead.stage}</div>
+                )}
               </div>
+              {isImported ? (
+                <div style={{ background:T.accentSub, border:`1px solid ${T.accentGlow}`, borderRadius:8,
+                  color:T.accent, padding:"5px 12px", fontSize:11, fontWeight:700 }}>✓ Done</div>
+              ) : (
+                <button onClick={() => startImport(num)}
+                  style={{ background:T.accent, border:"none", borderRadius:10, color:"#060B16",
+                    padding:"8px 14px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
+                  Fill & Add
+                </button>
+              )}
             </div>
           );
         })}
       </div>
 
-      <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14, padding:14, marginTop:4 }}>
-        <div style={{ fontSize:12, fontWeight:700, color:T.accent, marginBottom:8 }}>📋 Google Sheet Setup</div>
-        <div style={{ fontSize:11, color:T.t3, lineHeight:1.8 }}>
-          Create a tab named HRLeads in your Google Sheet with these columns: name, contact, business, type, area, address, telecaller, remarks. HR can enter numbers in any format: +91 98765 43210, 091-9876543210, 9876543210 — all normalized automatically.
+      <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12, padding:12, marginTop:4 }}>
+        <div style={{ fontSize:11, color:T.accent, fontWeight:700, marginBottom:6 }}>Setup Guide</div>
+        <div style={{ fontSize:11, color:T.t3, lineHeight:1.7 }}>
+          Google Sheet tab name: HRLeads. Column A header: contact. HR enters one number per row in any format — +91 98765 43210, 091-9876543210, 9876543210 etc. Telecaller sees new numbers here and taps Fill and Add to enter details and push to CRM pipeline.
         </div>
       </div>
     </div>
   );
 }
+
 
 function Leads() {
   const [leads, setLeads, leadsSyncStatus] = useSheetSynced("leads", "leads", INITIAL_LEADS);

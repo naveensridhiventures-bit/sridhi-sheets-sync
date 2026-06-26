@@ -22,7 +22,7 @@ TAB_CONFIG = {
     "samples":         {"tab": "Samples",          "headers": ["id","customer","leadId","qty","unit","type","date","exec","deliveryCost","productionCost","status","feedback","converted"]},
     "expenses":        {"tab": "Expenses",         "headers": ["id","category","amount","date","type","subtype"]},
     "repeatCustomers": {"tab": "RepeatCustomers",  "headers": ["id","name","area","contact","product","qty","frequency","lastOrder","nextDue","status","revenue"]},
-    "hrLeads": {"tab": "HRLeads", "headers": ["name","contact","business","type","area","address","telecaller","remarks"]},
+    "hrLeads": {"tab": "HRLeads", "headers": ["contact"]},
 }
 
 _cache = {}
