@@ -1947,7 +1947,15 @@ export default function App() {
             </button>
           ))}
         </div>
-        <div style={{ position:"relative", zIndex:1, marginTop:32, fontSize:11, color:T.t4, fontWeight:500 }}>Sridhi Ventures BOS v3.0</div>
+        {installPrompt && (
+          <button onClick={handleInstall}
+            style={{ position:"relative", zIndex:1, marginTop:16, background:"#25D366", border:"none",
+              borderRadius:14, color:"white", padding:"12px 28px", fontSize:14, fontWeight:800,
+              cursor:"pointer", fontFamily:FONT, display:"flex", alignItems:"center", gap:8 }}>
+            📲 Install App on This Device
+          </button>
+        )}
+        <div style={{ position:"relative", zIndex:1, marginTop:16, fontSize:11, color:T.t4, fontWeight:500 }}>Sridhi Ventures BOS v3.0</div>
       </div>
     );
   }
@@ -1988,6 +1996,13 @@ export default function App() {
           <div style={{ fontSize:10, color:T.t3, marginTop:1, fontWeight:500, letterSpacing:"0.02em", textTransform:"uppercase" }}>{tabLabel[activeTab]}</div>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          {installPrompt && (
+            <button onClick={handleInstall}
+              style={{ background:"#25D366", border:"none", borderRadius:8, color:"white",
+                padding:"4px 10px", fontSize:11, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
+              📲 Install
+            </button>
+          )}
           <div style={{ background:T.accentSub, border:`1px solid ${T.accentGlow}`, borderRadius:8, padding:"4px 10px", fontSize:11, fontWeight:700, color:T.accent }}>{role}</div>
           <button onClick={() => setRole(null)} style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, color:T.t3, padding:"4px 10px", fontSize:11, cursor:"pointer", fontFamily:FONT, fontWeight:600 }}>Exit</button>
         </div>
