@@ -39,21 +39,21 @@ const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const INITIAL_LEADS = [];
 
 const PIPELINE_STAGES = [
-  { id:"New Lead",               color:T.t3,      count:23 },
-  { id:"Contacted",              color:T.sky,     count:18 },
-  { id:"Interested",             color:T.indigo,  count:14 },
-  { id:"Callback Requested",     color:T.amber,   count:9  },
-  { id:"Sample Requested",       color:T.orange,  count:11 },
-  { id:"Assigned to Field Sales",color:"#FC8181", count:7  },
-  { id:"Sample Delivered",       color:T.emerald, count:8  },
-  { id:"Feedback Pending",       color:T.sky,     count:6  },
-  { id:"Positive Feedback",      color:T.emerald, count:12 },
-  { id:"Negotiation",            color:T.amber,   count:5  },
-  { id:"Order Received",         color:T.accent,  count:19 },
-  { id:"Repeat Order Follow-up", color:T.indigo,  count:34 },
-  { id:"Active Customer",        color:T.emerald, count:87 },
-  { id:"Lost Customer",          color:T.rose,    count:21 },
-  { id:"Invalid Number",         color:T.t3,      count:8  },
+  { id:"New Lead",               color:T.t3,      count:0 },
+  { id:"Contacted",              color:T.sky,     count:0 },
+  { id:"Interested",             color:T.indigo,  count:0 },
+  { id:"Callback Requested",     color:T.amber,   count:0  },
+  { id:"Sample Requested",       color:T.orange,  count:0 },
+  { id:"Assigned to Field Sales",color:"#FC8181", count:0  },
+  { id:"Sample Delivered",       color:T.emerald, count:0  },
+  { id:"Feedback Pending",       color:T.sky,     count:0  },
+  { id:"Positive Feedback",      color:T.emerald, count:0 },
+  { id:"Negotiation",            color:T.amber,   count:0  },
+  { id:"Order Received",         color:T.accent,  count:0 },
+  { id:"Repeat Order Follow-up", color:T.indigo,  count:0 },
+  { id:"Active Customer",        color:T.emerald, count:0 },
+  { id:"Lost Customer",          color:T.rose,    count:0 },
+  { id:"Invalid Number",         color:T.t3,      count:0  },
 ];
 
 const INITIAL_SAMPLES = [
@@ -72,30 +72,11 @@ const FIELD_TASKS = [
 ];
 
 
-const TEAM_DATA = [
-  { name:"Priya S.",  role:"Telecaller",  calls:47, connected:38, followups:22, conversions:12, samples:8, score:94, color:T.accent  },
-  { name:"Kavya M.",  role:"Telecaller",  calls:43, connected:35, followups:20, conversions:11, samples:7, score:89, color:T.indigo  },
-  { name:"Ravi K.",   role:"Telecaller",  calls:39, connected:31, followups:17, conversions:9,  samples:6, score:82, color:T.amber   },
-  { name:"Arjun P.",  role:"Field Sales", calls:0,  connected:0,  visits:14,    orders:8,       revenue:48000, samples:5, score:91, color:T.emerald },
-  { name:"Suresh R.", role:"Field Sales", calls:0,  connected:0,  visits:11,    orders:6,       revenue:38000, samples:4, score:78, color:T.sky     },
-];
+const TEAM_DATA = [];
 
-const MARKETING_SOURCES = [
-  { source:"Facebook",   spend:12500, leads:78, converted:18, color:"#1877F2" },
-  { source:"Instagram",  spend:5000,  leads:42, converted:11, color:"#E1306C" },
-  { source:"WhatsApp",   spend:800,   leads:34, converted:9,  color:"#25D366" },
-  { source:"Google",     spend:0,     leads:15, converted:3,  color:"#4285F4" },
-  { source:"Referral",   spend:0,     leads:28, converted:12, color:T.accent  },
-  { source:"Field Sales",spend:0,     leads:19, converted:10, color:T.indigo  },
-  { source:"Telecalling",spend:0,     leads:58, converted:21, color:T.amber   },
-];
+const MARKETING_SOURCES = [];
 
-const META_CAMPAIGNS = [
-  { id:"C001", name:"Dosa Batter — Restaurants BLR", platform:"Facebook",  status:"Active", objective:"Lead Gen", budget:500, spend:8420,  impressions:142300, reach:89400, clicks:2180, leads:47, cpm:59.2, cpc:3.86, cpl:179, startDate:"Jun 10", color:"#1877F2" },
-  { id:"C002", name:"Idli Batter — Mess Owners IG",  platform:"Instagram", status:"Active", objective:"Lead Gen", budget:300, spend:4080,  impressions:78600,  reach:51200, clicks:1340, leads:31, cpm:51.9, cpc:3.04, cpl:132, startDate:"Jun 14", color:"#E1306C" },
-  { id:"C003", name:"Trial Offer — Cloud Kitchens",  platform:"Facebook",  status:"Paused", objective:"Conv.",    budget:200, spend:2200,  impressions:38000,  reach:24100, clicks:490,  leads:12, cpm:57.9, cpc:4.49, cpl:183, startDate:"Jun 5",  color:"#1877F2" },
-  { id:"C004", name:"WhatsApp Lead — Hotels",        platform:"WhatsApp",  status:"Active", objective:"Messages", budget:100, spend:800,   impressions:21000,  reach:14800, clicks:680,  leads:18, cpm:38.1, cpc:1.18, cpl:44,  startDate:"Jun 18", color:"#25D366" },
-];
+const META_CAMPAIGNS = [];
 
 // ─── UTILITIES ────────────────────────────────────────────────────────────
 function useAnimatedCounter(target, duration = 1200) {
@@ -388,7 +369,7 @@ function Stars({ value, onChange, max=5 }) {
 function Dashboard() {
   const salesData = [
     { label:"Jan", val:980 }, { label:"Feb", val:1050 }, { label:"Mar", val:1120 },
-    { label:"Apr", val:1280 }, { label:"May", val:1200 }, { label:"Jun", val:1650 },
+    { label:"Apr", val:0 }, { label:"May", val:0 }, { label:"Jun", val:0 },
   ];
   const expSegs = [
     { label:"Marketing", value:20500, color:T.indigo },
@@ -403,11 +384,11 @@ function Dashboard() {
 
       {/* KPIs */}
       <div style={{ display:"flex", flexWrap:"wrap", gap:10 }}>
-        <KPI label="Sales this month" value={1650}   unit="KG" change={37.5} color={T.accent}  icon="📦" />
-        <KPI label="Revenue"          value={198000}  unit="₹"  change={22.3} color={T.emerald} icon="💰" />
-        <KPI label="Active customers" value={87}                change={8.5}  color={T.indigo}  icon="🏪" />
-        <KPI label="Leads this month" value={274}               change={14.2} color={T.amber}   icon="📋" />
-        <KPI label="Conversion"       value="34%"               change={5.1}  color={T.accent}  icon="🎯" />
+        <KPI label="Sales this month" value={0}   unit="KG" change={0} color={T.accent}  icon="📦" />
+        <KPI label="Revenue"          value={0}  unit="₹"  change={0} color={T.emerald} icon="💰" />
+        <KPI label="Active customers" value={0}                change={0}  color={T.indigo}  icon="🏪" />
+        <KPI label="Leads this month" value={0}               change={0} color={T.amber}   icon="📋" />
+        <KPI label="Conversion"       value="0%"               change={0}  color={T.accent}  icon="🎯" />
         <KPI label="Samples sent"     value={112}    unit="KG"  change={-3.2} color={T.orange}  icon="🧪" />
         <KPI label="Ad spend"         value={20500}  unit="₹"  change={12}   color={T.rose}    icon="📢" />
         <KPI label="Est. profit"      value={54000}  unit="₹"  change={18.7} color={T.emerald} icon="📈" />
@@ -986,8 +967,8 @@ function RepeatOrders() {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
       <div style={{ display:"flex", flexWrap:"wrap", gap:10 }}>
-        <KPI label="Active customers" value={87}      color={T.accent}  icon="🏪" />
-        <KPI label="Monthly revenue"  value={198000} unit="₹" color={T.emerald} icon="💰" />
+        <KPI label="Active customers" value={0}      color={T.accent}  icon="🏪" />
+        <KPI label="Monthly revenue"  value={0} unit="₹" color={T.emerald} icon="💰" />
         <KPI label="Due today"        value={grouped["Due Today"].length} color={T.rose} icon="⚠️" />
         <KPI label="Avg order"        value="28 KG"  color={T.amber}   icon="📦" />
       </div>
