@@ -1855,10 +1855,55 @@ export default function App() {
   const [role, setRole] = useState(null);
   const [showMore, setShowMore] = useState(false);
   const contentRef = useRef(null);
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [showInstall, setShowInstall] = useState(false);
+
+  useEffect(() => {
+    const handler = e => { e.preventDefault(); setInstallPrompt(e); setShowInstall(true); };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    setShowInstall(false);
+    setInstallPrompt(null);
+  };
 
   useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; }, [activeTab]);
 
   const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant" };
+
+  // ── INSTALL BANNER ──
+  const InstallBanner = () => showInstall ? (
+    <div style={{
+      position:"fixed", bottom:90, left:"50%", transform:"translateX(-50%)",
+      width:"calc(100% - 32px)", maxWidth:448, zIndex:999,
+      background:"linear-gradient(135deg, #0F1C33, #132038)",
+      border:`1px solid ${T.accentGlow}`, borderRadius:18,
+      padding:"14px 16px", display:"flex", alignItems:"center", gap:12,
+      boxShadow:`0 8px 32px rgba(0,201,167,0.2)`,
+    }}>
+      <div style={{ width:42, height:42, borderRadius:12, background:T.accentSub,
+        border:`1px solid ${T.accentGlow}`, display:"flex", alignItems:"center",
+        justifyContent:"center", fontSize:22, flexShrink:0 }}>⚡</div>
+      <div style={{ flex:1 }}>
+        <div style={{ fontSize:13, fontWeight:800, color:T.t1 }}>Install Sridhi BOS</div>
+        <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>Add to home screen for quick access</div>
+      </div>
+      <div style={{ display:"flex", gap:6 }}>
+        <button onClick={() => setShowInstall(false)}
+          style={{ background:"transparent", border:`1px solid ${T.border}`, borderRadius:8,
+            color:T.t3, padding:"6px 10px", fontSize:11, cursor:"pointer", fontFamily:FONT }}>Later</button>
+        <button onClick={handleInstall}
+          style={{ background:T.accent, border:"none", borderRadius:8,
+            color:"#060B16", padding:"6px 12px", fontSize:11, fontWeight:800,
+            cursor:"pointer", fontFamily:FONT }}>Install</button>
+      </div>
+    </div>
+  ) : null;
 
   // ── LOGIN ──
   if (!role) {
@@ -1973,6 +2018,8 @@ export default function App() {
           );
         })}
       </div>
+
+      <InstallBanner />
 
       {/* More menu */}
       <Sheet open={showMore} onClose={() => setShowMore(false)} title="All Modules">
