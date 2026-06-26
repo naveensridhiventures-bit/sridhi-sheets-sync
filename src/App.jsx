@@ -1566,222 +1566,203 @@ const PIPELINE_STAGE_LIST = [
 ];
 
 const DEFAULT_TEMPLATES = [
-  { id:1, name:"Introduction", stage:"New Lead", message:"Hi {customer_name}, I'm calling from Sridhi Ventures, Bengaluru. We supply fresh dosa & idli batter to restaurants. Would you be interested in a free 3 KG trial? 🙏" },
-  { id:2, name:"Sample Follow-up", stage:"Sample Requested", message:"Hello {customer_name} ji, this is Sridhi Ventures. Your {product} sample is ready! Our executive {executive} will deliver it to {address} today. Please confirm your availability 🙏" },
-  { id:3, name:"Feedback Request", stage:"Sample Delivered", message:"Namaste {customer_name} ji! Hope you enjoyed our {product} sample. We'd love your feedback. Did it meet your quality expectations? We can offer you {qty} KG/week at competitive prices 😊" },
-  { id:4, name:"Order Confirmation", stage:"Order Received", message:"Thank you {customer_name} ji! 🎉 Your order of {qty} KG {product} is confirmed. Our team will deliver it fresh tomorrow morning. Sridhi Ventures is happy to serve you!" },
-  { id:5, name:"Reorder Reminder", stage:"Repeat Order Follow-up", message:"Hello {customer_name} ji, Sridhi Ventures here! Your regular {product} order is due. Shall we arrange {qty} KG delivery for you? Reply YES to confirm 🙏" },
+  { id:1, name:"Introduction", stage:"New Lead", message:"Hi {customer_name}, I\'m calling from Sridhi Ventures, Bengaluru. We supply fresh dosa & idli batter to restaurants. Would you be interested in a free 3 KG trial? 🙏" },
+  { id:2, name:"Sample Follow-up", stage:"Sample Requested", message:"Hello {customer_name} ji, your {product} sample is ready! Our executive {executive} will deliver it to {address} today. Please confirm your availability 🙏" },
+  { id:3, name:"Feedback Request", stage:"Sample Delivered", message:"Namaste {customer_name} ji! Hope you enjoyed our {product} sample. Did it meet your quality expectations? We can offer {qty} KG/week at great prices 😊" },
+  { id:4, name:"Order Confirmation", stage:"Order Received", message:"Thank you {customer_name} ji! 🎉 Your order of {qty} KG {product} is confirmed. We will deliver fresh tomorrow morning. Sridhi Ventures!" },
+  { id:5, name:"Reorder Reminder", stage:"Repeat Order Follow-up", message:"Hello {customer_name} ji, Sridhi Ventures here! Your regular {product} order is due. Shall we arrange {qty} KG delivery? Reply YES to confirm 🙏" },
 ];
 
-const VARIABLES = ["{customer_name}","{product}","{qty}","{address}","{executive}","{contact}","{area}","{stage}"];
+const WA_VARIABLES = ["{customer_name}","{product}","{qty}","{address}","{executive}","{contact}","{area}","{stage}"];
+
+function fillTemplate(msg, lead) {
+  if (!lead) return msg;
+  return msg
+    .replace(/{customer_name}/g, lead.name || "")
+    .replace(/{product}/g, lead.type || "Dosa Batter")
+    .replace(/{qty}/g, "10")
+    .replace(/{address}/g, lead.address || lead.area || "")
+    .replace(/{executive}/g, lead.telecaller || "")
+    .replace(/{contact}/g, lead.contact || "")
+    .replace(/{area}/g, lead.area || "")
+    .replace(/{stage}/g, lead.stage || "");
+}
+
+function sendWhatsApp(template, lead) {
+  const msg = fillTemplate(template.message, lead);
+  const phone = (lead.contact || "").replace(/[^0-9]/g,"");
+  const number = phone.startsWith("91") ? phone : "91" + phone;
+  window.open("https://wa.me/" + number + "?text=" + encodeURIComponent(msg), "_blank");
+}
+
+function loadWATemplates() {
+  try { const s = localStorage.getItem("wa_templates"); return s ? JSON.parse(s) : DEFAULT_TEMPLATES; } catch { return DEFAULT_TEMPLATES; }
+}
+function saveWATemplates(t) {
+  try { localStorage.setItem("wa_templates", JSON.stringify(t)); } catch {}
+}
+
+// ── Edit Form subcomponent ──
+function WAEditForm({ initial, onSave, onCancel }) {
+  const [form, setForm] = useState(initial || { name:"", stage:"New Lead", message:"" });
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+        <button onClick={onCancel}
+          style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:10, color:T.t2, padding:"6px 12px", fontSize:12, cursor:"pointer", fontFamily:FONT }}>← Back</button>
+        <div style={{ fontSize:14, fontWeight:700, color:T.t1 }}>{initial ? "Edit Template" : "New Template"}</div>
+      </div>
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:14, display:"flex", flexDirection:"column", gap:12 }}>
+        <div>
+          <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>TEMPLATE NAME</div>
+          <input value={form.name} onChange={e => setForm({...form, name:e.target.value})}
+            placeholder="e.g. Sample Follow-up"
+            style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
+        </div>
+        <div>
+          <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>PIPELINE STAGE</div>
+          <select value={form.stage} onChange={e => setForm({...form, stage:e.target.value})}
+            style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
+            {PIPELINE_STAGE_LIST.filter(s => s !== "All Stages").map(s => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+        <div>
+          <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>MESSAGE</div>
+          <textarea value={form.message} onChange={e => setForm({...form, message:e.target.value})}
+            rows={6} placeholder="Type your WhatsApp message..."
+            style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box", resize:"vertical" }} />
+        </div>
+        <div>
+          <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>INSERT VARIABLE</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {WA_VARIABLES.map(v => (
+              <button key={v} onClick={() => setForm({...form, message: form.message + v})}
+                style={{ background:T.accentSub, border:`1px solid ${T.accentGlow}`, borderRadius:8,
+                  color:T.accent, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:FONT }}>
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+        {form.message && (
+          <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, padding:10 }}>
+            <div style={{ fontSize:10, color:T.accent, fontWeight:700, marginBottom:4 }}>PREVIEW</div>
+            <div style={{ fontSize:12, color:T.t2, lineHeight:1.6 }}>{form.message}</div>
+          </div>
+        )}
+      </div>
+      <button onClick={() => onSave(form)} disabled={!form.name || !form.message}
+        style={{ background: form.name && form.message ? T.accent : T.border, border:"none", borderRadius:14,
+          color: form.name && form.message ? "#060B16" : T.t3, padding:"14px", fontSize:14, fontWeight:800,
+          cursor: form.name && form.message ? "pointer" : "default", fontFamily:FONT }}>
+        Save Template
+      </button>
+    </div>
+  );
+}
+
+// ── Send View subcomponent ──
+function WASendView({ template, leads, onBack }) {
+  const [selectedLead, setSelectedLead] = useState(null);
+  const [search, setSearch] = useState("");
+  const filtered = leads.filter(l =>
+    (template.stage === "All Stages" || l.stage === template.stage) &&
+    (search === "" || (l.name||"").toLowerCase().includes(search.toLowerCase()))
+  );
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+        <button onClick={onBack}
+          style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:10, color:T.t2, padding:"6px 12px", fontSize:12, cursor:"pointer", fontFamily:FONT }}>← Back</button>
+        <div style={{ fontSize:14, fontWeight:700, color:T.t1 }}>Send: {template.name}</div>
+      </div>
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:14 }}>
+        <div style={{ fontSize:11, color:T.accent, fontWeight:700, marginBottom:8 }}>MESSAGE PREVIEW</div>
+        <div style={{ fontSize:12, color:T.t2, lineHeight:1.6, whiteSpace:"pre-wrap" }}>
+          {selectedLead ? fillTemplate(template.message, selectedLead) : template.message}
+        </div>
+      </div>
+      <div style={{ fontSize:11, color:T.t3, fontWeight:700 }}>SELECT LEAD TO SEND</div>
+      <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search lead name..."
+        style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
+      <div style={{ display:"flex", flexDirection:"column", gap:8, maxHeight:300, overflowY:"auto" }}>
+        {filtered.map(lead => (
+          <div key={lead.id} onClick={() => setSelectedLead(lead)}
+            style={{ background: selectedLead?.id === lead.id ? T.accentSub : T.card,
+              border:`1px solid ${selectedLead?.id === lead.id ? T.accent : T.border}`,
+              borderRadius:12, padding:"10px 14px", cursor:"pointer" }}>
+            <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{lead.name}</div>
+            <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>{lead.stage} · {lead.contact}</div>
+          </div>
+        ))}
+        {filtered.length === 0 && <div style={{ textAlign:"center", color:T.t3, fontSize:12, padding:20 }}>No leads found</div>}
+      </div>
+      {selectedLead && (
+        <button onClick={() => sendWhatsApp(template, selectedLead)}
+          style={{ background:"#25D366", border:"none", borderRadius:14, color:"white",
+            padding:"14px", fontSize:14, fontWeight:800, cursor:"pointer", fontFamily:FONT,
+            display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+          📲 Open WhatsApp & Send
+        </button>
+      )}
+    </div>
+  );
+}
 
 function WhatsAppTemplates() {
-  const [templates, setTemplates] = useLocalStorage("wa_templates", DEFAULT_TEMPLATES);
+  const [templates, setTemplates] = useState(loadWATemplates);
   const [leads] = useSheetSynced("leads","leads", []);
-  const [view, setView] = useState("list"); // list | edit | send
+  const [view, setView] = useState("list");
   const [editing, setEditing] = useState(null);
   const [sending, setSending] = useState(null);
-  const [selectedLead, setSelectedLead] = useState(null);
   const [filterStage, setFilterStage] = useState("All Stages");
   const [search, setSearch] = useState("");
-  const [preview, setPreview] = useState("");
 
-  function useLocalStorage(key, init) {
-    const [val, setVal] = useState(() => {
-      try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : init; } catch { return init; }
-    });
-    const set = v => { setVal(v); try { localStorage.setItem(key, JSON.stringify(v)); } catch {} };
-    return [val, set];
-  }
+  function updateTemplates(t) { setTemplates(t); saveWATemplates(t); }
 
-  function fillTemplate(msg, lead) {
-    if (!lead) return msg;
-    return msg
-      .replace(/{customer_name}/g, lead.name || "")
-      .replace(/{product}/g, lead.type || "Dosa Batter")
-      .replace(/{qty}/g, "10")
-      .replace(/{address}/g, lead.address || lead.area || "")
-      .replace(/{executive}/g, lead.telecaller || "")
-      .replace(/{contact}/g, lead.contact || "")
-      .replace(/{area}/g, lead.area || "")
-      .replace(/{stage}/g, lead.stage || "");
-  }
-
-  function sendWhatsApp(template, lead) {
-    const msg = fillTemplate(template.message, lead);
-    const phone = (lead.contact || "").replace(/[^0-9]/g,"");
-    const number = phone.startsWith("91") ? phone : "91" + phone;
-    const url = "https://wa.me/" + number + "?text=" + encodeURIComponent(msg);
-    window.open(url, "_blank");
-  }
-
-  function saveTemplate(t) {
-    if (t.id) {
-      saveTemplates(templates.map(x => x.id === t.id ? t : x));
+  function handleSave(form) {
+    if (form.id) {
+      updateTemplates(templates.map(x => x.id === form.id ? form : x));
     } else {
-      saveTemplates([...templates, { ...t, id: Date.now() }]);
+      updateTemplates([...templates, { ...form, id: Date.now() }]);
     }
-    setView("list");
-    setEditing(null);
+    setView("list"); setEditing(null);
   }
 
-  function deleteTemplate(id) {
-    saveTemplates(templates.filter(t => t.id !== id));
-  }
+  function deleteTemplate(id) { updateTemplates(templates.filter(t => t.id !== id)); }
+
+  if (view === "edit") return <WAEditForm initial={editing} onSave={handleSave} onCancel={() => { setView("list"); setEditing(null); }} />;
+  if (view === "send" && sending) return <WASendView template={sending} leads={leads} onBack={() => { setView("list"); setSending(null); }} />;
 
   const filtered = templates.filter(t =>
     (filterStage === "All Stages" || t.stage === filterStage) &&
     (search === "" || t.name.toLowerCase().includes(search.toLowerCase()))
   );
 
-  // ── SEND VIEW ──
-  if (view === "send" && sending) {
-    const filteredLeads = leads.filter(l =>
-      sending.stage === "All Stages" || l.stage === sending.stage
-    );
-    return (
-      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-          <button onClick={() => { setView("list"); setSending(null); setSelectedLead(null); }}
-            style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:10, color:T.t2, padding:"6px 12px", fontSize:12, cursor:"pointer", fontFamily:FONT }}>← Back</button>
-          <div style={{ fontSize:14, fontWeight:700, color:T.t1 }}>Send: {sending.name}</div>
-        </div>
-
-        <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:14 }}>
-          <div style={{ fontSize:11, color:T.accent, fontWeight:700, marginBottom:8 }}>MESSAGE PREVIEW</div>
-          <div style={{ fontSize:12, color:T.t2, lineHeight:1.6, whiteSpace:"pre-wrap" }}>
-            {selectedLead ? fillTemplate(sending.message, selectedLead) : sending.message}
-          </div>
-        </div>
-
-        <div style={{ fontSize:11, color:T.t3, fontWeight:700, marginBottom:4 }}>SELECT LEAD TO SEND</div>
-        <input value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="Search lead name..."
-          style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
-
-        <div style={{ display:"flex", flexDirection:"column", gap:8, maxHeight:360, overflowY:"auto" }}>
-          {filteredLeads.filter(l => l.name?.toLowerCase().includes(search.toLowerCase()) || search === "").map(lead => (
-            <div key={lead.id} onClick={() => setSelectedLead(lead)}
-              style={{ background: selectedLead?.id === lead.id ? T.accentSub : T.card,
-                border:`1px solid ${selectedLead?.id === lead.id ? T.accent : T.border}`,
-                borderRadius:12, padding:"10px 14px", cursor:"pointer" }}>
-              <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{lead.name}</div>
-              <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>{lead.stage} · {lead.contact}</div>
-            </div>
-          ))}
-          {filteredLeads.length === 0 && (
-            <div style={{ textAlign:"center", color:T.t3, fontSize:12, padding:20 }}>No leads match this template stage</div>
-          )}
-        </div>
-
-        {selectedLead && (
-          <button onClick={() => sendWhatsApp(sending, selectedLead)}
-            style={{ background:"#25D366", border:"none", borderRadius:14, color:"white",
-              padding:"14px", fontSize:14, fontWeight:800, cursor:"pointer", fontFamily:FONT,
-              display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
-            📲 Open WhatsApp & Send
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  // ── EDIT VIEW ──
-  if (view === "edit") {
-    const t = editing || { name:"", stage:"New Lead", message:"" };
-    const [form, setForm] = useState(t);
-    return (
-      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-          <button onClick={() => { setView("list"); setEditing(null); }}
-            style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:10, color:T.t2, padding:"6px 12px", fontSize:12, cursor:"pointer", fontFamily:FONT }}>← Back</button>
-          <div style={{ fontSize:14, fontWeight:700, color:T.t1 }}>{editing ? "Edit Template" : "New Template"}</div>
-        </div>
-
-        <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:14, display:"flex", flexDirection:"column", gap:12 }}>
-          <div>
-            <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>TEMPLATE NAME</div>
-            <input value={form.name} onChange={e => setForm({...form, name:e.target.value})}
-              placeholder="e.g. Sample Follow-up"
-              style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
-          </div>
-          <div>
-            <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>PIPELINE STAGE</div>
-            <select value={form.stage} onChange={e => setForm({...form, stage:e.target.value})}
-              style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
-              {PIPELINE_STAGE_LIST.filter(s => s !== "All Stages").map(s => <option key={s}>{s}</option>)}
-            </select>
-          </div>
-          <div>
-            <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>MESSAGE</div>
-            <textarea value={form.message} onChange={e => setForm({...form, message:e.target.value})}
-              rows={6} placeholder="Type your WhatsApp message here..."
-              style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box", resize:"vertical" }} />
-          </div>
-          <div>
-            <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>INSERT VARIABLE</div>
-            <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
-              {VARIABLES.map(v => (
-                <button key={v} onClick={() => setForm({...form, message: form.message + v})}
-                  style={{ background:T.accentSub, border:`1px solid ${T.accentGlow}`, borderRadius:8,
-                    color:T.accent, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:FONT }}>
-                  {v}
-                </button>
-              ))}
-            </div>
-          </div>
-          {form.message && (
-            <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, padding:10 }}>
-              <div style={{ fontSize:10, color:T.accent, fontWeight:700, marginBottom:4 }}>PREVIEW</div>
-              <div style={{ fontSize:12, color:T.t2, lineHeight:1.6 }}>{form.message}</div>
-            </div>
-          )}
-        </div>
-
-        <button onClick={() => saveTemplate(form)}
-          disabled={!form.name || !form.message}
-          style={{ background: form.name && form.message ? T.accent : T.border, border:"none", borderRadius:14,
-            color: form.name && form.message ? "#060B16" : T.t3, padding:"14px", fontSize:14, fontWeight:800,
-            cursor: form.name && form.message ? "pointer" : "default", fontFamily:FONT }}>
-          Save Template
-        </button>
-      </div>
-    );
-  }
-
-  // ── LIST VIEW ──
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div>
           <div style={{ fontSize:16, fontWeight:800, color:T.t1 }}>WA Templates</div>
-          <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>{templates.length} templates</div>
+          <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>{templates.length} templates · tap to send</div>
         </div>
         <button onClick={() => { setEditing(null); setView("edit"); }}
-          style={{ background:T.accent, border:"none", borderRadius:12, color:"#060B16",
-            padding:"8px 16px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
+          style={{ background:T.accent, border:"none", borderRadius:12, color:"#060B16", padding:"8px 16px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
           + New
         </button>
       </div>
-
-      <input value={search} onChange={e => setSearch(e.target.value)}
-        placeholder="Search templates..."
-        style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1,
-          padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
-
+      <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search templates..."
+        style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
       <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:4 }}>
         {["All Stages","New Lead","Sample Requested","Order Received","Active Customer"].map(s => (
           <button key={s} onClick={() => setFilterStage(s)}
-            style={{ background: filterStage===s ? T.accent : T.card,
-              border:`1px solid ${filterStage===s ? T.accent : T.border}`,
-              borderRadius:20, color: filterStage===s ? "#060B16" : T.t2,
-              padding:"5px 12px", fontSize:11, fontWeight:700, cursor:"pointer",
-              whiteSpace:"nowrap", flexShrink:0, fontFamily:FONT }}>
+            style={{ background: filterStage===s ? T.accent : T.card, border:`1px solid ${filterStage===s ? T.accent : T.border}`,
+              borderRadius:20, color: filterStage===s ? "#060B16" : T.t2, padding:"5px 12px", fontSize:11,
+              fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0, fontFamily:FONT }}>
             {s}
           </button>
         ))}
       </div>
-
       <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
         {filtered.map(t => (
           <div key={t.id} style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:14 }}>
@@ -1792,26 +1773,20 @@ function WhatsAppTemplates() {
               </div>
               <div style={{ display:"flex", gap:6 }}>
                 <button onClick={() => { setEditing(t); setView("edit"); }}
-                  style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8,
-                    color:T.t2, padding:"4px 10px", fontSize:11, cursor:"pointer", fontFamily:FONT }}>Edit</button>
+                  style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.t2, padding:"4px 10px", fontSize:11, cursor:"pointer", fontFamily:FONT }}>Edit</button>
                 <button onClick={() => deleteTemplate(t.id)}
-                  style={{ background:"rgba(244,63,94,0.1)", border:`1px solid rgba(244,63,94,0.3)`,
-                    borderRadius:8, color:T.rose, padding:"4px 10px", fontSize:11, cursor:"pointer", fontFamily:FONT }}>Del</button>
+                  style={{ background:"rgba(244,63,94,0.1)", border:"1px solid rgba(244,63,94,0.3)", borderRadius:8, color:T.rose, padding:"4px 10px", fontSize:11, cursor:"pointer", fontFamily:FONT }}>Del</button>
               </div>
             </div>
-            <div style={{ fontSize:12, color:T.t3, lineHeight:1.5, marginBottom:10,
-              whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{t.message}</div>
-            <button onClick={() => { setSending(t); setSelectedLead(null); setSearch(""); setView("send"); }}
-              style={{ background:"#25D366", border:"none", borderRadius:10, color:"white",
-                padding:"8px 16px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:FONT,
-                display:"flex", alignItems:"center", gap:6, width:"100%", justifyContent:"center" }}>
+            <div style={{ fontSize:12, color:T.t3, lineHeight:1.5, marginBottom:10, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{t.message}</div>
+            <button onClick={() => { setSending(t); setView("send"); }}
+              style={{ background:"#25D366", border:"none", borderRadius:10, color:"white", padding:"8px 16px",
+                fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:FONT, width:"100%", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
               📲 Send to Lead
             </button>
           </div>
         ))}
-        {filtered.length === 0 && (
-          <div style={{ textAlign:"center", color:T.t3, fontSize:13, padding:40 }}>No templates found</div>
-        )}
+        {filtered.length === 0 && <div style={{ textAlign:"center", color:T.t3, fontSize:13, padding:40 }}>No templates found</div>}
       </div>
     </div>
   );
