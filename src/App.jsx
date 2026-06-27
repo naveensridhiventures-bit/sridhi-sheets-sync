@@ -379,11 +379,20 @@ function ProspectFinder() {
   const [form, setForm] = useState({ name:"", business:"", type2:"Restaurant", area2:"", address:"", telecaller:"Thulasi", notes:"" });
 
   const AREAS = [
+    // Chennai
     "T Nagar, Chennai","Anna Nagar, Chennai","Adyar, Chennai","Velachery, Chennai",
     "Porur, Chennai","Tambaram, Chennai","Mylapore, Chennai","Nungambakkam, Chennai",
-    "Guindy, Chennai","Vadapalani, Chennai","Koramangala, Bengaluru","BTM Layout, Bengaluru",
-    "Indiranagar, Bengaluru","HSR Layout, Bengaluru","Whitefield, Bengaluru",
-    "JP Nagar, Bengaluru","Jayanagar, Bengaluru","Marathahalli, Bengaluru",
+    "Guindy, Chennai","Vadapalani, Chennai","Chromepet, Chennai","Perambur, Chennai",
+    "Kolathur, Chennai","Villivakkam, Chennai","Ambattur, Chennai","Avadi, Chennai",
+    "Sholinganallur, Chennai","OMR, Chennai","ECR, Chennai","Perungudi, Chennai",
+    "Royapuram, Chennai","Tondiarpet, Chennai","Egmore, Chennai","Kilpauk, Chennai",
+    "Chetpet, Chennai","Pattabiram, Chennai","Thiruvottiyur, Chennai",
+    "Madipakkam, Chennai","Pallikaranai, Chennai","Keelkattalai, Chennai",
+    "Nanganallur, Chennai","Alandur, Chennai","St Thomas Mount, Chennai",
+    // Bengaluru
+    "Koramangala, Bengaluru","BTM Layout, Bengaluru","Indiranagar, Bengaluru",
+    "HSR Layout, Bengaluru","Whitefield, Bengaluru","JP Nagar, Bengaluru",
+    "Jayanagar, Bengaluru","Marathahalli, Bengaluru","Rajajinagar, Bengaluru",
   ];
 
   const TYPES = [
@@ -566,7 +575,10 @@ function ProspectFinder() {
       )}
 
       {results.length > 0 && (
-        <div style={{ fontSize:11, color:T.t3, fontWeight:600 }}>{results.length} FOUND · {Object.keys(added).length} ADDED TO CRM</div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div style={{ fontSize:11, color:T.t3, fontWeight:600 }}>{results.length} PROSPECTS FOUND</div>
+          <div style={{ fontSize:11, color:T.accent, fontWeight:700 }}>{Object.keys(added).length} ADDED TO CRM</div>
+        </div>
       )}
 
       <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
@@ -581,7 +593,8 @@ function ProspectFinder() {
                   <div style={{ fontSize:11, color:T.t3, marginTop:3 }}>📍 {r.address}</div>
                   {r.phone
                     ? <div style={{ fontSize:12, color:T.accent, marginTop:3, fontWeight:600 }}>📞 {r.phone}</div>
-                    : <div style={{ fontSize:11, color:T.t3, marginTop:3 }}>📞 No number listed</div>}
+                    : <div style={{ fontSize:11, color:T.t3, marginTop:3 }}>📞 No number — search manually</div>}
+                  {r.website ? <div style={{ fontSize:10, color:T.sky, marginTop:2 }}>🌐 {r.website.replace("https://","").slice(0,30)}</div> : null}
                   <div style={{ fontSize:10, color:T.t3, marginTop:2, textTransform:"capitalize" }}>{r.type}</div>
                 </div>
                 <div style={{ display:"flex", flexDirection:"column", gap:6, marginLeft:8, flexShrink:0 }}>
