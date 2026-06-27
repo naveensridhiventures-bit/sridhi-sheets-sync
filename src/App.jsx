@@ -2412,6 +2412,10 @@ function Reports() {
 
 // ─── AI ASSISTANT ─────────────────────────────────────────────────────────
 function AIAssistant() {
+  const [leads] = useSheetSynced("leads","leads",[]);
+  const [samples] = useSheetSynced("samples","samples",[]);
+  const [expenses] = useSheetSynced("expenses","expenses",[]);
+  const [repeatCustomers] = useSheetSynced("repeatCustomers","repeatCustomers",[]);
   const [messages, setMessages] = useState([
     { role:"assistant", content:"Hi! I'm your Sridhi Ventures AI. I can analyze your sales data, write call scripts, identify follow-up priorities, and give business insights. What would you like to know?" }
   ]);
