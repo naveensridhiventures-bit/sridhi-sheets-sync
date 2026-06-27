@@ -1149,6 +1149,7 @@ function Leads() {
   const [showWAForLead, setShowWAForLead] = useState(null);
   const [deliveryDialog, setDeliveryDialog] = useState(null); // { lead, targetStage }
   const [porterAmt, setPorterAmt] = useState("");
+  const [kgQty, setKgQty] = useState("");
   const [groupMsg, setGroupMsg] = useState(null); // { lead, stage, method }
   const [newLead, setNewLead] = useState({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Thulasi" });
 
@@ -1172,6 +1173,7 @@ function Leads() {
     if ((stage === "Sample Requested" || stage === "Order Received") && lead) {
       setDeliveryDialog({ lead, targetStage: stage });
       setPorterAmt("");
+      setKgQty("");
     } else {
       setLeads(leads.map(l => l.id===id ? { ...l, stage, lastContact:"Today" } : l));
     }
@@ -1196,9 +1198,10 @@ function Leads() {
       };
       setExpenses([newExp, ...expenses]);
     }
-    setGroupMsg({ lead, targetStage, method });
+    setGroupMsg({ lead, targetStage, method, kgQty });
     setDeliveryDialog(null);
     setPorterAmt("");
+    setKgQty("");
   };
   const addLead = () => {
     if (!newLead.name || !newLead.contact) return;
@@ -1217,6 +1220,7 @@ function Leads() {
         "━━━━━━━━━━━━━━━━━━\n" +
         "👤 Customer: " + lead.name + "\n" +
         "📍 Area: " + (lead.area||"-") + "\n" +
+        (kgQty ? "⚖️ Quantity: " + kgQty + " KG\n" : "") +
         "🚚 Via: " + (method === "porter" ? "Porter" : "Company Vehicle") + "\n" +
         "🕐 Time: " + time + " · " + date + "\n" +
         "👩 Telecaller: " + (lead.telecaller||"Team") + "\n" +
@@ -1230,6 +1234,7 @@ function Leads() {
         "👤 Customer: " + lead.name + "\n" +
         "📍 Area: " + (lead.area||"-") + "\n" +
         "🏪 Business: " + (lead.business||lead.name) + "\n" +
+        (kgQty ? "⚖️ Quantity: " + kgQty + " KG\n" : "") +
         "🚚 Delivery: " + (method === "porter" ? "Porter" : "Company Vehicle") + "\n" +
         "🕐 Time: " + time + " · " + date + "\n" +
         "👩 Telecaller: " + (lead.telecaller||"Team") + "\n" +
@@ -1240,7 +1245,7 @@ function Leads() {
   }
 
   if (groupMsg) {
-    const { lead, targetStage, method } = groupMsg;
+    const { lead, targetStage, method, kgQty } = groupMsg;
     const defaultMsg = buildGroupMsg(lead, targetStage, method, "");
     const [editedMsg, setEditedMsg] = React.useState(defaultMsg);
     const GROUP_NUMBER = ""; // leave blank to open WhatsApp without number (user picks group)
@@ -1305,6 +1310,14 @@ function Leads() {
             Moving <b style={{color:T.t1}}>{lead.name}</b> → <b style={{color:T.accent}}>{targetStage}</b>
           </div>
 
+          <div style={{ marginBottom:14 }}>
+            <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>QUANTITY (KG)</div>
+            <input type="number" value={kgQty} onChange={e => setKgQty(e.target.value)}
+              placeholder="Enter KG e.g. 10"
+              style={{ background:T.surface, border:`1px solid ${T.accentGlow}`, borderRadius:10,
+                color:T.t1, padding:"10px 12px", fontSize:15, fontFamily:FONT,
+                outline:"none", width:"100%", boxSizing:"border-box", fontWeight:700 }} />
+          </div>
           <div style={{ fontSize:11, color:T.t3, fontWeight:700, marginBottom:12 }}>SELECT DELIVERY METHOD</div>
 
           <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
