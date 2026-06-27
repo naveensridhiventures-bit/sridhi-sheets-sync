@@ -2454,15 +2454,32 @@ function AIAssistant() {
     setInput("");
     setLoading(true);
     try {
+      const API_BASE = import.meta.env.VITE_API_BASE ?? "";
       const groqKey = import.meta.env.VITE_GROQ_API_KEY ?? "";
-      if (!groqKey) { setMessages(prev => [...prev, { role:"assistant", content:"Add VITE_GROQ_API_KEY to your .env.local file." }]); setLoading(false); return; }
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method:"POST",
-        headers:{ "Content-Type":"application/json", "Authorization":"Bearer " + groqKey },
-        body:JSON.stringify({ model:"llama-3.3-70b-versatile", max_tokens:1000, messages:[{ role:"system", content:CONTEXT }, ...[...messages,userMsg].map(m => ({ role:m.role, content:m.content }))] }),
-      });
-      const data = await res.json();
-      const text = data.choices?.[0]?.message?.content || "Sorry, couldn't get a response.";
+      let text = "";
+      // Try backend first, fallback to direct Groq
+      try {
+        const r = await fetch(API_BASE + "/api/ai", {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body:JSON.stringify({ system:CONTEXT, messages:[...messages,userMsg].map(m=>({role:m.role,content:m.content})) }),
+        });
+        if (r.ok) {
+          const d = await r.json();
+          text = d.content?.map(b=>b.text||"").join("") || d.reply || "";
+        }
+      } catch(e) {}
+      // Fallback: direct Groq
+      if (!text && groqKey) {
+        const r2 = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method:"POST",
+          headers:{ "Content-Type":"application/json", "Authorization":"Bearer " + groqKey },
+          body:JSON.stringify({ model:"llama-3.3-70b-versatile", max_tokens:1000, messages:[{ role:"system", content:CONTEXT }, ...[...messages,userMsg].map(m=>({role:m.role,content:m.content}))] }),
+        });
+        const d2 = await r2.json();
+        text = d2.choices?.[0]?.message?.content || "";
+      }
+      if (!text) text = "AI is not configured. Add ANTHROPIC_API_KEY or VITE_GROQ_API_KEY in Vercel dashboard.";
       setMessages(prev => [...prev, { role:"assistant", content:text }]);
     } catch {
       setMessages(prev => [...prev, { role:"assistant", content:"Connection error. Please check your network and try again." }]);

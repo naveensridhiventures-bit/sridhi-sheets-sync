@@ -201,3 +201,8 @@ class handler(BaseHTTPRequestHandler):
 
     def log_message(self, *_):
         pass
+
+
+# ── /api/prospects — proxy for OpenStreetMap search (avoids browser CORS) ───
+# Called from ProspectFinder component
+# GET /api/prospects?area=T+Nagar+Chennai&type=restaurant
