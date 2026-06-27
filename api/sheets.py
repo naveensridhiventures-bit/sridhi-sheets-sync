@@ -110,7 +110,11 @@ def _coerce(tab_key, row):
     return row
 
 def _decoerce_leads(lead):
+    import time as _time
     out = dict(lead)
+    # Assign a unique id if missing
+    if not out.get("id"):
+        out["id"] = str(int(_time.time() * 1000)) + "_" + str(abs(hash(out.get("contact","") + out.get("name",""))))[:6]
     remarks = out.get("remarks", [])
     out["remarks"] = " || ".join(remarks) if isinstance(remarks, list) else (remarks or "")
     return out

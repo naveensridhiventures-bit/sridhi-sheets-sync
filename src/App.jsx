@@ -1241,17 +1241,20 @@ function Leads() {
     const now = new Date();
     const stamp = now.toLocaleDateString("en-IN",{day:"2-digit",month:"short"}) + " " + now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",hour12:true});
     const remarkWithStamp = "[" + stamp + " · " + (role||"Team") + "] " + remark.trim();
-    setLeads(leads.map(l => l.id===id ? { ...l, remarks:[...(l.remarks||[]),remarkWithStamp], lastContact:"Today" } : l));
+    setLeads(leads.map(l => ((l.contact && l.contact===id) || l.id===id) ? { ...l, remarks:[...(l.remarks||[]),remarkWithStamp], lastContact:"Today" } : l));
     setRemark("");
   };
-  const updateStage = (id, stage) => {
-    const lead = leads.find(l => l.id === id);
+  const updateStage = (key, stage) => {
+    const lead = leads.find(l => (l.contact && l.contact===key) || l.id===key);
     if ((stage === "Sample Requested" || stage === "Order Received") && lead) {
       setDeliveryDialog({ lead, targetStage: stage });
       setPorterAmt("");
       setKgQty("");
     } else {
-      setLeads(leads.map(l => l.id===id ? { ...l, stage, lastContact:"Today" } : l));
+      setLeads(leads.map(l => {
+        const match = (l.contact && l.contact===key) || l.id===key;
+        return match ? { ...l, stage, lastContact:"Today" } : l;
+      }));
     }
   };
 
@@ -1394,7 +1397,7 @@ function Leads() {
   }
 
   if (selected) {
-    const lead = leads.find(l => l.id===selected);
+    const lead = leads.find(l => (l.contact && l.contact===selected) || l.id===selected);
     if (!lead) return null;
     return (
       <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
@@ -1445,7 +1448,7 @@ function Leads() {
               </select>
             </div>
             <Btn label="✓ Save Changes" full color={T.accent} onClick={() => {
-              setLeads(leads.map(l => l.id===lead.id ? { ...l, ...editForm } : l));
+              setLeads(leads.map(l => ((l.contact && l.contact===(lead.contact||lead.id)) || l.id===lead.id) ? { ...l, ...editForm } : l));
               setShowEdit(false);
             }} />
           </Card>
@@ -1495,7 +1498,7 @@ function Leads() {
           <Label>Update Stage</Label>
           <div style={{ display:"flex", flexWrap:"wrap", gap:7 }}>
             {PIPELINE_STAGES.map(s => (
-              <button key={s.id} onClick={() => updateStage(lead.id, s.id)}
+              <button key={s.id} onClick={() => updateStage(lead.contact || lead.id, s.id)}
                 style={{
                   padding:"5px 10px", borderRadius:7, cursor:"pointer", fontSize:10, fontWeight:700,
                   border:`1px solid ${lead.stage===s.id ? s.color : T.border}`,
@@ -1580,7 +1583,7 @@ function Leads() {
       </div>
 
       {filtered.map(lead => (
-        <div key={lead.id} onClick={() => setSelected(lead.id)}
+        <div key={lead.contact || lead.id} onClick={() => setSelected(lead.contact || lead.id)}
           style={{
             background:T.card, border:`1px solid ${T.border}`,
             borderRadius:16, padding:14, cursor:"pointer",
