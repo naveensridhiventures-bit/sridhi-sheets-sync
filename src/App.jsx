@@ -1319,79 +1319,19 @@ function Leads() {
     }
   }
 
-  if (groupMsg) {
-    return <GroupMsgDialog groupMsg={groupMsg} buildGroupMsg={buildGroupMsg} onClose={() => setGroupMsg(null)} />;
-  }
-  
-  if (false) { return (
-      <div style={{ padding:"0 0 80px" }}>
-        <div style={{ background:T.card, border:`1px solid ${T.accentGlow}`, borderRadius:18, padding:20, margin:"16px 0" }}>
-          <div style={{ fontSize:15, fontWeight:800, color:T.t1, marginBottom:4 }}>
-            {targetStage === "Sample Requested" ? "🧪 Share Sample Update" : "🎉 Share Order Update"}
-          </div>
-          <div style={{ fontSize:12, color:T.t3, marginBottom:16 }}>Send to Sridhi Ventures WhatsApp group</div>
-
-          <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>MESSAGE PREVIEW (tap to edit)</div>
-          <textarea
-            value={editedMsg}
-            onChange={e => setEditedMsg(e.target.value)}
-            rows={10}
-            style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12,
-              color:T.t1, padding:"12px", fontSize:13, fontFamily:FONT,
-              outline:"none", width:"100%", boxSizing:"border-box", resize:"vertical",
-              lineHeight:1.7 }}
-          />
-
-          <div style={{ display:"flex", gap:8, marginTop:12 }}>
-            <button onClick={() => setGroupMsg(null)}
-              style={{ flex:1, background:T.surface, border:`1px solid ${T.border}`, borderRadius:12,
-                color:T.t2, padding:"11px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:FONT }}>
-              Skip
-            </button>
-            <button onClick={() => {
-                navigator.clipboard.writeText(editedMsg).then(() => {
-                  alert("✅ Message copied! Now open WhatsApp → Batter sales and sample group → Paste → Send");
-                  setGroupMsg(null);
-                }).catch(() => {
-                  // Fallback for devices where clipboard API is blocked
-                  const ta = document.createElement("textarea");
-                  ta.value = editedMsg;
-                  document.body.appendChild(ta);
-                  ta.select();
-                  document.execCommand("copy");
-                  document.body.removeChild(ta);
-                  alert("✅ Message copied! Now open WhatsApp → Batter sales and sample group → Paste → Send");
-                  setGroupMsg(null);
-                });
-              }}
-              style={{ flex:2, background:"#25D366", border:"none", borderRadius:12,
-                color:"white", padding:"11px", fontSize:14, fontWeight:800,
-                cursor:"pointer", fontFamily:FONT, display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-              📋 Copy & Open WhatsApp
-            </button>
-          </div>
-          <div style={{ fontSize:11, color:T.amber, textAlign:"center", marginTop:8, fontWeight:600 }}>
-            👆 Tap to copy → Open WhatsApp → Open Batter group → Paste → Send
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Delivery method dialog ──
-  if (deliveryDialog) {
+  // ── Overlays (render on top of whatever view is active) ──
+  const renderDeliveryOverlay = () => {
+    if (!deliveryDialog) return null;
     const { lead, targetStage } = deliveryDialog;
-    const isPorter = porterAmt !== "";
     return (
-      <div style={{ padding:"0 0 80px" }}>
-        <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:18, padding:20, margin:"16px 0" }}>
+      <div style={{ position:"fixed", inset:0, background:"rgba(6,11,22,0.92)", zIndex:200, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+        <div style={{ background:T.card, borderRadius:"20px 20px 0 0", padding:20, width:"100%", maxWidth:480, maxHeight:"85vh", overflowY:"auto", paddingBottom:36 }}>
           <div style={{ fontSize:15, fontWeight:800, color:T.t1, marginBottom:4 }}>
             {targetStage === "Sample Requested" ? "🧪 Sample Delivery" : "📦 Order Delivery"}
           </div>
           <div style={{ fontSize:12, color:T.t3, marginBottom:20 }}>
             Moving <b style={{color:T.t1}}>{lead.name}</b> → <b style={{color:T.accent}}>{targetStage}</b>
           </div>
-
           <div style={{ marginBottom:14 }}>
             <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>QUANTITY (KG)</div>
             <input type="number" value={kgQty} onChange={e => setKgQty(e.target.value)}
@@ -1401,9 +1341,7 @@ function Leads() {
                 outline:"none", width:"100%", boxSizing:"border-box", fontWeight:700 }} />
           </div>
           <div style={{ fontSize:11, color:T.t3, fontWeight:700, marginBottom:12 }}>SELECT DELIVERY METHOD</div>
-
           <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-            {/* Porter option */}
             <div style={{ background:T.surface, border:`1px solid ${T.borderHi}`, borderRadius:14, padding:16 }}>
               <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
                 <div style={{ fontSize:24 }}>🛵</div>
@@ -1412,25 +1350,18 @@ function Leads() {
                   <div style={{ fontSize:11, color:T.t3 }}>3rd party delivery — cost logged as expense</div>
                 </div>
               </div>
-              <input
-                type="number"
-                value={porterAmt}
-                onChange={e => setPorterAmt(e.target.value)}
+              <input type="number" value={porterAmt} onChange={e => setPorterAmt(e.target.value)}
                 placeholder="Enter Porter cost (₹)"
                 style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:10,
                   color:T.t1, padding:"10px 12px", fontSize:14, fontFamily:FONT,
-                  outline:"none", width:"100%", boxSizing:"border-box", marginBottom:10 }}
-              />
-              <button onClick={() => confirmDelivery("porter")}
-                disabled={!porterAmt}
+                  outline:"none", width:"100%", boxSizing:"border-box", marginBottom:10 }} />
+              <button onClick={() => confirmDelivery("porter")} disabled={!porterAmt}
                 style={{ background: porterAmt ? T.amber : T.border, border:"none", borderRadius:12,
                   color: porterAmt ? "#060B16" : T.t3, padding:"12px", fontSize:13, fontWeight:800,
                   cursor: porterAmt ? "pointer" : "default", fontFamily:FONT, width:"100%" }}>
                 🛵 Confirm Porter — ₹{porterAmt || "0"} (logged to expenses)
               </button>
             </div>
-
-            {/* Company Vehicle option */}
             <div style={{ background:T.surface, border:`1px solid ${T.borderHi}`, borderRadius:14, padding:16 }}>
               <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
                 <div style={{ fontSize:24 }}>🚗</div>
@@ -1446,7 +1377,6 @@ function Leads() {
                 🚗 Confirm Company Vehicle
               </button>
             </div>
-
             <button onClick={() => setDeliveryDialog(null)}
               style={{ background:"transparent", border:`1px solid ${T.border}`, borderRadius:12,
                 color:T.t3, padding:"10px", fontSize:12, cursor:"pointer", fontFamily:FONT }}>
@@ -1456,6 +1386,10 @@ function Leads() {
         </div>
       </div>
     );
+  };
+
+  if (groupMsg) {
+    return <GroupMsgDialog groupMsg={groupMsg} buildGroupMsg={buildGroupMsg} onClose={() => setGroupMsg(null)} />;
   }
 
   if (selected) {
@@ -1604,6 +1538,7 @@ function Leads() {
             }} />
           <div style={{ marginTop:8 }}><Btn label="Save Remark" full onClick={() => addRemark(lead.id, lead.telecaller)} /></div>
         </Card>
+        {renderDeliveryOverlay()}
       </div>
     );
   }
@@ -1687,24 +1622,33 @@ function Leads() {
           <Btn label="Add Lead" full onClick={addLead} />
         </div>
       </Sheet>
+
+      {renderDeliveryOverlay()}
     </div>
   );
 }
 
 // ─── PIPELINE ─────────────────────────────────────────────────────────────
 function Pipeline() {
+  const [leads] = useSheetSynced("leads", "leads", INITIAL_LEADS);
   const [expanded, setExpanded] = useState(null);
-  const total = PIPELINE_STAGES.reduce((a,b) => a+b.count, 0);
+
+  // Build live stage counts from real leads
+  const stageCounts = {};
+  leads.forEach(l => { stageCounts[l.stage] = (stageCounts[l.stage]||0) + 1; });
+  const stages = PIPELINE_STAGES.map(s => ({ ...s, count: stageCounts[s.id]||0 }));
+  const total = leads.length;
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
       <Card accent={T.accent}>
         <Label sub={`${total} total leads across all stages`}>Pipeline Overview</Label>
-        <PipelineStrip stages={PIPELINE_STAGES} />
+        <PipelineStrip stages={stages} />
       </Card>
-      {PIPELINE_STAGES.map(stage => {
-        const pct = ((stage.count/total)*100).toFixed(1);
+      {stages.map(stage => {
+        const pct = total > 0 ? ((stage.count/total)*100).toFixed(1) : "0.0";
         const isOpen = expanded===stage.id;
-        const stageLeads = INITIAL_LEADS.filter(l => l.stage===stage.id);
+        const stageLeads = leads.filter(l => l.stage===stage.id);
         return (
           <div key={stage.id} style={{
             background: isOpen ? stage.color+"0D" : T.card,
@@ -1726,7 +1670,7 @@ function Pipeline() {
             <div style={{ height:2, background:T.border }}>
               <div style={{ width:`${pct}%`, height:"100%", background:stage.color }} />
             </div>
-            {isOpen && stageLeads.length>0 && (
+            {isOpen && stageLeads.length > 0 && (
               <div style={{ padding:"8px 16px 14px" }}>
                 {stageLeads.map(l => (
                   <div key={l.id} style={{
@@ -1736,15 +1680,21 @@ function Pipeline() {
                     <div>
                       <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{l.name}</div>
                       <div style={{ fontSize:10, color:T.t3, marginTop:2 }}>{l.area} · {l.telecaller}</div>
+                      {l.contact && (
+                        <div style={{ fontSize:10, color:T.accent, marginTop:2 }}>📞 {l.contact}</div>
+                      )}
                     </div>
-                    <Chip label={l.priority} color={getPriorityColor(l.priority)} />
+                    <div style={{ display:"flex", flexDirection:"column", gap:4, alignItems:"flex-end" }}>
+                      <Chip label={l.priority||"Medium"} color={getPriorityColor(l.priority||"Medium")} />
+                      <span style={{ fontSize:10, color:T.t3 }}>{l.lastContact||""}</span>
+                    </div>
                   </div>
                 ))}
-                {stageLeads.length<stage.count && (
-                  <div style={{ fontSize:11, color:T.t3, textAlign:"center", marginTop:8, fontStyle:"italic" }}>
-                    +{stage.count-stageLeads.length} more leads
-                  </div>
-                )}
+              </div>
+            )}
+            {isOpen && stageLeads.length === 0 && (
+              <div style={{ padding:"12px 16px", fontSize:12, color:T.t3, fontStyle:"italic" }}>
+                No leads in this stage
               </div>
             )}
           </div>
