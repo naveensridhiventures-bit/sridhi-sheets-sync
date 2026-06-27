@@ -1229,10 +1229,11 @@ function Leads() {
   const [newLead, setNewLead] = useState({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Thulasi" });
 
   const filtered = leads.filter(l =>
+    l && l.name && l.stage &&
     (filterStage==="All" || l.stage===filterStage) &&
     (l.name.toLowerCase().includes(search.toLowerCase()) ||
-     l.area.toLowerCase().includes(search.toLowerCase()) ||
-     l.contact.includes(search))
+     (l.area||"").toLowerCase().includes(search.toLowerCase()) ||
+     (l.contact||"").includes(search))
   );
 
   const addRemark = (id, role) => {
@@ -1630,8 +1631,11 @@ function Leads() {
 
 // ─── PIPELINE ─────────────────────────────────────────────────────────────
 function Pipeline() {
-  const [leads] = useSheetSynced("leads", "leads", INITIAL_LEADS);
+  const [allLeads] = useSheetSynced("leads", "leads", INITIAL_LEADS);
   const [expanded, setExpanded] = useState(null);
+
+  // Filter out blank rows from Google Sheet
+  const leads = (allLeads || []).filter(l => l && l.name && l.stage);
 
   // Build live stage counts from real leads
   const stageCounts = {};
