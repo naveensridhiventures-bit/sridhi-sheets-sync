@@ -1281,15 +1281,30 @@ function Leads() {
                 color:T.t2, padding:"11px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:FONT }}>
               Skip
             </button>
-            <button onClick={sendToGroup}
+            <button onClick={() => {
+                navigator.clipboard.writeText(editedMsg).then(() => {
+                  alert("✅ Message copied! Now open WhatsApp → Batter sales and sample group → Paste → Send");
+                  setGroupMsg(null);
+                }).catch(() => {
+                  // Fallback for devices where clipboard API is blocked
+                  const ta = document.createElement("textarea");
+                  ta.value = editedMsg;
+                  document.body.appendChild(ta);
+                  ta.select();
+                  document.execCommand("copy");
+                  document.body.removeChild(ta);
+                  alert("✅ Message copied! Now open WhatsApp → Batter sales and sample group → Paste → Send");
+                  setGroupMsg(null);
+                });
+              }}
               style={{ flex:2, background:"#25D366", border:"none", borderRadius:12,
-                color:"white", padding:"11px", fontSize:13, fontWeight:800,
+                color:"white", padding:"11px", fontSize:14, fontWeight:800,
                 cursor:"pointer", fontFamily:FONT, display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-              📲 Send to WhatsApp Group
+              📋 Copy & Open WhatsApp
             </button>
           </div>
-          <div style={{ fontSize:10, color:T.t3, textAlign:"center", marginTop:8 }}>
-            WhatsApp will open — select your Sridhi Ventures group to send
+          <div style={{ fontSize:11, color:T.amber, textAlign:"center", marginTop:8, fontWeight:600 }}>
+            👆 Tap to copy → Open WhatsApp → Open Batter group → Paste → Send
           </div>
         </div>
       </div>
