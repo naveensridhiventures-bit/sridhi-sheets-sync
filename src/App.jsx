@@ -1147,6 +1147,8 @@ function Leads() {
   const [showAdd, setShowAdd] = useState(false);
   const [remark, setRemark] = useState("");
   const [showWAForLead, setShowWAForLead] = useState(null);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editForm, setEditForm] = useState({});
   const [deliveryDialog, setDeliveryDialog] = useState(null); // { lead, targetStage }
   const [porterAmt, setPorterAmt] = useState("");
   const [kgQty, setKgQty] = useState("");
@@ -1400,6 +1402,54 @@ function Leads() {
           style={{ background:"none", border:"none", color:T.accent, fontSize:13, cursor:"pointer", padding:0, textAlign:"left", fontWeight:600, display:"flex", alignItems:"center", gap:6 }}>
           ← Back to leads
         </button>
+        {showEdit ? (
+          <Card>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+              <Label>Edit Lead Details</Label>
+              <button onClick={() => setShowEdit(false)}
+                style={{ background:"none", border:"none", color:T.t3, fontSize:18, cursor:"pointer" }}>✕</button>
+            </div>
+            {[
+              ["Customer Name", "name", "text"],
+              ["Business Name", "business", "text"],
+              ["Contact Number", "contact", "tel"],
+              ["Area", "area", "text"],
+              ["Full Address", "address", "text"],
+            ].map(([label, key, type]) => (
+              <div key={key} style={{ marginBottom:10 }}>
+                <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>{label.toUpperCase()}</div>
+                <input type={type} value={editForm[key]||""} onChange={e => setEditForm({...editForm,[key]:e.target.value})}
+                  style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1,
+                    padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
+              </div>
+            ))}
+            <div style={{ marginBottom:10 }}>
+              <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>BUSINESS TYPE</div>
+              <select value={editForm.type||""} onChange={e => setEditForm({...editForm,type:e.target.value})}
+                style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
+                {["Restaurant","Mess","Hotel","Bakery","Cloud Kitchen","Catering","Other"].map(t => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <div style={{ marginBottom:10 }}>
+              <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>ASSIGN TELECALLER</div>
+              <select value={editForm.telecaller||""} onChange={e => setEditForm({...editForm,telecaller:e.target.value})}
+                style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
+                {["Thulasi","Ramya"].map(t => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>PRIORITY</div>
+              <select value={editForm.priority||""} onChange={e => setEditForm({...editForm,priority:e.target.value})}
+                style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
+                {["High","Medium","Low"].map(t => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <Btn label="✓ Save Changes" full color={T.accent} onClick={() => {
+              setLeads(leads.map(l => l.id===lead.id ? { ...l, ...editForm } : l));
+              setShowEdit(false);
+            }} />
+          </Card>
+        ) : (
         <Card accent={getStageColor(lead.stage)}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12 }}>
             <div>
@@ -1407,7 +1457,14 @@ function Leads() {
               <div style={{ fontSize:12, color:T.t2, marginTop:2 }}>{lead.business}</div>
               <div style={{ fontSize:11, color:T.t3, marginTop:1 }}>{lead.type} · {lead.area}</div>
             </div>
-            <Chip label={lead.priority+" Priority"} color={getPriorityColor(lead.priority)} />
+            <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+              <button onClick={() => { setEditForm({...lead}); setShowEdit(true); }}
+                style={{ background:T.accentSub, border:`1px solid ${T.accentGlow}`, borderRadius:8,
+                  color:T.accent, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:FONT }}>
+                ✏️ Edit
+              </button>
+              <Chip label={lead.priority+" Priority"} color={getPriorityColor(lead.priority)} />
+            </div>
           </div>
           <Chip label={lead.stage} color={getStageColor(lead.stage)} />
           <div style={{ marginTop:16 }}>
@@ -1428,6 +1485,7 @@ function Leads() {
             }} />
           </div>
         </Card>
+        )}
 
         {showWAForLead && (
           <WATemplatePicker lead={showWAForLead} onClose={() => setShowWAForLead(null)} />
