@@ -1,13 +1,14 @@
 /**
  * useSheets — React hook for the Python /api/sheets endpoint.
+ * Always tries to sync — no API key required.
  * 1 fetch loads all tabs, stale-while-revalidate, 60s in-memory cache.
  */
 
 import { useState, useEffect, useRef } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
-const API_KEY  = import.meta.env.VITE_API_KEY  ?? "";
-const SYNC_ENABLED = API_KEY !== "" && API_KEY !== "YOUR-API-KEY";
+// Always enabled — no API key check needed since backend auth is disabled
+const SYNC_ENABLED = true;
 
 // in-memory cache shared across hook instances
 const _mem = {};
@@ -22,10 +23,7 @@ function memSet(key, data) {
 }
 
 function getHeaders() {
-  return {
-    "Content-Type": "application/json",
-    ...(API_KEY ? { "X-Api-Key": API_KEY } : {}),
-  };
+  return { "Content-Type": "application/json" };
 }
 
 let _allFetchPromise = null;
@@ -62,7 +60,7 @@ export function useSheets(tab, initialData) {
     const cached = memGet(tab);
     return Array.isArray(cached) && cached.length > 0 ? cached : initialData;
   });
-  const [status, setStatus] = useState(SYNC_ENABLED ? "loading" : "offline");
+  const [status, setStatus] = useState("loading");
 
   const skipPush  = useRef(true);
   const pushTimer = useRef(null);
@@ -70,7 +68,6 @@ export function useSheets(tab, initialData) {
   latestData.current = data;
 
   useEffect(() => {
-    if (!SYNC_ENABLED) return;
     const stale = memGet(tab);
     if (Array.isArray(stale) && stale.length > 0) {
       skipPush.current = true;
@@ -80,7 +77,7 @@ export function useSheets(tab, initialData) {
     fetchAll()
       .then((all) => {
         const fresh = all[tab];
-        if (Array.isArray(fresh) && fresh.length > 0) {
+        if (Array.isArray(fresh)) {
           skipPush.current = true;
           setDataRaw(fresh);
         }
@@ -90,7 +87,6 @@ export function useSheets(tab, initialData) {
   }, [tab]);
 
   useEffect(() => {
-    if (!SYNC_ENABLED) return;
     if (skipPush.current) { skipPush.current = false; return; }
     setStatus("syncing");
     if (pushTimer.current) clearTimeout(pushTimer.current);
