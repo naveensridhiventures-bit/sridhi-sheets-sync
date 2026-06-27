@@ -1149,6 +1149,7 @@ function Leads() {
   const [showWAForLead, setShowWAForLead] = useState(null);
   const [deliveryDialog, setDeliveryDialog] = useState(null); // { lead, targetStage }
   const [porterAmt, setPorterAmt] = useState("");
+  const [groupMsg, setGroupMsg] = useState(null); // { lead, stage, method }
   const [newLead, setNewLead] = useState({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Thulasi" });
 
   const filtered = leads.filter(l =>
@@ -1195,6 +1196,7 @@ function Leads() {
       };
       setExpenses([newExp, ...expenses]);
     }
+    setGroupMsg({ lead, targetStage, method });
     setDeliveryDialog(null);
     setPorterAmt("");
   };
@@ -1204,6 +1206,90 @@ function Leads() {
     setShowAdd(false);
     setNewLead({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Priya" });
   };
+
+  // ── Group WhatsApp message ──
+  function buildGroupMsg(lead, targetStage, method, customMsg) {
+    const time = new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",hour12:true});
+    const date = new Date().toLocaleDateString("en-IN",{weekday:"short",day:"2-digit",month:"short"});
+    if (targetStage === "Sample Requested") {
+      return customMsg || (
+        "🧪 *Sample Dispatched*\n" +
+        "━━━━━━━━━━━━━━━━━━\n" +
+        "👤 Customer: " + lead.name + "\n" +
+        "📍 Area: " + (lead.area||"-") + "\n" +
+        "🚚 Via: " + (method === "porter" ? "Porter" : "Company Vehicle") + "\n" +
+        "🕐 Time: " + time + " · " + date + "\n" +
+        "👩 Telecaller: " + (lead.telecaller||"Team") + "\n" +
+        "━━━━━━━━━━━━━━━━━━\n" +
+        "Sridhi Ventures 🌿"
+      );
+    } else {
+      return customMsg || (
+        "🎉 *Order Confirmed!*\n" +
+        "━━━━━━━━━━━━━━━━━━\n" +
+        "👤 Customer: " + lead.name + "\n" +
+        "📍 Area: " + (lead.area||"-") + "\n" +
+        "🏪 Business: " + (lead.business||lead.name) + "\n" +
+        "🚚 Delivery: " + (method === "porter" ? "Porter" : "Company Vehicle") + "\n" +
+        "🕐 Time: " + time + " · " + date + "\n" +
+        "👩 Telecaller: " + (lead.telecaller||"Team") + "\n" +
+        "━━━━━━━━━━━━━━━━━━\n" +
+        "Sridhi Ventures 🌿"
+      );
+    }
+  }
+
+  if (groupMsg) {
+    const { lead, targetStage, method } = groupMsg;
+    const defaultMsg = buildGroupMsg(lead, targetStage, method, "");
+    const [editedMsg, setEditedMsg] = React.useState(defaultMsg);
+    const GROUP_NUMBER = ""; // leave blank to open WhatsApp without number (user picks group)
+
+    function sendToGroup() {
+      const url = "https://wa.me/" + GROUP_NUMBER + "?text=" + encodeURIComponent(editedMsg);
+      window.open(url, "_blank");
+      setGroupMsg(null);
+    }
+
+    return (
+      <div style={{ padding:"0 0 80px" }}>
+        <div style={{ background:T.card, border:`1px solid ${T.accentGlow}`, borderRadius:18, padding:20, margin:"16px 0" }}>
+          <div style={{ fontSize:15, fontWeight:800, color:T.t1, marginBottom:4 }}>
+            {targetStage === "Sample Requested" ? "🧪 Share Sample Update" : "🎉 Share Order Update"}
+          </div>
+          <div style={{ fontSize:12, color:T.t3, marginBottom:16 }}>Send to Sridhi Ventures WhatsApp group</div>
+
+          <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>MESSAGE PREVIEW (tap to edit)</div>
+          <textarea
+            value={editedMsg}
+            onChange={e => setEditedMsg(e.target.value)}
+            rows={10}
+            style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12,
+              color:T.t1, padding:"12px", fontSize:13, fontFamily:FONT,
+              outline:"none", width:"100%", boxSizing:"border-box", resize:"vertical",
+              lineHeight:1.7 }}
+          />
+
+          <div style={{ display:"flex", gap:8, marginTop:12 }}>
+            <button onClick={() => setGroupMsg(null)}
+              style={{ flex:1, background:T.surface, border:`1px solid ${T.border}`, borderRadius:12,
+                color:T.t2, padding:"11px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:FONT }}>
+              Skip
+            </button>
+            <button onClick={sendToGroup}
+              style={{ flex:2, background:"#25D366", border:"none", borderRadius:12,
+                color:"white", padding:"11px", fontSize:13, fontWeight:800,
+                cursor:"pointer", fontFamily:FONT, display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+              📲 Send to WhatsApp Group
+            </button>
+          </div>
+          <div style={{ fontSize:10, color:T.t3, textAlign:"center", marginTop:8 }}>
+            WhatsApp will open — select your Sridhi Ventures group to send
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ── Delivery method dialog ──
   if (deliveryDialog) {
