@@ -915,6 +915,66 @@ function Dashboard() {
 
 // ─── LEADS CRM ────────────────────────────────────────────────────────────
 
+// ── GroupMsgDialog — proper component so hooks work correctly ─────────────────
+function GroupMsgDialog({ groupMsg, buildGroupMsg, onClose }) {
+  const { lead, targetStage, method, kgQty } = groupMsg;
+  const defaultMsg = buildGroupMsg(lead, targetStage, method, "");
+  const [editedMsg, setEditedMsg] = useState(defaultMsg);
+
+  function copyAndClose() {
+    const copy = () => {
+      try {
+        navigator.clipboard.writeText(editedMsg).then(() => {
+          alert("✅ Message copied! Open WhatsApp → Batter sales and sample group → Paste → Send");
+          onClose();
+        });
+      } catch {
+        const ta = document.createElement("textarea");
+        ta.value = editedMsg;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        alert("✅ Message copied! Open WhatsApp → Batter sales and sample group → Paste → Send");
+        onClose();
+      }
+    };
+    copy();
+  }
+
+  return (
+    <div style={{ padding:"0 0 80px" }}>
+      <div style={{ background:T.card, border:`1px solid ${T.accentGlow}`, borderRadius:18, padding:20, margin:"16px 0" }}>
+        <div style={{ fontSize:15, fontWeight:800, color:T.t1, marginBottom:4 }}>
+          {targetStage === "Sample Requested" ? "🧪 Share Sample Update" : "🎉 Share Order Update"}
+        </div>
+        <div style={{ fontSize:12, color:T.t3, marginBottom:16 }}>Send to Batter sales and sample group</div>
+        <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:6 }}>MESSAGE (tap to edit)</div>
+        <textarea value={editedMsg} onChange={e => setEditedMsg(e.target.value)} rows={10}
+          style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12,
+            color:T.t1, padding:"12px", fontSize:13, fontFamily:FONT,
+            outline:"none", width:"100%", boxSizing:"border-box", resize:"vertical", lineHeight:1.7 }} />
+        <div style={{ display:"flex", gap:8, marginTop:12 }}>
+          <button onClick={onClose}
+            style={{ flex:1, background:T.surface, border:`1px solid ${T.border}`, borderRadius:12,
+              color:T.t2, padding:"11px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:FONT }}>
+            Skip
+          </button>
+          <button onClick={copyAndClose}
+            style={{ flex:2, background:"#25D366", border:"none", borderRadius:12,
+              color:"white", padding:"11px", fontSize:13, fontWeight:800,
+              cursor:"pointer", fontFamily:FONT, display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+            📋 Copy & Send to Group
+          </button>
+        </div>
+        <div style={{ fontSize:11, color:T.amber, textAlign:"center", marginTop:8, fontWeight:600 }}>
+          Copy → WhatsApp → Batter sales and sample group → Paste → Send
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── WATemplatePicker — shown when WhatsApp tapped on a lead ──────────────────
 function WATemplatePicker({ lead, onClose }) {
   const templates = (() => {
@@ -1260,18 +1320,10 @@ function Leads() {
   }
 
   if (groupMsg) {
-    const { lead, targetStage, method, kgQty } = groupMsg;
-    const defaultMsg = buildGroupMsg(lead, targetStage, method, "");
-    const [editedMsg, setEditedMsg] = React.useState(defaultMsg);
-    const GROUP_NUMBER = ""; // leave blank to open WhatsApp without number (user picks group)
-
-    function sendToGroup() {
-      const url = "https://wa.me/" + GROUP_NUMBER + "?text=" + encodeURIComponent(editedMsg);
-      window.open(url, "_blank");
-      setGroupMsg(null);
-    }
-
-    return (
+    return <GroupMsgDialog groupMsg={groupMsg} buildGroupMsg={buildGroupMsg} onClose={() => setGroupMsg(null)} />;
+  }
+  
+  if (false) { return (
       <div style={{ padding:"0 0 80px" }}>
         <div style={{ background:T.card, border:`1px solid ${T.accentGlow}`, borderRadius:18, padding:20, margin:"16px 0" }}>
           <div style={{ fontSize:15, fontWeight:800, color:T.t1, marginBottom:4 }}>
