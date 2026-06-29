@@ -1,14 +1,13 @@
 /**
  * useSheets — React hook for the Python /api/sheets endpoint.
- * Always tries to sync — no API key required.
  * 1 fetch loads all tabs, stale-while-revalidate, 60s in-memory cache.
  */
 
 import { useState, useEffect, useRef } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
-// Always enabled — no API key check needed since backend auth is disabled
-const SYNC_ENABLED = true;
+const API_KEY  = import.meta.env.VITE_API_KEY  ?? "";
+const SYNC_ENABLED = API_KEY !== "" && API_KEY !== "YOUR-API-KEY";
 
 // in-memory cache shared across hook instances
 const _mem = {};
@@ -23,7 +22,10 @@ function memSet(key, data) {
 }
 
 function getHeaders() {
-  return { "Content-Type": "application/json" };
+  return {
+    "Content-Type": "application/json",
+    ...(API_KEY ? { "X-Api-Key": API_KEY } : {}),
+  };
 }
 
 let _allFetchPromise = null;
@@ -46,12 +48,11 @@ async function fetchAll() {
 }
 
 async function pushTab(tab, data) {
-  const r = await fetch(`${API_BASE}/api/sheets?tab=${tab}`, {
-    method: "POST",
-    headers: getHeaders(),
-    body: JSON.stringify({ [tab]: data }),
-  });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const body = JSON.stringify({ [tab]: data });
+  const b64 = btoa(unescape(encodeURIComponent(body)));
+  const url = API_BASE + "/api/sheets?tab=" + tab + "&action=write&data=" + encodeURIComponent(b64);
+  const r = await fetch(url, { headers: getHeaders() });
+  if (!r.ok) throw new Error("HTTP " + r.status);
   delete _mem["ALL"];
 }
 
@@ -60,7 +61,7 @@ export function useSheets(tab, initialData) {
     const cached = memGet(tab);
     return Array.isArray(cached) && cached.length > 0 ? cached : initialData;
   });
-  const [status, setStatus] = useState("loading");
+  const [status, setStatus] = useState(SYNC_ENABLED ? "loading" : "offline");
 
   const skipPush  = useRef(true);
   const pushTimer = useRef(null);
@@ -68,6 +69,7 @@ export function useSheets(tab, initialData) {
   latestData.current = data;
 
   useEffect(() => {
+    if (!SYNC_ENABLED) return;
     const stale = memGet(tab);
     if (Array.isArray(stale) && stale.length > 0) {
       skipPush.current = true;
@@ -77,7 +79,7 @@ export function useSheets(tab, initialData) {
     fetchAll()
       .then((all) => {
         const fresh = all[tab];
-        if (Array.isArray(fresh)) {
+        if (Array.isArray(fresh) && fresh.length > 0) {
           skipPush.current = true;
           setDataRaw(fresh);
         }
@@ -87,6 +89,7 @@ export function useSheets(tab, initialData) {
   }, [tab]);
 
   useEffect(() => {
+    if (!SYNC_ENABLED) return;
     if (skipPush.current) { skipPush.current = false; return; }
     setStatus("syncing");
     if (pushTimer.current) clearTimeout(pushTimer.current);
