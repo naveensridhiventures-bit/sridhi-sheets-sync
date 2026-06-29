@@ -168,6 +168,11 @@ class handler(BaseHTTPRequestHandler):
         tab = parse_qs(parsed.query).get("tab", ["all"])[0]
 
         # Debug endpoint
+        if tab == "envcheck":
+            email = os.environ.get("GOOGLE_SERVICE_ACCOUNT_EMAIL","")
+            key = os.environ.get("GOOGLE_PRIVATE_KEY","")
+            self._send(200,{"email_set":bool(email),"email":email[:30],"key_set":bool(key),"key_len":len(key),"key_has_begin":"BEGIN" in key,"sheet_id":os.environ.get("GOOGLE_SHEET_ID","")})
+            return
         if tab == "debug":
             try:
                 token = get_token()
