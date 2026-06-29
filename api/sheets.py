@@ -172,6 +172,34 @@ class handler(BaseHTTPRequestHandler):
                 self._send(500, {"error": str(e), "trace": traceback.format_exc()})
             return
 
+        # Handle writes via GET (Vercel rewrites block POST to Python functions)
+        method = parse_qs(parsed.query).get("_method", ["GET"])[0]
+        if method == "POST":
+            b64_body = parse_qs(parsed.query).get("_body", [""])[0]
+            if b64_body:
+                import base64
+                try:
+                    body = json.loads(base64.b64decode(b64_body.encode()).decode())
+                    records = body.get(tab, [])
+                    if isinstance(records, list) and tab in TAB_CONFIG:
+                        cfg = TAB_CONFIG[tab]
+                        if tab == "leads":
+                            records = [_decoerce_leads(r) for r in records]
+                        token = get_token()
+                        sheet_id = os.environ["GOOGLE_SHEET_ID"]
+                        actual_tabs = get_sheet_tabs(sheet_id, token)
+                        matched = next((t for t in actual_tabs if t.strip().lower() == cfg["tab"].lower()), cfg["tab"])
+                        write_tab(matched, cfg["headers"], records, token)
+                        _cache.clear()
+                        self._send(200, {"ok": True, "count": len(records)})
+                        return
+                except Exception as exc:
+                    import traceback
+                    self._send(500, {"error": str(exc), "trace": traceback.format_exc()})
+                    return
+            self._send(400, {"error": "No body"})
+            return
+
         try:
             if tab == "all":
                 self._send(200, fetch_all_tabs())
