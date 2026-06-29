@@ -3,11 +3,11 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
-  "routes": [
-    { "src": "/api/ai", "dest": "/api/ai.py", "methods": ["GET","POST","OPTIONS"] },
-    { "src": "/api/prospects", "dest": "/api/prospects.py", "methods": ["GET","POST","OPTIONS"] },
-    { "src": "/api/sheets", "dest": "/api/sheets.py", "methods": ["GET","POST","OPTIONS"] },
-    { "src": "/api/(.*)", "dest": "/api/sheets.py", "methods": ["GET","POST","OPTIONS"] },
-    { "src": "/(.*)", "dest": "/index.html" }
+  "rewrites": [
+    { "source": "/api/ai",        "destination": "/api/ai.py" },
+    { "source": "/api/prospects", "destination": "/api/prospects.py" },
+    { "source": "/api/sheets",    "destination": "/api/sheets.py" },
+    { "source": "/api/(.*)",      "destination": "/api/sheets.py" },
+    { "source": "/(.*)",          "destination": "/index.html" }
   ]
 }
