@@ -23,6 +23,8 @@ TAB_CONFIG = {
 
 _cache = {}
 CACHE_TTL = 60
+_token_cache = {"token": None, "ts": 0}
+TOKEN_TTL = 3500  # refresh before 1-hour expiry
 
 def clean_private_key(raw):
     """Handle every possible way Vercel might encode the private key."""
@@ -47,12 +49,28 @@ def clean_private_key(raw):
     return key
 
 def get_token():
-    email = os.environ.get("GOOGLE_SERVICE_ACCOUNT_EMAIL", "")
-    raw_key = os.environ.get("GOOGLE_PRIVATE_KEY", "")
+    # Use cached token if still valid
+    if _token_cache["token"] and time.time() - _token_cache["ts"] < TOKEN_TTL:
+        return _token_cache["token"]
+
+    # Read env vars - try multiple approaches
+    email = os.environ.get("GOOGLE_SERVICE_ACCOUNT_EMAIL") or os.environ.get("GOOGLE_SERVICE_ACCOUNT_EMAIL", "")
+    raw_key = os.environ.get("GOOGLE_PRIVATE_KEY") or os.environ.get("GOOGLE_PRIVATE_KEY", "")
+    
+    # Last resort - scan all env
+    if not email or not raw_key:
+        for k, v in os.environ.items():
+            if "SERVICE_ACCOUNT_EMAIL" in k and not email:
+                email = v
+            if "PRIVATE_KEY" in k and not raw_key:
+                raw_key = v
+
     key = clean_private_key(raw_key)
 
     if not email or not key:
-        raise RuntimeError("Missing GOOGLE_SERVICE_ACCOUNT_EMAIL or GOOGLE_PRIVATE_KEY")
+        env_keys = [k for k in os.environ.keys() if "GOOGLE" in k or "KEY" in k]
+        raise RuntimeError("Missing credentials. email={} key_len={} env_keys={}".format(
+            bool(email), len(key), env_keys))
 
     creds = service_account.Credentials.from_service_account_info(
         {"type": "service_account", "client_email": email, "private_key": key,
@@ -60,6 +78,8 @@ def get_token():
         scopes=SCOPES,
     )
     creds.refresh(google.auth.transport.requests.Request())
+    _token_cache["token"] = creds.token
+    _token_cache["ts"] = time.time()
     return creds.token
 
 def sheets_get(sheet_id, tab_name, token):
