@@ -30,7 +30,22 @@ CACHE_TTL = 60
 
 def get_token():
     email = os.environ.get("GOOGLE_SERVICE_ACCOUNT_EMAIL", "")
-    raw_key = os.environ.get("GOOGLE_PRIVATE_KEY", "").replace("\\n", "\n")
+    raw_key = os.environ.get("GOOGLE_PRIVATE_KEY", "")
+
+    # Handle all newline escape formats Vercel may use
+    raw_key = raw_key.replace("\\\\n", "\n")  # double escaped \\n
+    raw_key = raw_key.replace("\\n", "\n")     # single escaped \n
+    raw_key = raw_key.replace("\\r\\n", "\n")
+    raw_key = raw_key.replace("\\r", "\n")
+    raw_key = raw_key.strip()
+
+    # If pasted without headers, add them
+    if raw_key and "-----BEGIN" not in raw_key:
+        raw_key = "-----BEGIN PRIVATE KEY-----\n" + raw_key + "\n-----END PRIVATE KEY-----\n"
+
+    if not email or not raw_key:
+        raise RuntimeError("Missing GOOGLE_SERVICE_ACCOUNT_EMAIL or GOOGLE_PRIVATE_KEY")
+
     creds = service_account.Credentials.from_service_account_info(
         {"type": "service_account", "client_email": email, "private_key": raw_key,
          "token_uri": "https://oauth2.googleapis.com/token"},
@@ -110,11 +125,7 @@ def _coerce(tab_key, row):
     return row
 
 def _decoerce_leads(lead):
-    import time as _time
     out = dict(lead)
-    # Assign a unique id if missing
-    if not out.get("id"):
-        out["id"] = str(int(_time.time() * 1000)) + "_" + str(abs(hash(out.get("contact","") + out.get("name",""))))[:6]
     remarks = out.get("remarks", [])
     out["remarks"] = " || ".join(remarks) if isinstance(remarks, list) else (remarks or "")
     return out
