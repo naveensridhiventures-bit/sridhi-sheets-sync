@@ -48,10 +48,11 @@ async function fetchAll() {
 }
 
 async function pushTab(tab, data) {
-  const body = JSON.stringify({ [tab]: data });
-  const b64 = btoa(unescape(encodeURIComponent(body)));
-  const url = API_BASE + "/api/sheets?tab=" + tab + "&action=write&data=" + encodeURIComponent(b64);
-  const r = await fetch(url, { headers: getHeaders() });
+  const r = await fetch(API_BASE + "/api/sheets?tab=" + tab, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ [tab]: data }),
+  });
   if (!r.ok) throw new Error("HTTP " + r.status);
   delete _mem["ALL"];
 }

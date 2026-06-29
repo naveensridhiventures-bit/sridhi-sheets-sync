@@ -3,15 +3,10 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
-  "functions": {
-    "api/sheets.py": { "maxDuration": 30 },
-    "api/ai.py":     { "maxDuration": 30 },
-    "api/prospects.py": { "maxDuration": 30 }
-  },
   "rewrites": [
     { "source": "/api/ai",        "destination": "/api/ai.py" },
     { "source": "/api/prospects", "destination": "/api/prospects.py" },
-    { "source": "/api/(.*)",      "destination": "/api/sheets.py" },
+    { "source": "/api/sheets",    "destination": "/api/sheets.js" },
     { "source": "/(.*)",          "destination": "/index.html" }
   ]
 }
