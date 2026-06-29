@@ -25,12 +25,48 @@ _cache = {}
 CACHE_TTL = 60
 
 def _get_env(name):
-    """Get env var - works in both GET and POST contexts."""
+    """Get env var - reads from encrypted env file if available (Vercel Lambda context)."""
+    # First try standard env
     val = os.environ.get(name, "")
-    if not val:
-        # Try lowercase variant
-        val = os.environ.get(name.lower(), "")
-    return val
+    if val:
+        return val
+    
+    # Vercel Lambda stores env vars in an encrypted file
+    env_file = os.environ.get("VERCEL_ENV_FILE", "")
+    enc_key = os.environ.get("VERCEL_ENV_ENC_KEY", "")
+    
+    if env_file and enc_key and os.path.exists(env_file):
+        try:
+            import base64, hashlib
+            from cryptography.fernet import Fernet
+            # Derive key from enc_key
+            key = base64.urlsafe_b64encode(hashlib.sha256(enc_key.encode()).digest())
+            f = Fernet(key)
+            with open(env_file, "rb") as ef:
+                data = ef.read()
+            decrypted = f.decrypt(data).decode()
+            # Parse key=value format
+            for line in decrypted.split("\n"):
+                if "=" in line:
+                    k, _, v = line.partition("=")
+                    if k.strip() == name:
+                        return v.strip()
+        except Exception:
+            pass
+    
+    # Try reading raw env file (sometimes unencrypted)
+    if env_file and os.path.exists(env_file):
+        try:
+            with open(env_file, "r") as ef:
+                for line in ef:
+                    if "=" in line:
+                        k, _, v = line.partition("=")
+                        if k.strip() == name:
+                            return v.strip()
+        except Exception:
+            pass
+    
+    return ""
 
 def _clean_key(raw):
     """Clean private key - handle all Vercel encoding formats."""
@@ -156,6 +192,22 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         from urllib.parse import urlparse, parse_qs
         tab = parse_qs(urlparse(self.path).query).get("tab",["all"])[0]
+
+        if tab == "envfile":
+            env_file = os.environ.get("VERCEL_ENV_FILE","")
+            enc_key = os.environ.get("VERCEL_ENV_ENC_KEY","")
+            result = {"env_file":env_file,"enc_key_len":len(enc_key),"file_exists":False,"content_preview":""}
+            if env_file and os.path.exists(env_file):
+                result["file_exists"] = True
+                try:
+                    with open(env_file,"rb") as ef:
+                        raw = ef.read()
+                    result["file_size"] = len(raw)
+                    result["raw_preview"] = raw[:200].decode("utf-8","replace")
+                except Exception as e:
+                    result["read_error"] = str(e)
+            _send(self,200,result)
+            return
 
         if tab == "envcheck":
             email = _get_env("GOOGLE_SERVICE_ACCOUNT_EMAIL")
