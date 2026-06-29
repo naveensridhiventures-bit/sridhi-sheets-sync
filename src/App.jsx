@@ -799,59 +799,112 @@ function TodayTasks() {
 }
 
 function Dashboard() {
-  const salesData = [
-    { label:"Jan", val:0 }, { label:"Feb", val:0 }, { label:"Mar", val:0 },
-    { label:"Apr", val:0 }, { label:"May", val:0 }, { label:"Jun", val:0 },
-  ];
+  const [leads] = useSheetSynced("leads","leads",[]);
+  const [samples] = useSheetSynced("samples","samples",[]);
+  const [expenses] = useSheetSynced("expenses","expenses",[]);
+  const [repeatCustomers] = useSheetSynced("repeatCustomers","repeatCustomers",[]);
+
+  // ── Live KPI calculations ──
+  const activeLeads = (leads||[]).filter(l => l && l.name && l.stage);
+  const activeCustomers = activeLeads.filter(l => l.stage === "Active Customer").length;
+  const ordersReceived = activeLeads.filter(l => ["Order Received","Active Customer","Repeat Order Follow-up"].includes(l.stage));
+  const converted = ordersReceived.length;
+  const convRate = activeLeads.length > 0 ? Math.round((converted/activeLeads.length)*100) : 0;
+
+  // Sales KG - from samples delivered + pipeline kgQty
+  const samplesDeliveredKg = (samples||[]).filter(s => s.status==="Delivered").reduce((a,b) => a+(Number(b.qty)||0), 0);
+  const orderKg = activeLeads.filter(l => l.stage === "Order Received" || l.stage === "Active Customer")
+    .reduce((a,l) => a+(Number(l.kgQty)||0), 0);
+  const totalKg = samplesDeliveredKg + orderKg;
+
+  // Revenue - KG * price (₹120/kg default)
+  const pricePerKg = 120;
+  const totalRevenue = totalKg * pricePerKg;
+
+  // Expenses from expense tab
+  const totalExpenses = (expenses||[]).reduce((a,b) => a+(Number(b.amount)||0), 0);
+  const deliveryExp = (expenses||[]).filter(e => e.type==="Delivery" || e.subtype==="Porter").reduce((a,b) => a+(Number(b.amount)||0), 0);
+  const marketingExp = (expenses||[]).filter(e => e.type==="Marketing").reduce((a,b) => a+(Number(b.amount)||0), 0);
+  const sampleExp = (samples||[]).reduce((a,b) => a+(Number(b.deliveryCost)||0)+(Number(b.productionCost)||0), 0);
+  const estProfit = totalRevenue - totalExpenses - sampleExp;
+
+  // Samples
+  const samplesSentKg = (samples||[]).reduce((a,b) => a+(Number(b.qty)||0), 0);
+
+  // Pipeline stage counts
+  const stageCounts = {};
+  activeLeads.forEach(l => { stageCounts[l.stage] = (stageCounts[l.stage]||0) + 1; });
+  const liveStages = PIPELINE_STAGES.map(s => ({ ...s, count: stageCounts[s.id]||0 }));
+
+  // Due today repeat orders
+  const dueToday = (repeatCustomers||[]).filter(c => c.status === "Due Today");
+
+  // Expense segments for donut
   const expSegs = [
-    { label:"Marketing", value:0, color:T.indigo },
-    { label:"Delivery",  value:0,  color:T.amber  },
-    { label:"Samples",   value:0, color:T.accent  },
-    { label:"Staff",     value:0,  color:T.sky    },
+    { label:"Marketing", value:marketingExp, color:T.indigo },
+    { label:"Delivery",  value:deliveryExp,  color:T.amber  },
+    { label:"Samples",   value:sampleExp,    color:T.accent },
+    { label:"Staff",     value:Math.max(0, totalExpenses - marketingExp - deliveryExp), color:T.sky },
   ];
   const totalExp = expSegs.reduce((a,b) => a+b.value, 0);
+
+  const thisMonth = new Date().toLocaleDateString("en-IN",{month:"long",year:"numeric"});
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
 
       {/* KPIs */}
       <div style={{ display:"flex", flexWrap:"wrap", gap:10 }}>
-        <KPI label="Sales this month" value={0}   unit="KG" change={0} color={T.accent}  icon="📦" />
-        <KPI label="Revenue"          value={0}  unit="₹"  change={0} color={T.emerald} icon="💰" />
-        <KPI label="Active customers" value={0}                change={0}  color={T.indigo}  icon="🏪" />
-        <KPI label="Leads this month" value={0}               change={0} color={T.amber}   icon="📋" />
-        <KPI label="Conversion"       value="0%"               change={0}  color={T.accent}  icon="🎯" />
-        <KPI label="Samples sent"     value={0}    unit="KG"  change={0} color={T.orange}  icon="🧪" />
-        <KPI label="Ad spend"         value={0}  unit="₹"  change={0}   color={T.rose}    icon="📢" />
-        <KPI label="Est. profit"      value={0}  unit="₹"  change={0} color={T.emerald} icon="📈" />
+        <KPI label="Sales this month" value={totalKg}   unit="KG" change={0} color={T.accent}  icon="📦" />
+        <KPI label="Revenue"          value={totalRevenue}  unit="₹" change={0} color={T.emerald} icon="💰" />
+        <KPI label="Active customers" value={activeCustomers} change={0} color={T.indigo} icon="🏪" />
+        <KPI label="Total Leads"      value={activeLeads.length} change={0} color={T.amber} icon="📋" />
+        <KPI label="Conversion"       value={convRate+"%"} change={0} color={T.accent} icon="🎯" />
+        <KPI label="Samples sent"     value={samplesSentKg} unit="KG" change={0} color={T.orange} icon="🧪" />
+        <KPI label="Total Expenses"   value={totalExpenses} unit="₹" change={0} color={T.rose} icon="💸" />
+        <KPI label="Est. profit"      value={estProfit} unit="₹" change={0} color={T.emerald} icon="📈" />
       </div>
 
-      {/* Sales chart */}
-      <Card accent={T.accent}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
-          <Label sub="Monthly KG dispatched">Sales Trend</Label>
-          <div style={{ textAlign:"right" }}>
-            <div style={{ fontSize:20, fontWeight:800, color:T.accent, letterSpacing:"-0.02em" }}>0 KG</div>
-            <div style={{ fontSize:10, color:T.emerald, fontWeight:600 }}>↑ 0% vs May</div>
-          </div>
+      {/* Pipeline live */}
+      <Card>
+        <Label sub={`${activeLeads.length} total leads across all stages`}>Telecalling Pipeline</Label>
+        <PipelineStrip stages={liveStages} />
+        <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:10 }}>
+          {liveStages.filter(s => s.count > 0).map(s => (
+            <div key={s.id} style={{ display:"flex", alignItems:"center", gap:4 }}>
+              <div style={{ width:7,height:7,borderRadius:2,background:s.color }} />
+              <span style={{ fontSize:10, color:T.t3 }}>{s.id} {s.count}</span>
+            </div>
+          ))}
         </div>
-        <BarChart data={salesData} color={T.accent} height={72} />
       </Card>
 
-      {/* Pipeline */}
-      <Card>
-        <Label sub={`${PIPELINE_STAGES.reduce((a,b) => a+b.count, 0)} total leads`}>Telecalling Pipeline</Label>
-        <PipelineStrip stages={PIPELINE_STAGES} />
+      {/* Orders summary */}
+      <Card accent={T.emerald}>
+        <Label sub={thisMonth}>Orders & Revenue</Label>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginTop:8 }}>
+          {[
+            ["Orders", ordersReceived.length, T.emerald],
+            ["KG Sold", totalKg, T.accent],
+            ["Revenue", "₹"+(totalRevenue/1000).toFixed(1)+"K", T.emerald],
+            ["Samples", (samples||[]).length, T.orange],
+            ["Expenses", "₹"+(totalExpenses/1000).toFixed(1)+"K", T.rose],
+            ["Profit", "₹"+(Math.max(0,estProfit)/1000).toFixed(1)+"K", T.sky],
+          ].map(([l,v,c]) => (
+            <div key={l} style={{ textAlign:"center", background:T.surface, borderRadius:12, padding:"10px 4px" }}>
+              <div style={{ fontSize:16, fontWeight:900, color:c }}>{v}</div>
+              <div style={{ fontSize:10, color:T.t3, marginTop:2, fontWeight:600 }}>{l}</div>
+            </div>
+          ))}
+        </div>
       </Card>
 
       {/* Repeat order alerts */}
       <Card accent={T.amber}>
         <Label sub="Customers due for re-order today">Re-order Alerts</Label>
-        {REPEAT_CUSTOMERS.filter(c => c.status==="Due Today").map(c => (
-          <div key={c.id} style={{
-            display:"flex", justifyContent:"space-between", alignItems:"center",
-            padding:"11px 0", borderBottom:`1px solid ${T.border}`,
-          }}>
+        {dueToday.length === 0 && <div style={{ fontSize:12, color:T.t3, padding:"8px 0" }}>No re-orders due today</div>}
+        {dueToday.map(c => (
+          <div key={c.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"11px 0", borderBottom:`1px solid ${T.border}` }}>
             <div>
               <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{c.name}</div>
               <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>{c.qty} KG {c.product} · {c.frequency}</div>
@@ -863,7 +916,7 @@ function Dashboard() {
 
       {/* Expense breakdown */}
       <Card>
-        <Label sub="June 2025">Expense Breakdown</Label>
+        <Label sub={thisMonth}>Expense Breakdown</Label>
         <div style={{ display:"flex", alignItems:"center", gap:18 }}>
           <Donut segments={expSegs} size={110} centerLabel={"₹"+(totalExp/1000).toFixed(0)+"K"} centerSub="Total" />
           <div style={{ flex:1 }}>
@@ -1634,8 +1687,12 @@ function Leads() {
 
 // ─── PIPELINE ─────────────────────────────────────────────────────────────
 function Pipeline() {
-  const [allLeads] = useSheetSynced("leads", "leads", INITIAL_LEADS);
+  const [allLeads, setAllLeads] = useSheetSynced("leads", "leads", INITIAL_LEADS);
   const [expanded, setExpanded] = useState(null);
+  const [selectedLead, setSelectedLead] = useState(null);
+  const [remark, setRemark] = useState("");
+  const [showEdit, setShowEdit] = useState(false);
+  const [editForm, setEditForm] = useState({});
 
   // Filter out blank rows from Google Sheet
   const leads = (allLeads || []).filter(l => l && l.name && l.stage);
@@ -1645,6 +1702,122 @@ function Pipeline() {
   leads.forEach(l => { stageCounts[l.stage] = (stageCounts[l.stage]||0) + 1; });
   const stages = PIPELINE_STAGES.map(s => ({ ...s, count: stageCounts[s.id]||0 }));
   const total = leads.length;
+
+  const updateStageP = (id, stage) => setAllLeads(allLeads.map(l => l.id===id ? {...l, stage, lastContact:"Today"} : l));
+  const addRemarkP = (id) => {
+    if (!remark.trim()) return;
+    const now = new Date();
+    const stamp = now.toLocaleDateString("en-IN",{day:"2-digit",month:"short"}) + " " + now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",hour12:true});
+    const r = "["+stamp+"] "+remark.trim();
+    setAllLeads(allLeads.map(l => l.id===id ? {...l, remarks:[...(l.remarks||[]),r], lastContact:"Today"} : l));
+    setRemark("");
+  };
+
+  if (selectedLead) {
+    const lead = allLeads.find(l => l.id === selectedLead.id) || selectedLead;
+    return (
+      <div style={{ display:"flex", flexDirection:"column", gap:12, paddingBottom:80 }}>
+        <button onClick={() => { setSelectedLead(null); setShowEdit(false); }}
+          style={{ background:"none", border:"none", color:T.accent, fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:FONT, textAlign:"left", padding:"4px 0" }}>
+          ← Back to pipeline
+        </button>
+
+        {showEdit ? (
+          <Card>
+            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:12 }}>
+              <Label>Edit Lead</Label>
+              <button onClick={() => setShowEdit(false)} style={{ background:"none", border:"none", color:T.t3, fontSize:18, cursor:"pointer" }}>✕</button>
+            </div>
+            {[["Name","name","text"],["Business","business","text"],["Contact","contact","tel"],["Area","area","text"],["Address","address","text"]].map(([label,key,type]) => (
+              <div key={key} style={{ marginBottom:10 }}>
+                <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:4 }}>{label.toUpperCase()}</div>
+                <input type={type} value={editForm[key]||""} onChange={e => setEditForm({...editForm,[key]:e.target.value})}
+                  style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
+              </div>
+            ))}
+            <div style={{ marginBottom:10 }}>
+              <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:4 }}>TELECALLER</div>
+              <select value={editForm.telecaller||""} onChange={e => setEditForm({...editForm,telecaller:e.target.value})}
+                style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
+                {["Thulasi","Ramya"].map(t => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <button onClick={() => { setAllLeads(allLeads.map(l => l.id===lead.id ? {...l,...editForm} : l)); setShowEdit(false); }}
+              style={{ background:T.accent, border:"none", borderRadius:12, color:"#060B16", padding:"12px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT, width:"100%" }}>
+              ✓ Save Changes
+            </button>
+          </Card>
+        ) : (
+          <Card accent={getStageColor(lead.stage)}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12 }}>
+              <div>
+                <div style={{ fontSize:18, fontWeight:800, color:T.t1 }}>{lead.name}</div>
+                <div style={{ fontSize:12, color:T.t2 }}>{lead.business}</div>
+                <div style={{ fontSize:11, color:T.t3 }}>{lead.type} · {lead.area}</div>
+              </div>
+              <button onClick={() => { setEditForm({...lead}); setShowEdit(true); }}
+                style={{ background:T.accentSub, border:`1px solid ${T.accentGlow}`, borderRadius:8, color:T.accent, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:FONT }}>
+                ✏️ Edit
+              </button>
+            </div>
+            <Chip label={lead.stage} color={getStageColor(lead.stage)} />
+            <div style={{ marginTop:12 }}>
+              {[["Contact",lead.contact],["Area",lead.area],["Address",lead.address],["Source",lead.source],["Telecaller",lead.telecaller],["Last contact",lead.lastContact]].map(([k,v]) => v ? (
+                <div key={k} style={{ display:"flex", padding:"8px 0", borderBottom:`1px solid ${T.border}` }}>
+                  <span style={{ fontSize:11, color:T.t3, width:100, flexShrink:0, fontWeight:600 }}>{k}</span>
+                  <span style={{ fontSize:12, fontWeight:600, color:T.t1 }}>{v}</span>
+                </div>
+              ) : null)}
+            </div>
+            <div style={{ display:"flex", gap:8, marginTop:14 }}>
+              <button onClick={() => { const p=(lead.contact||"").replace(/[^0-9]/g,""); if(p) window.location.href="tel:+91"+p; }}
+                style={{ flex:1, background:T.emerald+"22", border:`1px solid ${T.emerald}44`, borderRadius:10, color:T.emerald, padding:"10px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:FONT }}>📞 Call</button>
+              <button onClick={() => { const p=(lead.contact||"").replace(/[^0-9]/g,""); window.open("https://wa.me/91"+p,"_blank"); }}
+                style={{ flex:1, background:"#25D36622", border:"1px solid #25D36644", borderRadius:10, color:"#25D366", padding:"10px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:FONT }}>💬 WhatsApp</button>
+            </div>
+          </Card>
+        )}
+
+        <Card>
+          <Label>Update Stage</Label>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:7, marginTop:8 }}>
+            {PIPELINE_STAGES.map(s => (
+              <button key={s.id} onClick={() => { updateStageP(lead.id, s.id); setSelectedLead({...lead, stage:s.id}); }}
+                style={{ background: lead.stage===s.id ? s.color+"22" : T.surface,
+                  border:`1px solid ${lead.stage===s.id ? s.color : T.border}`,
+                  borderRadius:8, padding:"6px 12px", fontSize:11, fontWeight:600,
+                  color: lead.stage===s.id ? s.color : T.t2, cursor:"pointer", fontFamily:FONT }}>
+                {s.id}
+              </button>
+            ))}
+          </div>
+        </Card>
+
+        <Card>
+          <Label sub={`${(lead.remarks||[]).length} entries`}>Remarks</Label>
+          {(lead.remarks||[]).length === 0 && <div style={{ fontSize:12, color:T.t3, padding:"8px 0" }}>No remarks yet.</div>}
+          {(lead.remarks||[]).slice().reverse().map((r,i) => {
+            const match = r.match(/^\[(.+?)\] (.+)$/);
+            return (
+              <div key={i} style={{ background:T.surface, borderRadius:10, padding:"10px 12px", marginBottom:8, borderLeft:`3px solid ${T.accent}` }}>
+                {match && <div style={{ fontSize:10, color:T.accent, fontWeight:700, marginBottom:3 }}>🕐 {match[1]}</div>}
+                <div style={{ fontSize:12, color:T.t1 }}>{match ? match[2] : r}</div>
+              </div>
+            );
+          })}
+          <textarea value={remark} onChange={e => setRemark(e.target.value)} rows={3}
+            placeholder="Add a remark..."
+            style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"10px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box", resize:"none", marginTop:8 }} />
+          <div style={{ marginTop:8 }}>
+            <button onClick={() => addRemarkP(lead.id)}
+              style={{ background:T.accent, border:"none", borderRadius:12, color:"#060B16", padding:"11px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT, width:"100%" }}>
+              Save Remark
+            </button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
@@ -1680,20 +1853,31 @@ function Pipeline() {
             {isOpen && stageLeads.length > 0 && (
               <div style={{ padding:"8px 16px 14px" }}>
                 {stageLeads.map(l => (
-                  <div key={l.id} style={{
-                    background:T.surface, borderRadius:10, padding:"10px 12px", marginTop:8,
-                    display:"flex", justifyContent:"space-between", alignItems:"center",
-                  }}>
+                  <div key={l.id} onClick={() => setSelectedLead(l)}
+                    style={{
+                      background:T.surface, borderRadius:10, padding:"10px 12px", marginTop:8,
+                      display:"flex", justifyContent:"space-between", alignItems:"center",
+                      cursor:"pointer", border:`1px solid transparent`,
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.borderColor=T.accentGlow}
+                    onMouseLeave={e => e.currentTarget.style.borderColor="transparent"}
+                  >
                     <div>
                       <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{l.name}</div>
                       <div style={{ fontSize:10, color:T.t3, marginTop:2 }}>{l.area} · {l.telecaller}</div>
                       {l.contact && (
-                        <div style={{ fontSize:10, color:T.accent, marginTop:2 }}>📞 {l.contact}</div>
+                        <div style={{ fontSize:11, color:T.accent, marginTop:2, fontWeight:600 }}>📞 {l.contact}</div>
+                      )}
+                      {l.remarks && l.remarks.length > 0 && (
+                        <div style={{ fontSize:10, color:T.t3, marginTop:3, fontStyle:"italic" }}>
+                          💬 {typeof l.remarks[l.remarks.length-1] === "string" ? l.remarks[l.remarks.length-1].slice(0,50)+"..." : ""}
+                        </div>
                       )}
                     </div>
                     <div style={{ display:"flex", flexDirection:"column", gap:4, alignItems:"flex-end" }}>
                       <Chip label={l.priority||"Medium"} color={getPriorityColor(l.priority||"Medium")} />
                       <span style={{ fontSize:10, color:T.t3 }}>{l.lastContact||""}</span>
+                      <span style={{ fontSize:10, color:T.accent }}>Tap to open →</span>
                     </div>
                   </div>
                 ))}
