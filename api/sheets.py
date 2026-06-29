@@ -31,7 +31,10 @@ CACHE_TTL = 60
 def get_token():
     email = os.environ.get("GOOGLE_SERVICE_ACCOUNT_EMAIL", "")
     raw_key = os.environ.get("GOOGLE_PRIVATE_KEY", "")
-    raw_key = raw_key.replace("\\n", "\n").replace("\\r", "").strip()
+    # Handle all Vercel key encoding variants
+    raw_key = raw_key.replace("\\n", "
+").replace("\n", "
+").replace("\r", "").strip()
     creds = service_account.Credentials.from_service_account_info(
         {"type": "service_account", "client_email": email, "private_key": raw_key,
          "token_uri": "https://oauth2.googleapis.com/token"},
