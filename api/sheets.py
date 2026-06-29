@@ -171,7 +171,25 @@ class handler(BaseHTTPRequestHandler):
         if tab == "envcheck":
             email = os.environ.get("GOOGLE_SERVICE_ACCOUNT_EMAIL","")
             key = os.environ.get("GOOGLE_PRIVATE_KEY","")
-            self._send(200,{"email_set":bool(email),"email":email[:30],"key_set":bool(key),"key_len":len(key),"key_has_begin":"BEGIN" in key,"sheet_id":os.environ.get("GOOGLE_SHEET_ID","")})
+            sheet_id = os.environ.get("GOOGLE_SHEET_ID","")
+            key2 = key.replace("\\\\n","\n").replace("\\n","\n").strip()
+            try:
+                creds_test = service_account.Credentials.from_service_account_info(
+                    {"type":"service_account","client_email":email,"private_key":key2,
+                     "token_uri":"https://oauth2.googleapis.com/token"},
+                    scopes=SCOPES)
+                key_valid = True
+                key_error = ""
+            except Exception as ke:
+                key_valid = False
+                key_error = str(ke)
+            self._send(200,{
+                "email":email[:40],"key_len":len(key),"key_len_processed":len(key2),
+                "key_newlines":key2.count("\n"),"key_has_begin":"BEGIN" in key2,
+                "key_valid":key_valid,"key_error":key_error,
+                "key_first_40":key2[:40],"key_last_20":key2[-20:],
+                "sheet_id":sheet_id
+            })
             return
         if tab == "debug":
             try:
