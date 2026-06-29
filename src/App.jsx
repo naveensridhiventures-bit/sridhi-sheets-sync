@@ -813,8 +813,18 @@ function Dashboard() {
 
   // Sales KG - from samples delivered + pipeline kgQty
   const samplesDeliveredKg = (samples||[]).filter(s => s.status==="Delivered").reduce((a,b) => a+(Number(b.qty)||0), 0);
-  const orderKg = activeLeads.filter(l => l.stage === "Order Received" || l.stage === "Active Customer")
-    .reduce((a,l) => a+(Number(l.kgQty)||0), 0);
+  // Sum KG from all order-stage leads (kgQty field entered during delivery)
+  const orderKg = activeLeads
+    .filter(l => ["Order Received","Active Customer","Repeat Order Follow-up"].includes(l.stage))
+    .reduce((a,l) => {
+      // Try kgQty field first, then parse from remarks
+      const fromField = Number(l.kgQty) || 0;
+      if (fromField > 0) return a + fromField;
+      // Try to extract KG from last remark e.g. "10 KG ORDER"
+      const lastRemark = (l.remarks||[]).slice(-1)[0] || "";
+      const match = lastRemark.match(/(\d+)\s*(?:kg|KG|Kg)/);
+      return a + (match ? Number(match[1]) : 0);
+    }, 0);
   const totalKg = samplesDeliveredKg + orderKg;
 
   // Revenue - KG * price (₹120/kg default)
@@ -859,6 +869,7 @@ function Dashboard() {
         <KPI label="Revenue"          value={totalRevenue}  unit="₹" change={0} color={T.emerald} icon="💰" />
         <KPI label="Active customers" value={activeCustomers} change={0} color={T.indigo} icon="🏪" />
         <KPI label="Total Leads"      value={activeLeads.length} change={0} color={T.amber} icon="📋" />
+        <KPI label="Orders"           value={ordersReceived.length} change={0} color={T.emerald} icon="📦" />
         <KPI label="Conversion"       value={convRate+"%"} change={0} color={T.accent} icon="🎯" />
         <KPI label="Samples sent"     value={samplesSentKg} unit="KG" change={0} color={T.orange} icon="🧪" />
         <KPI label="Total Expenses"   value={totalExpenses} unit="₹" change={0} color={T.rose} icon="💸" />
@@ -885,11 +896,11 @@ function Dashboard() {
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginTop:8 }}>
           {[
             ["Orders", ordersReceived.length, T.emerald],
-            ["KG Sold", totalKg, T.accent],
-            ["Revenue", "₹"+(totalRevenue/1000).toFixed(1)+"K", T.emerald],
+            ["KG Sold", totalKg > 0 ? totalKg : "—", T.accent],
+            ["Revenue", totalRevenue > 0 ? "₹"+(totalRevenue/1000).toFixed(1)+"K" : "—", T.emerald],
             ["Samples", (samples||[]).length, T.orange],
             ["Expenses", "₹"+(totalExpenses/1000).toFixed(1)+"K", T.rose],
-            ["Profit", "₹"+(Math.max(0,estProfit)/1000).toFixed(1)+"K", T.sky],
+            ["Profit", estProfit > 0 ? "₹"+(estProfit/1000).toFixed(1)+"K" : "—", T.sky],
           ].map(([l,v,c]) => (
             <div key={l} style={{ textAlign:"center", background:T.surface, borderRadius:12, padding:"10px 4px" }}>
               <div style={{ fontSize:16, fontWeight:900, color:c }}>{v}</div>
@@ -897,6 +908,19 @@ function Dashboard() {
             </div>
           ))}
         </div>
+        {ordersReceived.length > 0 && (
+          <div style={{ marginTop:12, borderTop:`1px solid ${T.border}`, paddingTop:10 }}>
+            <div style={{ fontSize:10, color:T.t3, fontWeight:700, marginBottom:6 }}>RECENT ORDERS</div>
+            {ordersReceived.slice(0,5).map((l,i) => (
+              <div key={i} style={{ display:"flex", justifyContent:"space-between", padding:"5px 0", borderBottom:`1px solid ${T.border}` }}>
+                <span style={{ fontSize:12, color:T.t1, fontWeight:600 }}>{l.name}</span>
+                <span style={{ fontSize:11, color:T.accent, fontWeight:700 }}>
+                  {l.kgQty ? l.kgQty+"KG" : l.remarks?.slice(-1)[0]?.match(/(\d+)\s*(?:kg|KG)/)?.[0] || "—"}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
 
       {/* Repeat order alerts */}
