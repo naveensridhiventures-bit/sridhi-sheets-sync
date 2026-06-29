@@ -6,7 +6,7 @@
   "rewrites": [
     { "source": "/api/ai",        "destination": "/api/ai.py" },
     { "source": "/api/prospects", "destination": "/api/prospects.py" },
-    { "source": "/api/sheets",    "destination": "/api/sheets.js" },
+    { "source": "/api/sheets",    "destination": "/api/sheets.cjs" },
     { "source": "/(.*)",          "destination": "/index.html" }
   ]
 }
