@@ -1304,6 +1304,29 @@ function Leads() {
   const [kgQty, setKgQty] = useState("");
   const [groupMsg, setGroupMsg] = useState(null); // { lead, stage, method }
   const [newLead, setNewLead] = useState({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Thulasi" });
+  const [newLeadToast, setNewLeadToast] = useState(null);
+  const seenLeadIds = useRef(null);
+
+  // ── Pop in a small toast whenever a lead appears that we haven't seen before ──
+  useEffect(() => {
+    const ids = leads.map(l => l.contact || l.id).filter(Boolean);
+    if (seenLeadIds.current === null) {
+      // First load — remember what's already here, don't toast for it
+      let stored = null;
+      try { stored = JSON.parse(localStorage.getItem("bos_seen_lead_ids") || "null"); } catch {}
+      seenLeadIds.current = new Set(stored && Array.isArray(stored) ? stored : ids);
+      try { localStorage.setItem("bos_seen_lead_ids", JSON.stringify(ids)); } catch {}
+      return;
+    }
+    const fresh = leads.find(l => (l.contact || l.id) && !seenLeadIds.current.has(l.contact || l.id));
+    if (fresh) {
+      setNewLeadToast(fresh);
+      const t = setTimeout(() => setNewLeadToast(null), 6000);
+      ids.forEach(id => seenLeadIds.current.add(id));
+      try { localStorage.setItem("bos_seen_lead_ids", JSON.stringify([...seenLeadIds.current])); } catch {}
+      return () => clearTimeout(t);
+    }
+  }, [leads]);
 
   const filtered = leads.filter(l =>
     l && l.name && l.stage &&
@@ -1626,6 +1649,24 @@ function Leads() {
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      {newLeadToast && (
+        <div onClick={() => { setSelected(newLeadToast.contact || newLeadToast.id); setNewLeadToast(null); }}
+          style={{
+            position:"fixed", top:14, left:"50%", transform:"translateX(-50%)",
+            width:"calc(100% - 32px)", maxWidth:420, zIndex:999, cursor:"pointer",
+            background:T.card, border:`1px solid ${T.emerald}55`, borderRadius:16,
+            boxShadow:"0 10px 30px rgba(15,23,42,0.18)", padding:"12px 14px",
+            display:"flex", alignItems:"center", gap:12,
+          }}>
+          <div style={{ width:38, height:38, borderRadius:10, background:T.emerald+"1c", display:"flex", alignItems:"center", justifyContent:"center", fontSize:19, flexShrink:0 }}>🎉</div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:12.5, fontWeight:800, color:T.t1 }}>New lead: {newLeadToast.name}</div>
+            <div style={{ fontSize:11, color:T.t3, marginTop:1 }}>{newLeadToast.area || newLeadToast.source || "Tap to view and call"}</div>
+          </div>
+          <button onClick={(e) => { e.stopPropagation(); const p=(newLeadToast.contact||"").replace(/[^0-9]/g,""); if(p) window.location.href="tel:+91"+p; }}
+            style={{ background:T.emerald, border:"none", borderRadius:10, color:"#060B16", width:34, height:34, fontSize:15, cursor:"pointer", flexShrink:0 }}>📞</button>
+        </div>
+      )}
       <div style={{ display:"flex", gap:8 }}>
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search by name, area, contact…"
@@ -1686,6 +1727,22 @@ function Leads() {
               {lead.remarks[lead.remarks.length-1]}
             </div>
           )}
+          <div style={{ display:"flex", gap:8, marginTop:11 }} onClick={e => e.stopPropagation()}>
+            <button onClick={() => { const p=(lead.contact||"").replace(/[^0-9]/g,""); if(p) window.location.href="tel:+91"+p; }}
+              style={{
+                flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+                background:T.emerald+"14", border:`1px solid ${T.emerald}33`, borderRadius:10,
+                color:T.emerald, padding:"8px 0", fontSize:11.5, fontWeight:700, cursor:"pointer", fontFamily:FONT,
+              }}>📞 Call</button>
+            <select value={lead.stage} onChange={e => updateStage(lead.contact || lead.id, e.target.value)}
+              style={{
+                flex:1.4, background:T.accent+"14", border:`1px solid ${T.accent}33`, borderRadius:10,
+                color:T.accent, padding:"8px 6px", fontSize:11.5, fontWeight:700, cursor:"pointer",
+                fontFamily:FONT, appearance:"none", textAlign:"center",
+              }}>
+              {PIPELINE_STAGES.map(s => <option key={s.id} value={s.id}>{s.id}</option>)}
+            </select>
+          </div>
         </div>
       ))}
 
@@ -2343,24 +2400,57 @@ function FieldSync() {
 
 // ─── REPEAT ORDERS ────────────────────────────────────────────────────────
 function RepeatOrders() {
-  const [repeatCustomers, , repeatSyncStatus] = useSheetSynced("repeatCustomers", "repeatCustomers", REPEAT_CUSTOMERS);
+  const [repeatCustomers, setRepeatCustomers, repeatSyncStatus] = useSheetSynced("repeatCustomers", "repeatCustomers", REPEAT_CUSTOMERS);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newCust, setNewCust] = useState({ name:"", area:"", contact:"", product:"Ghee", qty:"", frequency:"Weekly", status:"Upcoming", lastOrder:"", nextDue:"", revenue:"" });
   const statusColor = { "Due Today":T.rose, Tomorrow:T.amber, Upcoming:T.emerald };
   const grouped = {
     "Due Today": repeatCustomers.filter(c => c.status==="Due Today"),
     "Tomorrow":  repeatCustomers.filter(c => c.status==="Tomorrow"),
     "Upcoming":  repeatCustomers.filter(c => c.status==="Upcoming"),
   };
+  const activeCount = repeatCustomers.length;
+  const monthlyRevenue = repeatCustomers.reduce((a,c) => a + ((parseInt(c.revenue)||0)/12), 0);
+  const avgQty = activeCount ? Math.round(repeatCustomers.reduce((a,c) => a + (parseInt(c.qty)||0), 0) / activeCount) : 0;
+
+  const addCustomer = () => {
+    if (!newCust.name || !newCust.contact) return;
+    const today = new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
+    setRepeatCustomers([{ ...newCust, id: Date.now(), qty: parseInt(newCust.qty)||0, revenue: parseInt(newCust.revenue)||0, lastOrder: newCust.lastOrder || today, nextDue: newCust.nextDue || today }, ...repeatCustomers]);
+    setShowAdd(false);
+    setNewCust({ name:"", area:"", contact:"", product:"Ghee", qty:"", frequency:"Weekly", status:"Upcoming", lastOrder:"", nextDue:"", revenue:"" });
+  };
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
       <div style={{ display:"flex", flexWrap:"wrap", gap:10 }}>
-        <KPI label="Active customers" value={0}      color={T.accent}  icon="🏪" />
-        <KPI label="Monthly revenue"  value={0} unit="₹" color={T.emerald} icon="💰" />
+        <KPI label="Active customers" value={activeCount}      color={T.accent}  icon="🏪" />
+        <KPI label="Monthly revenue"  value={Math.round(monthlyRevenue)} unit="₹" color={T.emerald} icon="💰" />
         <KPI label="Due today"        value={grouped["Due Today"].length} color={T.rose} icon="⚠️" />
-        <KPI label="Avg order"        value="28 KG"  color={T.amber}   icon="📦" />
+        <KPI label="Avg order"        value={avgQty ? `${avgQty} KG` : "—"}  color={T.amber}   icon="📦" />
       </div>
       <div style={{ display:"flex", justifyContent:"flex-end" }}>
         <SyncBadge status={repeatSyncStatus} />
       </div>
+
+      <button onClick={() => setShowAdd(true)} style={{
+        background:T.indigo+"18", border:`1px solid ${T.indigo}33`,
+        borderRadius:14, color:T.indigo, padding:13,
+        fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:FONT,
+      }}>+ Add Repeat Customer</button>
+
+      {activeCount===0 && (
+        <Card>
+          <div style={{ textAlign:"center", padding:"28px 12px" }}>
+            <div style={{ fontSize:36, marginBottom:10 }}>🔁</div>
+            <div style={{ fontSize:14, fontWeight:800, color:T.t1, marginBottom:6 }}>No repeat customers yet</div>
+            <div style={{ fontSize:12, color:T.t3, lineHeight:1.5, maxWidth:280, margin:"0 auto" }}>
+              Once a lead converts into a recurring customer, add them here to track their order cycle, revenue and due dates.
+            </div>
+          </div>
+        </Card>
+      )}
+
       {Object.entries(grouped).map(([group, customers]) => customers.length>0 && (
         <div key={group}>
           <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
@@ -2396,6 +2486,21 @@ function RepeatOrders() {
           ))}
         </div>
       ))}
+
+      <Sheet open={showAdd} onClose={() => setShowAdd(false)} title="Add Repeat Customer">
+        <Field label="Customer Name *" value={newCust.name} onChange={e => setNewCust({...newCust,name:e.target.value})} />
+        <Field label="Contact *" value={newCust.contact} onChange={e => setNewCust({...newCust,contact:e.target.value})} type="tel" />
+        <Field label="Area" value={newCust.area} onChange={e => setNewCust({...newCust,area:e.target.value})} />
+        <Dropdown label="Product" value={newCust.product} onChange={e => setNewCust({...newCust,product:e.target.value})} options={["Ghee","Honey","Millets","Oil","Spices","Other"]} />
+        <Field label="Qty per order (KG)" value={newCust.qty} onChange={e => setNewCust({...newCust,qty:e.target.value})} type="number" />
+        <Dropdown label="Order Frequency" value={newCust.frequency} onChange={e => setNewCust({...newCust,frequency:e.target.value})} options={["Weekly","Fortnightly","Monthly"]} />
+        <Dropdown label="Status" value={newCust.status} onChange={e => setNewCust({...newCust,status:e.target.value})} options={["Due Today","Tomorrow","Upcoming"]} />
+        <Field label="Annual Revenue (₹)" value={newCust.revenue} onChange={e => setNewCust({...newCust,revenue:e.target.value})} type="number" placeholder="e.g. 24000" />
+        <div style={{ display:"flex", gap:10 }}>
+          <Btn label="Cancel" color={T.t2} ghost full onClick={() => setShowAdd(false)} />
+          <Btn label="Add Customer" full onClick={addCustomer} />
+        </div>
+      </Sheet>
     </div>
   );
 }
@@ -3538,33 +3643,28 @@ function DesktopSidebar({ activeTab, setActiveTab, collapsed, setCollapsed, lead
 }
 
 function DesktopTopbar({ role, setRole, search, setSearch, collapsed, setCollapsed, notifCount }) {
-  const profile = ROLE_PROFILE[role] || { name: "Team Member", sub: role || "Member" };
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
   const todayStr = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-  const firstName = profile.name.split(" ")[0];
 
   return (
     <div style={{
       position: "sticky", top: 0, zIndex: 40, background: `${DT.bg}F2`, backdropFilter: "blur(10px)",
-      borderBottom: `1px solid ${DT.border}`, padding: "16px 28px", display: "flex", alignItems: "center", gap: 20,
+      borderBottom: `1px solid ${DT.border}`, padding: "14px 28px", display: "flex", alignItems: "center", gap: 16,
     }}>
       <button onClick={() => setCollapsed(!collapsed)}
         style={{ width: 30, height: 30, borderRadius: "50%", background: DT.card, border: `1px solid ${DT.borderHi}`, color: DT.t2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
         <DIcon id="chevron" size={14} color={DT.t2} strokeWidth={2.4} style={{ transform: collapsed ? "rotate(180deg)" : "none" }} />
       </button>
 
-      <div style={{ flex: "0 0 auto" }}>
-        <div style={{ fontSize: 18, fontWeight: 800, color: DT.t1, letterSpacing: "-0.01em" }}>{greeting}, {firstName} 👋</div>
-        <div style={{ fontSize: 12.5, color: DT.t3, marginTop: 2 }}>Here's what's happening with your business today.</div>
+      <div style={{ position: "relative", width: 320 }}>
+        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}><DIcon id="search" size={15} color={DT.t3} /></span>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search leads, customers, tasks..."
+          style={{ width: "100%", background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 10, padding: "9px 12px 9px 34px", fontSize: 12.5, color: DT.t1, fontFamily: FONT, outline: "none" }} />
       </div>
 
       <div style={{ flex: 1 }} />
 
-      <div style={{ position: "relative", width: 280 }}>
-        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}><DIcon id="search" size={15} color={DT.t3} /></span>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search leads, customers, tasks..."
-          style={{ width: "100%", background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 10, padding: "9px 12px 9px 34px", fontSize: 12.5, color: DT.t1, fontFamily: FONT, outline: "none" }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 8, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 10, padding: "6px 12px", fontSize: 12, color: DT.t2, whiteSpace: "nowrap" }}>
+        <DIcon id="calendar" size={13} color={DT.t3} />Today, {todayStr}
       </div>
 
       <div style={{ position: "relative", width: 36, height: 36, borderRadius: "50%", background: DT.card, border: `1px solid ${DT.border}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
@@ -3574,21 +3674,10 @@ function DesktopTopbar({ role, setRole, search, setSearch, collapsed, setCollaps
         )}
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 8, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 10, padding: "6px 12px", fontSize: 12, color: DT.t2, whiteSpace: "nowrap" }}>
-        <DIcon id="calendar" size={13} color={DT.t3} />Today, {todayStr}
-      </div>
-
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 34, height: 34, borderRadius: "50%", background: `linear-gradient(135deg, ${DT.indigo}, ${DT.purple})`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 13, fontWeight: 800 }}>
-          {firstName.slice(0, 1)}
-        </div>
-        <div>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: DT.t1, lineHeight: 1.2 }}>{profile.name}</div>
-          <div style={{ fontSize: 10.5, color: DT.t3, lineHeight: 1.2 }}>{profile.sub}</div>
-        </div>
-        <button onClick={() => setRole(null)} title="Exit"
-          style={{ background: "transparent", border: `1px solid ${DT.border}`, borderRadius: 8, color: DT.t3, padding: "5px 9px", fontSize: 10.5, cursor: "pointer", fontFamily: FONT, fontWeight: 600, marginLeft: 4 }}>Exit</button>
-      </div>
+      <button onClick={() => setRole(null)} title={`Switch role (currently ${role})`}
+        style={{ width: 34, height: 34, borderRadius: "50%", background: `linear-gradient(135deg, ${DT.indigo}, ${DT.purple})`, border: "none", color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        {(role || "?").slice(0, 1)}
+      </button>
     </div>
   );
 }
@@ -4025,8 +4114,23 @@ function NavIcon({ id, active }) {
 
 // ─── ROOT ──────────────────────────────────────────────────────────────────
 export default function App() {
-  const [activeTab, setActiveTab] = useState("dashboard");
-  const [role, setRole] = useState(null);
+  const [activeTab, setActiveTabRaw] = useState(() => {
+    try { return localStorage.getItem("bos_activeTab") || "dashboard"; } catch { return "dashboard"; }
+  });
+  const [role, setRoleRaw] = useState(() => {
+    try { return localStorage.getItem("bos_role") || null; } catch { return null; }
+  });
+  const setActiveTab = (tab) => {
+    setActiveTabRaw(tab);
+    try { localStorage.setItem("bos_activeTab", tab); } catch {}
+  };
+  const setRole = (r) => {
+    setRoleRaw(r);
+    try {
+      if (r) localStorage.setItem("bos_role", r);
+      else { localStorage.removeItem("bos_role"); localStorage.removeItem("bos_activeTab"); setActiveTabRaw("dashboard"); }
+    } catch {}
+  };
   const [showMore, setShowMore] = useState(false);
   const contentRef = useRef(null);
   const [installPrompt, setInstallPrompt] = useState(null);
