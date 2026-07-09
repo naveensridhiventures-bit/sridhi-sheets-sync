@@ -20,7 +20,7 @@ except Exception as _e:
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 TAB_CONFIG = {
-    "leads":           {"tab": "Leads",           "headers": ["id","name","contact","business","type","area","address","stage","source","telecaller","lastContact","priority","remarks","kgQty"]},
+    "leads":           {"tab": "Leads",           "headers": ["id","name","contact","business","type","area","address","stage","source","telecaller","lastContact","lastContactAt","createdAt","orderCount","callOutcome","priority","remarks","kgQty"]},
     "samples":         {"tab": "Samples",          "headers": ["id","customer","leadId","qty","unit","type","date","exec","deliveryCost","productionCost","status","feedback","converted"]},
     "expenses":        {"tab": "Expenses",         "headers": ["id","category","amount","date","type","subtype"]},
     "repeatCustomers": {"tab": "RepeatCustomers",  "headers": ["id","name","area","contact","product","qty","frequency","lastOrder","nextDue","status","revenue"]},
@@ -103,6 +103,12 @@ def _coerce(tab_key, row):
     if tab_key == "leads":
         row["id"] = int(row["id"]) if str(row.get("id","")).isdigit() else row.get("id","")
         row["remarks"] = [r for r in row.get("remarks","").split(" || ") if r] if row.get("remarks") else []
+        for f in ("lastContactAt", "createdAt", "orderCount", "kgQty"):
+            if row.get(f, "") not in (None, ""):
+                try: row[f] = int(float(row[f]))
+                except: pass
+            else:
+                row[f] = None if f in ("lastContactAt", "createdAt") else 0
     elif tab_key in ("samples","expenses","repeatCustomers"):
         for f in ("id","qty","deliveryCost","productionCost","amount","revenue","leadId"):
             if f in row:

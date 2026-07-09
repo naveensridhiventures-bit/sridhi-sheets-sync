@@ -48,11 +48,12 @@ async function fetchAll() {
 }
 
 async function pushTab(tab, data) {
-  // Use GET with base64 body since Vercel rewrites block POST to Python
-  const body = JSON.stringify({ [tab]: data });
-  const b64 = btoa(unescape(encodeURIComponent(body)));
-  const url = API_BASE + "/api/sync?tab=" + tab + "&_method=POST&_body=" + encodeURIComponent(b64);
-  const r = await fetch(url, { headers: getHeaders() });
+  const url = API_BASE + "/api/sync?tab=" + tab;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ [tab]: data }),
+  });
   if (!r.ok) throw new Error("HTTP " + r.status);
   delete _mem["ALL"];
 }
