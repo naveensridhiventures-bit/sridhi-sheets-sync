@@ -3,30 +3,30 @@ import { useSheets, SYNC_ENABLED } from "./useSheets.js";
 
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────
 const T = {
-  bg:       "#F4F7FB",
-  surface:  "#FFFFFF",
-  card:     "#FFFFFF",
-  cardHigh: "#F8FAFC",
-  glass:    "rgba(255,255,255,0.85)",
+  bg:       "#0A0E1A",
+  surface:  "#0F1524",
+  card:     "#131B2E",
+  cardHigh: "#1A2438",
+  glass:    "rgba(19,27,46,0.85)",
 
-  border:   "#E4E9F2",
-  borderHi: "#CBD5E1",
+  border:   "#212D47",
+  borderHi: "#2E3D5C",
 
-  accent:    "#00C9A7",
-  accentSub: "rgba(0,201,167,0.10)",
-  accentGlow:"rgba(0,201,167,0.28)",
+  accent:    "#1FE0B8",
+  accentSub: "rgba(31,224,184,0.12)",
+  accentGlow:"rgba(31,224,184,0.38)",
 
-  emerald:  "#10B981",
-  amber:    "#F59E0B",
-  rose:     "#F43F5E",
-  indigo:   "#6366F1",
-  sky:      "#0EA5E9",
+  emerald:  "#22D98A",
+  amber:    "#FBBF24",
+  rose:     "#FB7185",
+  indigo:   "#818CF8",
+  sky:      "#38BDF8",
   orange:   "#FB923C",
 
-  t1: "#0F172A",
-  t2: "#475569",
-  t3: "#7C8CA6",
-  t4: "#CBD5E1",
+  t1: "#F1F5F9",
+  t2: "#94A3B8",
+  t3: "#64748B",
+  t4: "#3B4A6B",
 };
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
@@ -3775,6 +3775,9 @@ function DIcon({ id, size = 18, color = "currentColor", strokeWidth = 1.8 }) {
     case "cart": return <svg {...p}><circle cx="9" cy="20" r="1.3"/><circle cx="18" cy="20" r="1.3"/><path d="M2 3h2l2.4 12.4a2 2 0 0 0 2 1.6h8.3a2 2 0 0 0 2-1.6L21 7H6"/></svg>;
     case "wallet2": return <svg {...p}><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M17 12h.01"/></svg>;
     case "calendar": return <svg {...p}><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M3 10h18"/></svg>;
+    case "marketing": return <svg {...p}><path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M16 8a5 5 0 0 1 0 8"/><path d="M19 5a9 9 0 0 1 0 14"/></svg>;
+    case "compass": return <svg {...p}><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>;
+    case "clipboard": return <svg {...p}><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3"/><path d="M9 12h6"/><path d="M9 16h6"/><path d="M9 8h1"/></svg>;
     default: return null;
   }
 }
@@ -3788,7 +3791,10 @@ const DESKTOP_NAV = [
   { id: "fieldsync", label: "Dispatch",     icon: "dispatch" },
   { id: "samples",   label: "Samples",      icon: "samples" },
   { id: "today",     label: "Telecalling",  icon: "phone" },
+  { id: "prospects", label: "Find Prospects", icon: "compass", tag: "New" },
+  { id: "hrleads",   label: "HR Leads",     icon: "clipboard" },
   { id: "whatsapp",  label: "Follow-ups",   icon: "followups" },
+  { id: "marketing", label: "Marketing",    icon: "marketing" },
   { id: "expenses",  label: "Expenses",     icon: "expenses" },
   { id: "reports",   label: "Reports",      icon: "reports" },
   { id: "ai",        label: "AI Assistant", icon: "ai", tag: "New" },
@@ -4508,16 +4514,25 @@ export default function App() {
       <style>{`
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
-        ::-webkit-scrollbar { width: 0; height: 0; }
-        select option { background: #FFFFFF; color: #0F172A; }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-thumb { background: ${T.border}; border-radius: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        select option { background: ${T.card}; color: ${T.t1}; }
         @keyframes pulse { 0%,100% { opacity:0.25; transform:scale(0.8); } 50% { opacity:1; transform:scale(1.1); } }
-        input::placeholder { color: #94A3B8; }
-        textarea::placeholder { color: #94A3B8; }
-        input:-webkit-autofill { -webkit-box-shadow: 0 0 0 100px #FFFFFF inset; -webkit-text-fill-color: #0F172A; }
+        @keyframes fadeSlideIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+        input::placeholder { color: ${T.t3}; }
+        textarea::placeholder { color: ${T.t3}; }
+        input:-webkit-autofill { -webkit-box-shadow: 0 0 0 100px ${T.card} inset; -webkit-text-fill-color: ${T.t1}; }
+
+        button { transition: transform 0.12s ease, opacity 0.12s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }
+        button:active { transform: scale(0.96); opacity: 0.9; }
+        a, .tappable, [role="button"] { transition: transform 0.12s ease, opacity 0.12s ease; }
+
+        .bos-content-fade { animation: fadeSlideIn 0.28s ease both; }
       `}</style>
 
       {/* Header */}
-      <div style={{ background:T.surface, borderBottom:`1px solid ${T.border}`, padding:"12px 18px", display:"flex", justifyContent:"space-between", alignItems:"center", position:"sticky", top:0, zIndex:80, backdropFilter:"blur(12px)" }}>
+      <div style={{ background:T.glass, borderBottom:`1px solid ${T.border}`, padding:"12px 18px", display:"flex", justifyContent:"space-between", alignItems:"center", position:"sticky", top:0, zIndex:80, backdropFilter:"blur(14px)", boxShadow:"0 4px 20px rgba(0,0,0,0.25)" }}>
         <div>
           <div style={{ fontSize:15, fontWeight:900, color:T.t1, letterSpacing:"-0.03em" }}>Sridhi BOS</div>
           <div style={{ fontSize:10, color:T.t3, marginTop:1, fontWeight:500, letterSpacing:"0.02em", textTransform:"uppercase" }}>{tabLabel[activeTab]}</div>
@@ -4536,15 +4551,15 @@ export default function App() {
       </div>
 
       {/* Accent bar */}
-      <div style={{ height:2, flexShrink:0, background:`linear-gradient(90deg, ${T.sky}, ${T.indigo}, ${T.accent}, ${T.emerald})` }} />
+      <div style={{ height:2, flexShrink:0, background:`linear-gradient(90deg, ${T.sky}, ${T.indigo}, ${T.accent}, ${T.emerald})`, boxShadow:`0 0 12px ${T.accentGlow}` }} />
 
       {/* Content */}
-      <div ref={contentRef} style={{ flex:1, overflowY:"auto", padding: activeTab==="ai" ? "16px 16px 0" : "16px 16px 90px" }}>
+      <div ref={contentRef} key={activeTab} className="bos-content-fade" style={{ flex:1, overflowY:"auto", padding: activeTab==="ai" ? "16px 16px 0" : "16px 16px 90px" }}>
         {renderModule()}
       </div>
 
       {/* Bottom nav */}
-      <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:T.surface, borderTop:`1px solid ${T.border}`, display:"flex", padding:"10px 0 20px", zIndex:80 }}>
+      <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:T.glass, backdropFilter:"blur(14px)", borderTop:`1px solid ${T.border}`, display:"flex", padding:"10px 0 20px", zIndex:80, boxShadow:"0 -4px 20px rgba(0,0,0,0.3)" }}>
         {NAV.map(n => {
           const isActive = n.id==="more" ? MORE_MENU.some(m => m.id===activeTab) : activeTab===n.id;
           return (
@@ -4573,6 +4588,7 @@ export default function App() {
                 border:`1px solid ${activeTab===m.id ? T.accentGlow : T.border}`,
                 borderRadius:16, padding:"16px 14px", cursor:"pointer",
                 display:"flex", alignItems:"center", gap:10, fontFamily:FONT,
+                boxShadow: activeTab===m.id ? `0 0 16px ${T.accentGlow}` : "none",
               }}>
               <span style={{ fontSize:20 }}>{m.icon}</span>
               <span style={{ fontSize:13, fontWeight:700, color: activeTab===m.id ? T.accent : T.t1, letterSpacing:"-0.01em" }}>{m.label}</span>
