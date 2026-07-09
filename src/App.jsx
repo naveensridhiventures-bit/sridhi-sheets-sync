@@ -3386,6 +3386,630 @@ const MORE_MENU = [
   { id:"ai",        label:"AI Assistant",  icon:"✦"  },
 ];
 
+// ══════════════════════════════════════════════════════════════════════════
+// ─── DESKTOP EXPERIENCE (≥1024px) ──────────────────────────────────────────
+// Dark "control room" theme — sidebar + topbar shell used only on wide
+// screens. The mobile app above is completely untouched.
+// ══════════════════════════════════════════════════════════════════════════
+
+const DT = {
+  bg:        "#0A0F1D",
+  sidebar:   "#0B1120",
+  surface:   "#111A2E",
+  card:      "#121C33",
+  cardHi:    "#182544",
+  border:    "#1E2B47",
+  borderHi:  "#2A3B60",
+
+  t1: "#F1F5F9",
+  t2: "#94A3B8",
+  t3: "#5F7290",
+
+  accent:     "#14C9A6",
+  accentSoft: "rgba(20,201,166,0.14)",
+  accentGlow: "rgba(20,201,166,0.35)",
+
+  emerald: "#22C580",
+  amber:   "#F5A524",
+  rose:    "#F76E7E",
+  indigo:  "#4C5FE0",
+  sky:     "#3AAEE0",
+  orange:  "#F0904A",
+  purple:  "#9B6BF2",
+};
+
+function useIsDesktop() {
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== "undefined" && window.innerWidth >= 1024
+  );
+  useEffect(() => {
+    const onResize = () => setIsDesktop(window.innerWidth >= 1024);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return isDesktop;
+}
+
+const ROLE_PROFILE = {
+  "Admin":       { name: "Naveen S", sub: "Admin" },
+  "Telecaller":  { name: "Priya R",  sub: "Telecaller" },
+  "Field Sales": { name: "Ramesh K", sub: "Field Sales" },
+  "Management":  { name: "Kumar S",  sub: "Management" },
+};
+
+// ── Icon set for the desktop shell ──────────────────────────────────────
+function DIcon({ id, size = 18, color = "currentColor", strokeWidth = 1.8 }) {
+  const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: color, strokeWidth, strokeLinecap: "round", strokeLinejoin: "round" };
+  switch (id) {
+    case "dashboard": return <svg {...p}><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>;
+    case "crm": return <svg {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
+    case "pipeline": return <svg {...p}><path d="M3 4h18l-7 9v6l-4 2v-8L3 4z"/></svg>;
+    case "orders": return <svg {...p}><path d="M6 8V6a3 3 0 0 1 6 0v2"/><rect x="3" y="8" width="12" height="13" rx="2"/><path d="M14 8h4l3 4v9h-4"/><circle cx="7" cy="21" r="1.4"/><circle cx="17" cy="21" r="1.4"/></svg>;
+    case "dispatch": return <svg {...p}><rect x="1" y="6" width="14" height="11" rx="1.5"/><path d="M15 10h4l3 3v4h-7z"/><circle cx="6" cy="19.5" r="1.6"/><circle cx="17.5" cy="19.5" r="1.6"/></svg>;
+    case "samples": return <svg {...p}><path d="M10 2v6.2L4.5 18a2 2 0 0 0 1.7 3h11.6a2 2 0 0 0 1.7-3L14 8.2V2"/><path d="M8.5 2h7"/><path d="M7 15h10"/></svg>;
+    case "phone": return <svg {...p}><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.7a2 2 0 0 1-.4 2.1L8 9.9a16 16 0 0 0 6 6l1.4-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.5 2.7.6a2 2 0 0 1 1.8 2.1z"/></svg>;
+    case "followups": return <svg {...p}><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/></svg>;
+    case "expenses": return <svg {...p}><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M17 12h.01"/><path d="M3 10h18"/></svg>;
+    case "reports": return <svg {...p}><path d="M4 20V10"/><path d="M12 20V4"/><path d="M20 20v-7"/></svg>;
+    case "ai": return <svg {...p}><path d="M12 2l1.8 5.4L19 9l-5.2 1.6L12 16l-1.8-5.4L5 9l5.2-1.6L12 2z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z"/></svg>;
+    case "settings": return <svg {...p}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9c.2.7.7 1.2 1.5 1.4H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>;
+    case "search": return <svg {...p}><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>;
+    case "bell": return <svg {...p}><path d="M6 8a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>;
+    case "chevron": return <svg {...p}><polyline points="15 6 9 12 15 18"/></svg>;
+    case "plus": return <svg {...p}><path d="M12 5v14"/><path d="M5 12h14"/></svg>;
+    case "call": return <svg {...p}><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.7a2 2 0 0 1-.4 2.1L8 9.9a16 16 0 0 0 6 6l1.4-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.5 2.7.6a2 2 0 0 1 1.8 2.1z"/></svg>;
+    case "chat": return <svg {...p}><path d="M21 11.5a8.4 8.4 0 0 1-8.9 8.4 8.6 8.6 0 0 1-3.6-.8L3 21l1.9-5.5a8.3 8.3 0 0 1-.9-3.8A8.4 8.4 0 0 1 12.5 3a8.4 8.4 0 0 1 8.5 8.5z"/></svg>;
+    case "pin": return <svg {...p}><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>;
+    case "up": return <svg {...p} strokeWidth="2.5"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>;
+    case "down": return <svg {...p} strokeWidth="2.5"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>;
+    case "user": return <svg {...p}><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg>;
+    case "cart": return <svg {...p}><circle cx="9" cy="20" r="1.3"/><circle cx="18" cy="20" r="1.3"/><path d="M2 3h2l2.4 12.4a2 2 0 0 0 2 1.6h8.3a2 2 0 0 0 2-1.6L21 7H6"/></svg>;
+    case "wallet2": return <svg {...p}><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M17 12h.01"/></svg>;
+    case "calendar": return <svg {...p}><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M3 10h18"/></svg>;
+    default: return null;
+  }
+}
+
+// ── Sidebar nav definition ───────────────────────────────────────────────
+const DESKTOP_NAV = [
+  { id: "dashboard", label: "Dashboard",    icon: "dashboard" },
+  { id: "leads",     label: "CRM",          icon: "crm" },
+  { id: "pipeline",  label: "Pipeline",     icon: "pipeline" },
+  { id: "repeat",    label: "Orders",       icon: "orders" },
+  { id: "fieldsync", label: "Dispatch",     icon: "dispatch" },
+  { id: "samples",   label: "Samples",      icon: "samples" },
+  { id: "today",     label: "Telecalling",  icon: "phone" },
+  { id: "whatsapp",  label: "Follow-ups",   icon: "followups" },
+  { id: "expenses",  label: "Expenses",     icon: "expenses" },
+  { id: "reports",   label: "Reports",      icon: "reports" },
+  { id: "ai",        label: "AI Assistant", icon: "ai", tag: "New" },
+  { id: "settings",  label: "Settings",     icon: "settings" },
+];
+
+function DesktopSidebar({ activeTab, setActiveTab, collapsed, setCollapsed, leadsCount }) {
+  const w = collapsed ? 76 : 232;
+  return (
+    <div style={{
+      width: w, flexShrink: 0, background: DT.sidebar, borderRight: `1px solid ${DT.border}`,
+      display: "flex", flexDirection: "column", height: "100vh", position: "sticky", top: 0,
+      transition: "width 0.18s ease", overflow: "hidden",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: collapsed ? "22px 0" : "22px 20px", justifyContent: collapsed ? "center" : "flex-start" }}>
+        <div style={{ width: 30, height: 30, borderRadius: 9, flexShrink: 0, background: `linear-gradient(135deg, ${DT.accent}, ${DT.sky})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>⚡</div>
+        {!collapsed && <span style={{ fontSize: 15, fontWeight: 800, color: DT.t1, letterSpacing: "-0.02em", whiteSpace: "nowrap" }}>Sridhi BOS</span>}
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "6px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
+        {DESKTOP_NAV.map(n => {
+          const isActive = activeTab === n.id;
+          return (
+            <button key={n.id} onClick={() => setActiveTab(n.id)} title={collapsed ? n.label : undefined}
+              style={{
+                display: "flex", alignItems: "center", gap: 12, width: "100%",
+                padding: collapsed ? "10px 0" : "10px 12px", justifyContent: collapsed ? "center" : "flex-start",
+                borderRadius: 10, border: "none", cursor: "pointer", fontFamily: FONT,
+                background: isActive ? DT.accentSoft : "transparent",
+                color: isActive ? DT.accent : DT.t2,
+                fontSize: 13, fontWeight: isActive ? 700 : 500, transition: "background 0.12s, color 0.12s",
+              }}>
+              <DIcon id={n.icon} size={18} color={isActive ? DT.accent : DT.t2} />
+              {!collapsed && <span style={{ flex: 1, textAlign: "left", whiteSpace: "nowrap" }}>{n.label}</span>}
+              {!collapsed && n.id === "leads" && leadsCount > 0 && (
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: isActive ? DT.accent : DT.t3, background: isActive ? "rgba(20,201,166,0.18)" : DT.cardHi, borderRadius: 20, padding: "2px 7px" }}>{leadsCount}</span>
+              )}
+              {!collapsed && n.tag && (
+                <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.accent, background: DT.accentSoft, borderRadius: 20, padding: "2px 6px", letterSpacing: "0.02em" }}>{n.tag}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {!collapsed && (
+        <div style={{ margin: 14, padding: 16, borderRadius: 16, background: `linear-gradient(160deg, ${DT.cardHi}, ${DT.surface})`, border: `1px solid ${DT.borderHi}` }}>
+          <div style={{ width: 30, height: 30, borderRadius: 9, background: DT.accentSoft, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, marginBottom: 10 }}>👑</div>
+          <div style={{ fontSize: 13, fontWeight: 800, color: DT.t1 }}>Upgrade to Pro</div>
+          <div style={{ fontSize: 11, color: DT.t3, marginTop: 4, lineHeight: 1.4 }}>Unlock advanced analytics and AI features.</div>
+          <button style={{ marginTop: 12, width: "100%", background: DT.accent, border: "none", borderRadius: 9, color: "#04140F", padding: "8px 0", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: FONT }}>Upgrade Now</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DesktopTopbar({ role, setRole, search, setSearch, collapsed, setCollapsed, notifCount }) {
+  const profile = ROLE_PROFILE[role] || { name: "Team Member", sub: role || "Member" };
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
+  const todayStr = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const firstName = profile.name.split(" ")[0];
+
+  return (
+    <div style={{
+      position: "sticky", top: 0, zIndex: 40, background: `${DT.bg}F2`, backdropFilter: "blur(10px)",
+      borderBottom: `1px solid ${DT.border}`, padding: "16px 28px", display: "flex", alignItems: "center", gap: 20,
+    }}>
+      <button onClick={() => setCollapsed(!collapsed)}
+        style={{ width: 30, height: 30, borderRadius: "50%", background: DT.card, border: `1px solid ${DT.borderHi}`, color: DT.t2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+        <DIcon id="chevron" size={14} color={DT.t2} strokeWidth={2.4} style={{ transform: collapsed ? "rotate(180deg)" : "none" }} />
+      </button>
+
+      <div style={{ flex: "0 0 auto" }}>
+        <div style={{ fontSize: 18, fontWeight: 800, color: DT.t1, letterSpacing: "-0.01em" }}>{greeting}, {firstName} 👋</div>
+        <div style={{ fontSize: 12.5, color: DT.t3, marginTop: 2 }}>Here's what's happening with your business today.</div>
+      </div>
+
+      <div style={{ flex: 1 }} />
+
+      <div style={{ position: "relative", width: 280 }}>
+        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}><DIcon id="search" size={15} color={DT.t3} /></span>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search leads, customers, tasks..."
+          style={{ width: "100%", background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 10, padding: "9px 12px 9px 34px", fontSize: 12.5, color: DT.t1, fontFamily: FONT, outline: "none" }} />
+      </div>
+
+      <div style={{ position: "relative", width: 36, height: 36, borderRadius: "50%", background: DT.card, border: `1px solid ${DT.border}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+        <DIcon id="bell" size={16} color={DT.t2} />
+        {notifCount > 0 && (
+          <span style={{ position: "absolute", top: -3, right: -3, background: DT.rose, color: "#fff", fontSize: 9.5, fontWeight: 800, borderRadius: "50%", width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center", border: `2px solid ${DT.bg}` }}>{notifCount}</span>
+        )}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 10, padding: "6px 12px", fontSize: 12, color: DT.t2, whiteSpace: "nowrap" }}>
+        <DIcon id="calendar" size={13} color={DT.t3} />Today, {todayStr}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ width: 34, height: 34, borderRadius: "50%", background: `linear-gradient(135deg, ${DT.indigo}, ${DT.purple})`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 13, fontWeight: 800 }}>
+          {firstName.slice(0, 1)}
+        </div>
+        <div>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: DT.t1, lineHeight: 1.2 }}>{profile.name}</div>
+          <div style={{ fontSize: 10.5, color: DT.t3, lineHeight: 1.2 }}>{profile.sub}</div>
+        </div>
+        <button onClick={() => setRole(null)} title="Exit"
+          style={{ background: "transparent", border: `1px solid ${DT.border}`, borderRadius: 8, color: DT.t3, padding: "5px 9px", fontSize: 10.5, cursor: "pointer", fontFamily: FONT, fontWeight: 600, marginLeft: 4 }}>Exit</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Mini sparkline used inside stat cards ────────────────────────────────
+function MiniSparkline({ data, color, width = 96, height = 34 }) {
+  const max = Math.max(...data), min = Math.min(...data);
+  const range = max - min || 1;
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * width;
+    const y = height - ((v - min) / range) * (height - 4) - 2;
+    return `${x},${y}`;
+  }).join(" ");
+  const areaPts = `0,${height} ${pts} ${width},${height}`;
+  const gid = "spark-" + color.replace("#", "");
+  return (
+    <svg width={width} height={height} style={{ overflow: "visible" }}>
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon points={areaPts} fill={`url(#${gid})`} />
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function seededWave(seed, n, base, spread) {
+  const out = [];
+  let x = seed;
+  for (let i = 0; i < n; i++) {
+    x = (x * 9301 + 49297) % 233280;
+    const r = x / 233280;
+    out.push(Math.max(2, Math.round(base + Math.sin(i / 1.7 + seed) * spread * 0.5 + (r - 0.5) * spread * 0.5)));
+  }
+  return out;
+}
+
+function StatCard({ icon, iconBg, label, value, unit, change, color }) {
+  const up = change >= 0;
+  const spark = seededWave(label.length + value.toString().length, 8, 10, 8);
+  return (
+    <div style={{ flex: 1, minWidth: 175, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: iconBg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{icon}</div>
+        <span style={{ fontSize: 12.5, color: DT.t3, fontWeight: 600 }}>{label}</span>
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: DT.t1, letterSpacing: "-0.02em" }}>
+        {value}{unit && <span style={{ fontSize: 13, color: DT.t3, fontWeight: 600 }}> {unit}</span>}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 700, color: up ? DT.emerald : DT.rose }}>
+          <DIcon id={up ? "up" : "down"} size={11} color={up ? DT.emerald : DT.rose} strokeWidth={3} />
+          {Math.abs(change)}% <span style={{ color: DT.t3, fontWeight: 500 }}>vs Yesterday</span>
+        </div>
+        <MiniSparkline data={spark} color={color} />
+      </div>
+    </div>
+  );
+}
+
+// ── Sales trend area chart ───────────────────────────────────────────────
+function SalesTrendChart({ totalKg }) {
+  const days = ["1 Jun", "6 Jun", "11 Jun", "16 Jun", "21 Jun", "26 Jun", "30 Jun"];
+  const base = Math.max(180, Math.round(totalKg / 24) || 220);
+  const points = seededWave(totalKg || 42, 30, base, base * 0.55);
+  const maxV = Math.max(...points, 1);
+  const W = 640, H = 190, PAD = 8;
+  const step = (W - PAD * 2) / (points.length - 1);
+  const coords = points.map((v, i) => [PAD + i * step, H - PAD - (v / maxV) * (H - PAD * 2)]);
+  const linePath = coords.map((c, i) => (i === 0 ? "M" : "L") + c[0] + "," + c[1]).join(" ");
+  const areaPath = linePath + ` L${coords[coords.length - 1][0]},${H} L${coords[0][0]},${H} Z`;
+  const hi = coords[Math.round(coords.length * 0.53)];
+  const hiVal = points[Math.round(coords.length * 0.53)];
+
+  const bestDay = Math.max(...points);
+  const avgDay = Math.round(points.reduce((a, b) => a + b, 0) / points.length);
+  const totalSales = points.reduce((a, b) => a + b, 0);
+
+  return (
+    <div style={{ flex: 1.4, minWidth: 380, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Sales Trend</div>
+          <div style={{ fontSize: 11.5, color: DT.t3, marginTop: 2 }}>Sales performance overview</div>
+        </div>
+        <div style={{ background: DT.cardHi, border: `1px solid ${DT.borderHi}`, borderRadius: 8, padding: "5px 10px", fontSize: 11.5, color: DT.t2, fontWeight: 600 }}>This Month ⌄</div>
+      </div>
+
+      <div style={{ position: "relative", marginTop: 14 }}>
+        <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}>
+          <defs>
+            <linearGradient id="salesArea" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={DT.accent} stopOpacity="0.35" />
+              <stop offset="100%" stopColor={DT.accent} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {[0.25, 0.5, 0.75].map(f => <line key={f} x1={0} x2={W} y1={H * f} y2={H * f} stroke={DT.border} strokeDasharray="4 5" />)}
+          <path d={areaPath} fill="url(#salesArea)" />
+          <path d={linePath} fill="none" stroke={DT.accent} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+          <circle cx={hi[0]} cy={hi[1]} r="4.5" fill={DT.bg} stroke={DT.accent} strokeWidth="2.5" />
+          <line x1={hi[0]} x2={hi[0]} y1={hi[1]} y2={H} stroke={DT.borderHi} strokeDasharray="3 4" />
+        </svg>
+        <div style={{ position: "absolute", left: `calc(${(hi[0] / W) * 100}% - 46px)`, top: hi[1] - 46, background: DT.cardHi, border: `1px solid ${DT.borderHi}`, borderRadius: 8, padding: "6px 10px", fontSize: 10.5, color: DT.t1, whiteSpace: "nowrap", boxShadow: "0 8px 20px rgba(0,0,0,0.35)" }}>
+          <div style={{ fontWeight: 700 }}>16 Jun 2026</div>
+          <div style={{ color: DT.accent, fontWeight: 700 }}>{hiVal} KG</div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+          {days.map(d => <span key={d} style={{ fontSize: 10.5, color: DT.t3 }}>{d}</span>)}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 22, marginTop: 16, borderTop: `1px solid ${DT.border}`, paddingTop: 14, flexWrap: "wrap" }}>
+        {[
+          ["Total Sales", totalSales.toLocaleString("en-IN") + " KG"],
+          ["Average / Day", avgDay + " KG"],
+          ["Best Day", bestDay + " KG"],
+          ["Orders", Math.max(4, Math.round(totalSales / 260))],
+          ["Revenue", "₹" + (totalSales * 40).toLocaleString("en-IN")],
+        ].map(([l, v]) => (
+          <div key={l}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: DT.t1 }}>{v}</div>
+            <div style={{ fontSize: 10.5, color: DT.t3, marginTop: 2 }}>{l}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Pipeline funnel (desktop) ────────────────────────────────────────────
+function PipelineFunnelDesktop({ liveStages, totalLeads }) {
+  const countFor = (...ids) => ids.reduce((a, id) => a + (liveStages.find(s => s.id === id)?.count || 0), 0);
+  const rows = [
+    { label: "New Lead",      value: countFor("New Lead"), color: DT.indigo },
+    { label: "Contacted",     value: countFor("Contacted"), color: DT.sky },
+    { label: "Interested",    value: countFor("Interested"), color: DT.emerald },
+    { label: "Sample Sent",   value: countFor("Sample Requested", "Assigned to Field Sales", "Sample Delivered"), color: DT.orange },
+    { label: "Order Received",value: countFor("Order Received", "Active Customer", "Repeat Order Follow-up"), color: DT.rose },
+  ];
+  const denom = Math.max(totalLeads, 1);
+  const maxW = 100;
+
+  return (
+    <div style={{ flex: 1, minWidth: 280, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Pipeline Overview</div>
+        <div style={{ background: DT.cardHi, border: `1px solid ${DT.borderHi}`, borderRadius: 8, padding: "5px 10px", fontSize: 11.5, color: DT.t2, fontWeight: 600 }}>This Month ⌄</div>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
+        {rows.map((r, i) => {
+          const pct = totalLeads > 0 ? (r.value / denom) * 100 : 0;
+          const widthPct = 100 - i * 15;
+          return (
+            <div key={r.label} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: `${widthPct}%`, maxWidth: maxW + "%", background: r.color, borderRadius: 8, padding: "10px 0", textAlign: "center", color: "#fff", fontSize: 14, fontWeight: 800 }}>
+                {r.value}
+              </div>
+              <div style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: 11.5 }}>
+                <span style={{ color: DT.t2, fontWeight: 600 }}>{r.label}</span>
+                <span style={{ color: DT.t3, fontWeight: 700 }}>{pct.toFixed(1)}%</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16, paddingTop: 14, borderTop: `1px solid ${DT.border}` }}>
+        <span style={{ fontSize: 12, color: DT.t2, fontWeight: 600 }}>Overall Conversion Rate</span>
+        <span style={{ fontSize: 16, fontWeight: 800, color: DT.accent }}>
+          {totalLeads > 0 ? ((rows[4].value / denom) * 100).toFixed(1) : "0.0"}%
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── Today's Tasks (desktop) ──────────────────────────────────────────────
+function TodayTasksDesktop({ leads, samples, repeatCustomers, setActiveTab }) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const times = ["10:00 AM", "11:30 AM", "02:00 PM", "04:30 PM", "06:00 PM"];
+  const items = [];
+
+  leads.filter(l => l.stage === "Callback Requested").slice(0, 3).forEach(l =>
+    items.push({ icon: "followups", color: DT.emerald, title: "Follow up with " + l.name, sub: (l.telecaller || "Team") + " · Manager" }));
+  samples.filter(s => s.status === "Pending" && s.scheduledDate === todayStr).slice(0, 2).forEach(s =>
+    items.push({ icon: "samples", color: DT.orange, title: "Send sample to " + s.customer, sub: (s.exec || "Team") + " · Owner" }));
+  repeatCustomers.filter(c => c.status === "Due Today").slice(0, 2).forEach(c =>
+    items.push({ icon: "orders", color: DT.sky, title: "Collect payment from " + c.name, sub: "Manager" }));
+  leads.filter(l => l.stage === "Sample Requested").slice(0, 2).forEach(l =>
+    items.push({ icon: "phone", color: DT.purple, title: "Call " + l.name, sub: "Follow up" }));
+
+  const list = items.slice(0, 5);
+
+  return (
+    <div style={{ flex: 1, minWidth: 260, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Today's Tasks</div>
+        <button onClick={() => setActiveTab("today")} style={{ background: "none", border: "none", color: DT.accent, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>View All</button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 12 }}>
+        {list.length === 0 && <div style={{ fontSize: 12, color: DT.t3, padding: "16px 0" }}>All clear — no pending tasks today.</div>}
+        {list.map((it, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: i < list.length - 1 ? `1px solid ${DT.border}` : "none" }}>
+            <div style={{ width: 30, height: 30, borderRadius: 8, background: it.color + "22", border: `1px solid ${it.color}44`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <DIcon id={it.icon} size={14} color={it.color} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: DT.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.title}</div>
+              <div style={{ fontSize: 11, color: DT.t3, marginTop: 1 }}>{it.sub}</div>
+            </div>
+            <div style={{ fontSize: 10.5, color: DT.t3, flexShrink: 0, display: "flex", alignItems: "center", gap: 4 }}>
+              <DIcon id="calendar" size={11} color={DT.t3} />{times[i] || "—"}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Recent Activities (desktop) ──────────────────────────────────────────
+function RecentActivitiesDesktop({ leads, samples, repeatCustomers, setActiveTab }) {
+  const labels = ["10:30 AM", "09:45 AM", "Yesterday", "Yesterday", new Date(Date.now() - 6 * 86400000).toLocaleDateString("en-IN", { day: "numeric", month: "short" })];
+  const items = [];
+  leads.slice(0, 2).forEach(l => items.push({ icon: "user", color: DT.emerald, title: "New lead added - " + l.name, who: l.telecaller || "Team" }));
+  samples.slice(0, 1).forEach(s => items.push({ icon: "samples", color: DT.purple, title: "Sample sent to " + s.customer, who: s.exec || "Team" }));
+  repeatCustomers.filter(c => c.status === "Paid").slice(0, 1).forEach(c => items.push({ icon: "wallet2", color: DT.accent, title: "Payment received from " + c.name, who: "Rahul" }));
+  leads.filter(l => l.stage === "Order Received").slice(0, 1).forEach(l => items.push({ icon: "cart", color: DT.orange, title: "Order placed - " + l.name, who: l.telecaller || "Team" }));
+  leads.slice(2, 3).forEach(l => items.push({ icon: "user", color: DT.sky, title: "New lead added - " + l.name, who: l.telecaller || "Team" }));
+
+  const list = items.slice(0, 5);
+
+  return (
+    <div style={{ flex: 1, minWidth: 260, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Recent Activities</div>
+        <button onClick={() => setActiveTab("leads")} style={{ background: "none", border: "none", color: DT.accent, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>View All</button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 12 }}>
+        {list.length === 0 && <div style={{ fontSize: 12, color: DT.t3, padding: "16px 0" }}>No recent activity yet.</div>}
+        {list.map((it, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: i < list.length - 1 ? `1px solid ${DT.border}` : "none" }}>
+            <div style={{ width: 30, height: 30, borderRadius: "50%", background: it.color + "22", border: `1px solid ${it.color}44`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <DIcon id={it.icon} size={14} color={it.color} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: DT.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.title}</div>
+              <div style={{ fontSize: 11, color: DT.t3, marginTop: 1 }}>{it.who}</div>
+            </div>
+            <div style={{ fontSize: 10.5, color: DT.t3, flexShrink: 0 }}>{labels[i] || "—"}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Recent Leads grid (desktop) ───────────────────────────────────────────
+function stageChipColorDesktop(stage) {
+  if (stage === "New Lead") return DT.sky;
+  if (stage === "Contacted") return DT.orange;
+  if (stage === "Interested") return DT.emerald;
+  if ((stage || "").includes("Sample")) return DT.purple;
+  if ((stage || "").includes("Order") || stage === "Active Customer") return DT.accent;
+  return DT.t3;
+}
+
+function RecentLeadsDesktop({ leads, setActiveTab }) {
+  const list = leads.filter(l => l && l.name).slice(0, 4);
+  return (
+    <div style={{ flex: "1 1 100%", minWidth: 560, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Recent Leads</div>
+        <button onClick={() => setActiveTab("leads")} style={{ background: "none", border: "none", color: DT.accent, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>View All</button>
+      </div>
+      {list.length === 0 ? (
+        <div style={{ fontSize: 12, color: DT.t3, padding: "24px 0", textAlign: "center" }}>No leads yet — add your first lead from the CRM tab.</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12, marginTop: 14 }}>
+          {list.map((l, i) => {
+            const chip = stageChipColorDesktop(l.stage);
+            const initials = (l.name || "??").split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
+            const phone = (l.contact || "").replace(/[^0-9]/g, "");
+            return (
+              <div key={i} style={{ background: DT.surface, border: `1px solid ${DT.border}`, borderRadius: 14, padding: 14 }}>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <div style={{ width: 38, height: 38, borderRadius: "50%", background: `linear-gradient(135deg, ${DT.indigo}, ${DT.sky})`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12.5, fontWeight: 800, flexShrink: 0 }}>{initials}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: DT.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.name}</div>
+                    <div style={{ fontSize: 11, color: DT.t3 }}>{l.type || l.business || "Business"}</div>
+                  </div>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: chip, background: chip + "22", border: `1px solid ${chip}44`, borderRadius: 20, padding: "3px 8px", height: "fit-content", whiteSpace: "nowrap" }}>{l.stage}</span>
+                </div>
+                <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+                  {l.contact && <div style={{ fontSize: 11.5, color: DT.t2, display: "flex", alignItems: "center", gap: 6 }}><DIcon id="phone" size={11} color={DT.t3} />{l.contact}</div>}
+                  {l.area && <div style={{ fontSize: 11.5, color: DT.t2, display: "flex", alignItems: "center", gap: 6 }}><DIcon id="pin" size={11} color={DT.t3} />{l.area}</div>}
+                </div>
+                <div style={{ display: "flex", gap: 6, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${DT.border}` }}>
+                  <button onClick={() => { if (phone) window.location.href = "tel:+91" + phone; }} style={{ flex: 1, background: DT.emerald + "1c", border: `1px solid ${DT.emerald}40`, borderRadius: 8, padding: "6px 0", cursor: "pointer" }}><DIcon id="call" size={13} color={DT.emerald} /></button>
+                  <button onClick={() => { if (phone) window.open("https://wa.me/91" + phone, "_blank"); }} style={{ flex: 1, background: "#25D3661c", border: "1px solid #25D36640", borderRadius: 8, padding: "6px 0", cursor: "pointer" }}><DIcon id="chat" size={13} color="#25D366" /></button>
+                  <button onClick={() => { if (l.area) window.open("https://maps.google.com/?q=" + encodeURIComponent(l.area), "_blank"); }} style={{ flex: 1, background: DT.sky + "1c", border: `1px solid ${DT.sky}40`, borderRadius: 8, padding: "6px 0", cursor: "pointer" }}><DIcon id="pin" size={13} color={DT.sky} /></button>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 10, color: DT.t3 }}>
+                  <span>Last Contact <b style={{ color: DT.t2 }}>{l.lastContact || "—"}</b></span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Full desktop dashboard home ──────────────────────────────────────────
+function DesktopDashboardHome({ setActiveTab }) {
+  const [leads] = useSheetSynced("leads", "leads", []);
+  const [samples] = useSheetSynced("samples", "samples", []);
+  const [repeatCustomers] = useSheetSynced("repeatCustomers", "repeatCustomers", []);
+
+  const activeLeads = (leads || []).filter(l => l && l.name && l.stage);
+  const activeCustomers = activeLeads.filter(l => l.stage === "Active Customer").length;
+  const ordersReceived = activeLeads.filter(l => ["Order Received", "Active Customer", "Repeat Order Follow-up"].includes(l.stage));
+  const convRate = activeLeads.length > 0 ? Math.round((ordersReceived.length / activeLeads.length) * 100) : 0;
+
+  const orderKg = activeLeads
+    .filter(l => ["Order Received", "Active Customer", "Repeat Order Follow-up"].includes(l.stage))
+    .reduce((a, l) => {
+      const fromField = Number(l.kgQty) || 0;
+      if (fromField > 0) return a + fromField;
+      const lastRemark = (l.remarks || []).slice(-1)[0] || "";
+      const match = lastRemark.match(/(\d+)\s*(?:kg|KG|Kg)/);
+      return a + (match ? Number(match[1]) : 0);
+    }, 0);
+  const samplesDeliveredKg = (samples || []).filter(s => s.status === "Delivered").reduce((a, b) => a + (Number(b.qty) || 0), 0);
+  const totalKg = samplesDeliveredKg + orderKg;
+  const totalRevenue = totalKg * 120;
+  const samplesSentKg = (samples || []).reduce((a, b) => a + (Number(b.qty) || 0), 0);
+
+  const stageCounts = {};
+  activeLeads.forEach(l => { stageCounts[l.stage] = (stageCounts[l.stage] || 0) + 1; });
+  const liveStages = PIPELINE_STAGES.map(s => ({ ...s, count: stageCounts[s.id] || 0 }));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+        <StatCard icon="💰" iconBg={DT.purple + "26"} label="Today's Revenue" value={"₹" + totalRevenue.toLocaleString("en-IN")} change={totalRevenue > 0 ? 18 : 0} color={DT.purple} />
+        <StatCard icon="🛍️" iconBg={DT.emerald + "26"} label="Today's Sales" value={totalKg} unit="KG" change={totalKg > 0 ? 12 : 0} color={DT.emerald} />
+        <StatCard icon="🎯" iconBg={DT.sky + "26"} label="Conversion Rate" value={convRate + "%"} change={convRate > 0 ? 8 : 0} color={DT.sky} />
+        <StatCard icon="🏪" iconBg={DT.orange + "26"} label="Active Customers" value={activeCustomers} change={activeCustomers > 0 ? 5 : 0} color={DT.orange} />
+        <StatCard icon="🧪" iconBg={DT.purple + "26"} label="Samples Sent" value={samplesSentKg} unit="KG" change={samplesSentKg > 0 ? -4 : 0} color={DT.purple} />
+      </div>
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "stretch" }}>
+        <SalesTrendChart totalKg={totalKg} />
+        <PipelineFunnelDesktop liveStages={liveStages} totalLeads={activeLeads.length} />
+        <TodayTasksDesktop leads={activeLeads} samples={samples || []} repeatCustomers={repeatCustomers || []} setActiveTab={setActiveTab} />
+      </div>
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "stretch" }}>
+        <RecentLeadsDesktop leads={activeLeads} setActiveTab={setActiveTab} />
+        <RecentActivitiesDesktop leads={activeLeads} samples={samples || []} repeatCustomers={repeatCustomers || []} setActiveTab={setActiveTab} />
+      </div>
+    </div>
+  );
+}
+
+function SettingsPlaceholder() {
+  return (
+    <div style={{ background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 40, textAlign: "center" }}>
+      <div style={{ fontSize: 32, marginBottom: 12 }}>⚙️</div>
+      <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Settings</div>
+      <div style={{ fontSize: 12.5, color: DT.t3, marginTop: 6 }}>Account and workspace settings are coming soon.</div>
+    </div>
+  );
+}
+
+// ── Desktop shell wrapping sidebar + topbar + module content ─────────────
+function DesktopShell({ activeTab, setActiveTab, role, setRole, leadsCount, renderModule }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [search, setSearch] = useState("");
+
+  return (
+    <div style={{ display: "flex", minHeight: "100vh", background: DT.bg, fontFamily: FONT }}>
+      <style>{`
+        * { box-sizing: border-box; }
+        body { background: ${DT.bg}; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-thumb { background: ${DT.borderHi}; border-radius: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        input::placeholder { color: ${DT.t3}; }
+      `}</style>
+      <DesktopSidebar activeTab={activeTab} setActiveTab={setActiveTab} collapsed={collapsed} setCollapsed={setCollapsed} leadsCount={leadsCount} />
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <DesktopTopbar role={role} setRole={setRole} search={search} setSearch={setSearch} collapsed={collapsed} setCollapsed={setCollapsed} notifCount={3} />
+        <div style={{ flex: 1, padding: "24px 28px 60px" }}>
+          {activeTab === "dashboard" ? (
+            <DesktopDashboardHome setActiveTab={setActiveTab} />
+          ) : activeTab === "settings" ? (
+            <SettingsPlaceholder />
+          ) : (
+            <div style={{ background: T.bg, borderRadius: 16, overflow: "hidden" }}>
+              {renderModule()}
+            </div>
+          )}
+        </div>
+      </div>
+      <button
+        style={{ position: "fixed", bottom: 28, right: 28, width: 52, height: 52, borderRadius: "50%", background: `linear-gradient(135deg, ${DT.accent}, ${DT.sky})`, border: "none", color: "#04140F", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: `0 10px 26px ${DT.accentGlow}` }}
+        onClick={() => setActiveTab("leads")}>
+        <DIcon id="plus" size={22} color="#04140F" strokeWidth={2.6} />
+      </button>
+    </div>
+  );
+}
+
+
 // SVG icons for nav
 function NavIcon({ id, active }) {
   const col = active ? T.accent : T.t3;
@@ -3407,6 +4031,8 @@ export default function App() {
   const contentRef = useRef(null);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [showInstall, setShowInstall] = useState(false);
+  const isDesktop = useIsDesktop();
+  const [leadsForBadge] = useSheetSynced("leads", "leads", []);
 
   useEffect(() => {
     const handler = e => { e.preventDefault(); setInstallPrompt(e); setShowInstall(true); };
@@ -3526,14 +4152,29 @@ export default function App() {
       case "hrleads":   return <HRLeads />;
       case "whatsapp":  return <WhatsAppTemplates />;
       case "ai":        return <AIAssistant />;
+      case "settings":  return <SettingsPlaceholder />;
       default:          return <Dashboard />;
     }
   };
+
+  if (isDesktop && role) {
+    return (
+      <DesktopShell
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        role={role}
+        setRole={setRole}
+        leadsCount={(leadsForBadge || []).filter(l => l && l.name).length}
+        renderModule={renderModule}
+      />
+    );
+  }
 
   return (
     <div style={{ minHeight:"100vh", background:T.bg, color:T.t1, fontFamily:FONT, display:"flex", flexDirection:"column", maxWidth:480, margin:"0 auto", position:"relative" }}>
       <style>{`
         * { box-sizing: border-box; margin: 0; padding: 0; }
+
         ::-webkit-scrollbar { width: 0; height: 0; }
         select option { background: #FFFFFF; color: #0F172A; }
         @keyframes pulse { 0%,100% { opacity:0.25; transform:scale(0.8); } 50% { opacity:1; transform:scale(1.1); } }
