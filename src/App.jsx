@@ -3,30 +3,30 @@ import { useSheets, SYNC_ENABLED } from "./useSheets.js";
 
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────
 const T = {
-  bg:       "#060B16",
-  surface:  "#0C1526",
-  card:     "#0F1C33",
-  cardHigh: "#132038",
-  glass:    "rgba(15,28,51,0.85)",
+  bg:       "#F4F7FB",
+  surface:  "#FFFFFF",
+  card:     "#FFFFFF",
+  cardHigh: "#F8FAFC",
+  glass:    "rgba(255,255,255,0.85)",
 
-  border:   "#1A2D4A",
-  borderHi: "#243D64",
+  border:   "#E4E9F2",
+  borderHi: "#CBD5E1",
 
   accent:    "#00C9A7",
-  accentSub: "rgba(0,201,167,0.12)",
-  accentGlow:"rgba(0,201,167,0.25)",
+  accentSub: "rgba(0,201,167,0.10)",
+  accentGlow:"rgba(0,201,167,0.28)",
 
   emerald:  "#10B981",
   amber:    "#F59E0B",
   rose:     "#F43F5E",
-  indigo:   "#818CF8",
-  sky:      "#38BDF8",
+  indigo:   "#6366F1",
+  sky:      "#0EA5E9",
   orange:   "#FB923C",
 
-  t1: "#F0F6FF",
-  t2: "#7B9DC4",
-  t3: "#3A5578",
-  t4: "#1E3A5F",
+  t1: "#0F172A",
+  t2: "#475569",
+  t3: "#7C8CA6",
+  t4: "#CBD5E1",
 };
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
@@ -132,7 +132,7 @@ function Card({ children, style = {}, accent, noPad }) {
       border: `1px solid ${accent ? accent + "30" : T.border}`,
       borderRadius: 20,
       padding: noPad ? 0 : "18px 18px",
-      boxShadow: accent ? `0 0 32px ${accent}10` : "0 1px 3px rgba(0,0,0,0.4)",
+      boxShadow: accent ? `0 0 32px ${accent}12` : "0 1px 3px rgba(15,23,42,0.08)",
       overflow: "hidden",
       ...style,
     }}>{children}</div>
@@ -3431,10 +3431,10 @@ export default function App() {
     <div style={{
       position:"fixed", bottom:90, left:"50%", transform:"translateX(-50%)",
       width:"calc(100% - 32px)", maxWidth:448, zIndex:999,
-      background:"linear-gradient(135deg, #0F1C33, #132038)",
+      background:T.card,
+      boxShadow:`0 8px 32px rgba(15,23,42,0.12)`,
       border:`1px solid ${T.accentGlow}`, borderRadius:18,
       padding:"14px 16px", display:"flex", alignItems:"center", gap:12,
-      boxShadow:`0 8px 32px rgba(0,201,167,0.2)`,
     }}>
       <div style={{ width:42, height:42, borderRadius:12, background:T.accentSub,
         border:`1px solid ${T.accentGlow}`, display:"flex", alignItems:"center",
@@ -3535,11 +3535,11 @@ export default function App() {
       <style>{`
         * { box-sizing: border-box; margin: 0; padding: 0; }
         ::-webkit-scrollbar { width: 0; height: 0; }
-        select option { background: #0C1526; }
+        select option { background: #FFFFFF; color: #0F172A; }
         @keyframes pulse { 0%,100% { opacity:0.25; transform:scale(0.8); } 50% { opacity:1; transform:scale(1.1); } }
-        input::placeholder { color: #3A5578; }
-        textarea::placeholder { color: #3A5578; }
-        input:-webkit-autofill { -webkit-box-shadow: 0 0 0 100px #0C1526 inset; -webkit-text-fill-color: #F0F6FF; }
+        input::placeholder { color: #94A3B8; }
+        textarea::placeholder { color: #94A3B8; }
+        input:-webkit-autofill { -webkit-box-shadow: 0 0 0 100px #FFFFFF inset; -webkit-text-fill-color: #0F172A; }
       `}</style>
 
       {/* Header */}
