@@ -9,11 +9,13 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
+_IMPORT_ERROR = None
 try:
     from google.oauth2 import service_account
     import google.auth.transport.requests
-except ImportError:
-    pass
+except Exception as _e:
+    import traceback
+    _IMPORT_ERROR = traceback.format_exc()
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -160,6 +162,9 @@ class handler(BaseHTTPRequestHandler):
 
         # Debug endpoint
         if tab == "debug":
+            if _IMPORT_ERROR:
+                self._send(500, {"error": "google-auth import failed", "trace": _IMPORT_ERROR})
+                return
             try:
                 token = get_token()
                 sheet_id = os.environ.get("GOOGLE_SHEET_ID","")
