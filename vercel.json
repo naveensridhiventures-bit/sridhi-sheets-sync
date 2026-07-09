@@ -4,10 +4,6 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
-    { "source": "/api/ai",        "destination": "/api/ai.py" },
-    { "source": "/api/prospects", "destination": "/api/prospects.py" },
-    { "source": "/api/sheets",    "destination": "/api/sheets.py" },
-    { "source": "/api/(.*)",      "destination": "/api/sheets.py" },
-    { "source": "/(.*)",          "destination": "/index.html" }
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
