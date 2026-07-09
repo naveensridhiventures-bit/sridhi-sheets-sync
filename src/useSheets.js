@@ -1,5 +1,5 @@
 /**
- * useSheets — React hook for the Python /api/sheets endpoint.
+ * useSheets — React hook for the Python /api/sync endpoint.
  * 1 fetch loads all tabs, stale-while-revalidate, 60s in-memory cache.
  */
 
@@ -35,7 +35,7 @@ async function fetchAll() {
   if (cached) return cached;
   if (_allFetchPromise) return _allFetchPromise;
 
-  _allFetchPromise = fetch(`${API_BASE}/api/sheets?tab=all`, { headers: getHeaders() })
+  _allFetchPromise = fetch(`${API_BASE}/api/sync?tab=all`, { headers: getHeaders() })
     .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
     .then((data) => {
       memSet("ALL", data);
@@ -51,7 +51,7 @@ async function pushTab(tab, data) {
   // Use GET with base64 body since Vercel rewrites block POST to Python
   const body = JSON.stringify({ [tab]: data });
   const b64 = btoa(unescape(encodeURIComponent(body)));
-  const url = API_BASE + "/api/sheets?tab=" + tab + "&_method=POST&_body=" + encodeURIComponent(b64);
+  const url = API_BASE + "/api/sync?tab=" + tab + "&_method=POST&_body=" + encodeURIComponent(b64);
   const r = await fetch(url, { headers: getHeaders() });
   if (!r.ok) throw new Error("HTTP " + r.status);
   delete _mem["ALL"];
