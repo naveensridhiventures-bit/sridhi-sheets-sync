@@ -98,6 +98,33 @@ function useAnimatedCounter(target, duration = 1200) {
 
 // useSheetSynced — thin alias over useSheets (from useSheets.js)
 // Keeps backward-compatible call signature: useSheetSynced(endpoint, _key, initialData)
+
+// ── Follow-up timing helpers ──────────────────────────────────────────────
+function daysSince(ts) {
+  if (!ts) return null;
+  return Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
+}
+function formatLastContact(ts, fallback) {
+  if (!ts) return fallback || "Not contacted";
+  const days = daysSince(ts);
+  if (days === 0) {
+    const mins = Math.floor((Date.now() - ts) / 60000);
+    if (mins < 1) return "Just now";
+    if (mins < 60) return mins + "m ago";
+    const hrs = Math.floor(mins / 60);
+    return hrs + "h ago";
+  }
+  if (days === 1) return "Yesterday";
+  return days + " days ago";
+}
+const FOLLOWUP_OVERDUE_DAYS = 3;
+const TERMINAL_STAGES = ["Lost Customer", "Invalid Number"];
+function isFollowUpOverdue(lead) {
+  if (!lead || TERMINAL_STAGES.includes(lead.stage)) return false;
+  const ts = lead.lastContactAt || lead.createdAt;
+  if (!ts) return true; // never logged a contact at all
+  return daysSince(ts) > FOLLOWUP_OVERDUE_DAYS;
+}
 function useSheetSynced(_endpoint, _key, initialData) {
   // The new useSheets hook uses the tab name (same as _endpoint) and batches all tabs.
   return useSheets(_endpoint, initialData);
@@ -1288,9 +1315,94 @@ function HRLeads() {
 }
 
 
+// ─── CALL LOG DIALOG ──────────────────────────────────────────────────────
+// Structured call-outcome capture: did they answer? If yes, confirm/update
+// their details + a note. If no, pick a reason. Both paths stamp a real
+// timestamp so "last followup" and overdue reminders are accurate.
+const CALL_NOT_ANSWERED_REASONS = ["No Answer", "Wrong Number", "Switched Off", "Number Busy", "Call Back Later"];
+
+function CallLogDialog({ lead, onClose, onSubmit }) {
+  const [step, setStep] = useState("ask"); // ask | answered | notAnswered
+  const [name, setName] = useState(lead.name || "");
+  const [business, setBusiness] = useState(lead.business || "");
+  const [note, setNote] = useState("");
+  const [reason, setReason] = useState(null);
+
+  const submitAnswered = () => onSubmit({ outcome: "Answered", name: name.trim() || lead.name, business: business.trim() || lead.business, note: note.trim() });
+  const submitNotAnswered = () => { if (reason) onSubmit({ outcome: reason, name: lead.name, business: lead.business, note: "" }); };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(6,11,22,0.92)", zIndex:210, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+      <div style={{ background:T.card, borderRadius:"20px 20px 0 0", padding:20, width:"100%", maxWidth:480, maxHeight:"85vh", overflowY:"auto", paddingBottom:36 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+          <div style={{ fontSize:15, fontWeight:800, color:T.t1 }}>📞 Log Call — {lead.name}</div>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:T.t3, fontSize:18, cursor:"pointer" }}>✕</button>
+        </div>
+
+        {step === "ask" && (
+          <>
+            <div style={{ fontSize:13, color:T.t2, marginBottom:16 }}>Did the customer answer the call?</div>
+            <div style={{ display:"flex", gap:10 }}>
+              <Btn label="✅ Answered" color={T.emerald} full onClick={() => setStep("answered")} />
+              <Btn label="❌ Not Answered" color={T.rose} full onClick={() => setStep("notAnswered")} />
+            </div>
+          </>
+        )}
+
+        {step === "answered" && (
+          <>
+            <div style={{ marginBottom:10 }}>
+              <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>CUSTOMER NAME</div>
+              <input value={name} onChange={e => setName(e.target.value)}
+                style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
+            </div>
+            <div style={{ marginBottom:10 }}>
+              <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>BUSINESS NAME</div>
+              <input value={business} onChange={e => setBusiness(e.target.value)}
+                style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
+            </div>
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>CALL NOTES</div>
+              <textarea value={note} onChange={e => setNote(e.target.value)}
+                placeholder="What did they say?"
+                style={{ width:"100%", background:T.surface, border:`1px solid ${T.border}`, borderRadius:12, padding:12, color:T.t1, fontSize:13, resize:"none", outline:"none", boxSizing:"border-box", height:72, fontFamily:FONT }} />
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <Btn label="← Back" color={T.t2} ghost full onClick={() => setStep("ask")} />
+              <Btn label="✓ Save" full color={T.accent} onClick={submitAnswered} />
+            </div>
+          </>
+        )}
+
+        {step === "notAnswered" && (
+          <>
+            <div style={{ fontSize:11, color:T.t3, fontWeight:700, marginBottom:10 }}>WHY NOT ANSWERED?</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:14 }}>
+              {CALL_NOT_ANSWERED_REASONS.map(r => (
+                <button key={r} onClick={() => setReason(r)}
+                  style={{
+                    padding:"10px 12px", borderRadius:10, textAlign:"left", cursor:"pointer", fontSize:13, fontWeight:700, fontFamily:FONT,
+                    border:`1px solid ${reason===r ? T.accent : T.border}`,
+                    background: reason===r ? T.accentSub : T.surface,
+                    color: reason===r ? T.accent : T.t1,
+                  }}>{r}</button>
+              ))}
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <Btn label="← Back" color={T.t2} ghost full onClick={() => setStep("ask")} />
+              <Btn label="✓ Save" full color={T.accent} onClick={submitNotAnswered} />
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Leads() {
   const [leads, setLeads, leadsSyncStatus] = useSheetSynced("leads", "leads", INITIAL_LEADS);
   const [expenses, setExpenses] = useSheetSynced("expenses", "expenses", INITIAL_EXPENSES);
+  const [repeatCustomers, setRepeatCustomers] = useSheetSynced("repeatCustomers", "repeatCustomers", []);
   const [search, setSearch] = useState("");
   const [filterStage, setFilterStage] = useState("All");
   const [selected, setSelected] = useState(null);
@@ -1305,6 +1417,7 @@ function Leads() {
   const [groupMsg, setGroupMsg] = useState(null); // { lead, stage, method }
   const [newLead, setNewLead] = useState({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Thulasi" });
   const [newLeadToast, setNewLeadToast] = useState(null);
+  const [callLogFor, setCallLogFor] = useState(null);
   const seenLeadIds = useRef(null);
 
   // ── Pop in a small toast whenever a lead appears that we haven't seen before ──
@@ -1340,9 +1453,11 @@ function Leads() {
     }
   }, [leads]);
 
+  const overdueCount = leads.filter(isFollowUpOverdue).length;
+
   const filtered = leads.filter(l =>
     l && l.name && l.stage &&
-    (filterStage==="All" || l.stage===filterStage) &&
+    (filterStage==="All" ? true : filterStage==="Needs Follow-up" ? isFollowUpOverdue(l) : l.stage===filterStage) &&
     (l.name.toLowerCase().includes(search.toLowerCase()) ||
      (l.area||"").toLowerCase().includes(search.toLowerCase()) ||
      (l.contact||"").includes(search))
@@ -1353,9 +1468,29 @@ function Leads() {
     const now = new Date();
     const stamp = now.toLocaleDateString("en-IN",{day:"2-digit",month:"short"}) + " " + now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",hour12:true});
     const remarkWithStamp = "[" + stamp + " · " + (role||"Team") + "] " + remark.trim();
-    setLeads(leads.map(l => ((l.contact && l.contact===id) || l.id===id) ? { ...l, remarks:[...(l.remarks||[]),remarkWithStamp], lastContact:"Today" } : l));
+    setLeads(leads.map(l => ((l.contact && l.contact===id) || l.id===id) ? { ...l, remarks:[...(l.remarks||[]),remarkWithStamp], lastContact:"Today", lastContactAt:Date.now() } : l));
     setRemark("");
   };
+
+  // ── Structured call outcome logging ──
+  const logCall = (lead, result) => {
+    const now = new Date();
+    const stamp = now.toLocaleDateString("en-IN",{day:"2-digit",month:"short"}) + " " + now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",hour12:true});
+    const remarkText = "[" + result.outcome + "]" + (result.note ? " " + result.note : "");
+    const remarkWithStamp = "[" + stamp + " · " + (lead.telecaller||"Team") + "] " + remarkText;
+    setLeads(leads.map(l => l.id===lead.id ? {
+      ...l,
+      name: result.name || l.name,
+      business: result.business || l.business,
+      remarks: [...(l.remarks||[]), remarkWithStamp],
+      lastContact: "Today",
+      lastContactAt: Date.now(),
+      callOutcome: result.outcome,
+      stage: result.outcome === "Call Back Later" ? "Callback Requested" : l.stage,
+    } : l));
+    setCallLogFor(null);
+  };
+
   const updateStage = (key, stage) => {
     const lead = leads.find(l => (l.contact && l.contact===key) || l.id===key);
     if ((stage === "Sample Requested" || stage === "Order Received") && lead) {
@@ -1365,7 +1500,7 @@ function Leads() {
     } else {
       setLeads(leads.map(l => {
         const match = (l.contact && l.contact===key) || l.id===key;
-        return match ? { ...l, stage, lastContact:"Today" } : l;
+        return match ? { ...l, stage, lastContact:"Today", lastContactAt:Date.now() } : l;
       }));
     }
   };
@@ -1373,8 +1508,20 @@ function Leads() {
   const confirmDelivery = (method) => {
     if (!deliveryDialog) return;
     const { lead, targetStage } = deliveryDialog;
-    // Update lead stage
-    setLeads(leads.map(l => l.id===lead.id ? { ...l, stage:targetStage, lastContact:"Today" } : l));
+    const isOrder = targetStage === "Order Received";
+    const newOrderCount = (lead.orderCount || 0) + (isOrder ? 1 : 0);
+    // More than 3 orders → auto-promote to a repeat customer instead of staying in the one-off pipeline.
+    const promoteToRepeat = isOrder && newOrderCount > 3;
+    const finalStage = promoteToRepeat ? "Active Customer" : targetStage;
+    // Update lead stage — also actually save the KG entered here (previously only used in the WhatsApp message text)
+    setLeads(leads.map(l => l.id===lead.id ? {
+      ...l,
+      stage: finalStage,
+      lastContact: "Today",
+      lastContactAt: Date.now(),
+      orderCount: newOrderCount,
+      kgQty: kgQty ? Number(kgQty) : l.kgQty,
+    } : l));
     // Log expense if Porter
     if (method === "porter" && porterAmt) {
       const today = new Date();
@@ -1389,14 +1536,33 @@ function Leads() {
       };
       setExpenses([newExp, ...expenses]);
     }
-    setGroupMsg({ lead, targetStage, method, kgQty });
+    if (promoteToRepeat) {
+      const alreadyRepeat = (repeatCustomers||[]).some(c => c.contact === lead.contact);
+      if (!alreadyRepeat) {
+        const todayStr = new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
+        setRepeatCustomers([{
+          id: Date.now(),
+          name: lead.name,
+          area: lead.area || "",
+          contact: lead.contact,
+          product: "Dosa Batter",
+          qty: parseInt(kgQty) || 0,
+          frequency: "Weekly",
+          status: "Upcoming",
+          lastOrder: todayStr,
+          nextDue: todayStr,
+          revenue: 0,
+        }, ...(repeatCustomers||[])]);
+      }
+    }
+    setGroupMsg({ lead, targetStage: finalStage, method, kgQty });
     setDeliveryDialog(null);
     setPorterAmt("");
     setKgQty("");
   };
   const addLead = () => {
     if (!newLead.name || !newLead.contact) return;
-    setLeads([{ ...newLead, id:leads.length+1, stage:"New Lead", lastContact:"Today", priority:"Medium", remarks:[] }, ...leads]);
+    setLeads([{ ...newLead, id:leads.length+1, stage:"New Lead", lastContact:"Today", lastContactAt:Date.now(), createdAt:Date.now(), orderCount:0, priority:"Medium", remarks:[] }, ...leads]);
     setShowAdd(false);
     setNewLead({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Priya" });
   };
@@ -1583,10 +1749,10 @@ function Leads() {
           </div>
           <Chip label={lead.stage} color={getStageColor(lead.stage)} />
           <div style={{ marginTop:16 }}>
-            {[["Contact",lead.contact],["Address",lead.address||lead.area],["Source",lead.source],["Telecaller",lead.telecaller],["Last contact",lead.lastContact]].map(([k,v]) => (
+            {[["Contact",lead.contact],["Address",lead.address||lead.area],["Source",lead.source],["Telecaller",lead.telecaller],["Last contact",formatLastContact(lead.lastContactAt, lead.lastContact)]].map(([k,v]) => (
               <div key={k} style={{ display:"flex", padding:"9px 0", borderBottom:`1px solid ${T.border}` }}>
                 <span style={{ fontSize:11, color:T.t3, width:100, flexShrink:0, fontWeight:600 }}>{k}</span>
-                <span style={{ fontSize:12, fontWeight:600, color:T.t1 }}>{v}</span>
+                <span style={{ fontSize:12, fontWeight:600, color: k==="Last contact" && isFollowUpOverdue(lead) ? T.rose : T.t1 }}>{k==="Last contact" && isFollowUpOverdue(lead) ? "⏰ " : ""}{v}</span>
               </div>
             ))}
           </div>
@@ -1598,6 +1764,9 @@ function Leads() {
             <Btn label="💬 WhatsApp" color={T.accent} ghost full onClick={() => {
               setShowWAForLead(lead);
             }} />
+          </div>
+          <div style={{ marginTop:8 }}>
+            <Btn label="📝 Log Call Outcome" color={T.indigo} full onClick={() => setCallLogFor(lead)} />
           </div>
         </Card>
         )}
@@ -1654,6 +1823,7 @@ function Leads() {
             }} />
           <div style={{ marginTop:8 }}><Btn label="Save Remark" full onClick={() => addRemark(lead.id, lead.telecaller)} /></div>
         </Card>
+        {callLogFor && <CallLogDialog lead={callLogFor} onClose={() => setCallLogFor(null)} onSubmit={(result) => logCall(callLogFor, result)} />}
         {renderDeliveryOverlay()}
       </div>
     );
@@ -1679,6 +1849,18 @@ function Leads() {
             style={{ background:T.emerald, border:"none", borderRadius:10, color:"#060B16", width:34, height:34, fontSize:15, cursor:"pointer", flexShrink:0 }}>📞</button>
         </div>
       )}
+      {overdueCount > 0 && (
+        <div onClick={() => setFilterStage("Needs Follow-up")}
+          style={{
+            background:T.rose+"14", border:`1px solid ${T.rose}44`, borderRadius:14,
+            padding:"10px 14px", display:"flex", alignItems:"center", gap:10, cursor:"pointer",
+          }}>
+          <div style={{ fontSize:18 }}>⏰</div>
+          <div style={{ fontSize:12, fontWeight:700, color:T.rose }}>
+            {overdueCount} lead{overdueCount!==1?"s":""} need{overdueCount===1?"s":""} follow-up — no contact in over {FOLLOWUP_OVERDUE_DAYS} days
+          </div>
+        </div>
+      )}
       <div style={{ display:"flex", gap:8 }}>
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search by name, area, contact…"
@@ -1691,9 +1873,9 @@ function Leads() {
       </div>
 
       <div style={{ display:"flex", gap:7, overflowX:"auto", paddingBottom:4 }}>
-        {["All","New Lead","Interested","Sample Requested","Positive Feedback","Negotiation","Order Received","Active Customer","Lost Customer"].map(s => {
+        {["All","Needs Follow-up","New Lead","Interested","Sample Requested","Positive Feedback","Negotiation","Order Received","Active Customer","Lost Customer"].map(s => {
           const active = filterStage===s;
-          const col = s==="All" ? T.accent : getStageColor(s);
+          const col = s==="All" ? T.accent : s==="Needs Follow-up" ? T.rose : getStageColor(s);
           return (
             <button key={s} onClick={() => setFilterStage(s)}
               style={{
@@ -1702,7 +1884,7 @@ function Leads() {
                 background: active ? col+"1A" : "transparent",
                 color: active ? col : T.t2,
                 fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:FONT,
-              }}>{s==="All" ? `All (${leads.length})` : s}</button>
+              }}>{s==="All" ? `All (${leads.length})` : s==="Needs Follow-up" ? `⏰ Follow-up (${overdueCount})` : s}</button>
           );
         })}
       </div>
@@ -1712,10 +1894,12 @@ function Leads() {
         <SyncBadge status={leadsSyncStatus} />
       </div>
 
-      {filtered.map(lead => (
+      {filtered.map(lead => {
+        const overdue = isFollowUpOverdue(lead);
+        return (
         <div key={lead.contact || lead.id} onClick={() => setSelected(lead.contact || lead.id)}
           style={{
-            background:T.card, border:`1px solid ${T.border}`,
+            background:T.card, border:`1px solid ${overdue ? T.rose+"55" : T.border}`,
             borderRadius:16, padding:14, cursor:"pointer",
             borderLeft:`3px solid ${getStageColor(lead.stage)}`,
             transition:"background 0.15s",
@@ -1731,7 +1915,7 @@ function Leads() {
             <Chip label={lead.stage} color={getStageColor(lead.stage)} />
             <div style={{ display:"flex", gap:10 }}>
               <span style={{ fontSize:10, color:T.t3 }}>{lead.contact}</span>
-              <span style={{ fontSize:10, color:T.t3 }}>{lead.lastContact}</span>
+              <span style={{ fontSize:10, color: overdue ? T.rose : T.t3, fontWeight: overdue ? 700 : 400 }}>{overdue ? "⏰ " : ""}{formatLastContact(lead.lastContactAt, lead.lastContact)}</span>
             </div>
           </div>
           {lead.remarks?.length>0 && (
@@ -1746,6 +1930,12 @@ function Leads() {
                 background:T.emerald+"14", border:`1px solid ${T.emerald}33`, borderRadius:10,
                 color:T.emerald, padding:"8px 0", fontSize:11.5, fontWeight:700, cursor:"pointer", fontFamily:FONT,
               }}>📞 Call</button>
+            <button onClick={() => setCallLogFor(lead)}
+              style={{
+                flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+                background:T.indigo+"14", border:`1px solid ${T.indigo}33`, borderRadius:10,
+                color:T.indigo, padding:"8px 0", fontSize:11.5, fontWeight:700, cursor:"pointer", fontFamily:FONT,
+              }}>📝 Log Call</button>
             <select value={lead.stage} onChange={e => updateStage(lead.contact || lead.id, e.target.value)}
               style={{
                 flex:1.4, background:T.accent+"14", border:`1px solid ${T.accent}33`, borderRadius:10,
@@ -1756,7 +1946,8 @@ function Leads() {
             </select>
           </div>
         </div>
-      ))}
+        );
+      })}
 
       <Sheet open={showAdd} onClose={() => setShowAdd(false)} title="New Lead">
         <Field label="Customer Name *" value={newLead.name} onChange={e => setNewLead({...newLead,name:e.target.value})} />
@@ -1774,6 +1965,7 @@ function Leads() {
       </Sheet>
 
       {renderDeliveryOverlay()}
+      {callLogFor && <CallLogDialog lead={callLogFor} onClose={() => setCallLogFor(null)} onSubmit={(result) => logCall(callLogFor, result)} />}
     </div>
   );
 }
