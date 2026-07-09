@@ -3762,7 +3762,16 @@ function SalesTrendChart({ samples = [], pricePerKg = 120 }) {
   delivered.forEach(s => { if (!orderedDates.includes(s.date)) orderedDates.push(s.date); });
 
   const hasData = orderedDates.length > 0;
-  const points = orderedDates.map(d => byDate[d]);
+
+  // When there's no real data yet, still show a scale: the last 7 calendar
+  // days, all at zero, so the axis/gridlines render instead of a blank card.
+  const fallbackDates = hasData ? orderedDates : Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+  });
+
+  const points = hasData ? orderedDates.map(d => byDate[d]) : fallbackDates.map(() => 0);
   const totalSales = points.reduce((a, b) => a + b, 0);
   const bestDay = hasData ? Math.max(...points) : 0;
   const avgDay = hasData ? Math.round(totalSales / points.length) : 0;
@@ -3774,8 +3783,8 @@ function SalesTrendChart({ samples = [], pricePerKg = 120 }) {
   const coords = points.map((v, i) => [PAD + i * step, H - PAD - (v / maxV) * (H - PAD * 2)]);
   const linePath = coords.length ? coords.map((c, i) => (i === 0 ? "M" : "L") + c[0] + "," + c[1]).join(" ") : "";
   const areaPath = coords.length ? linePath + ` L${coords[coords.length - 1][0]},${H} L${coords[0][0]},${H} Z` : "";
-  const hiIdx = hasData ? points.indexOf(bestDay) : 0;
-  const hi = coords[hiIdx];
+  const hiIdx = hasData ? points.indexOf(bestDay) : -1;
+  const hi = hiIdx >= 0 ? coords[hiIdx] : null;
 
   return (
     <div style={{ flex: 1.4, minWidth: 380, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
@@ -3787,38 +3796,38 @@ function SalesTrendChart({ samples = [], pricePerKg = 120 }) {
         <div style={{ background: DT.cardHi, border: `1px solid ${DT.borderHi}`, borderRadius: 8, padding: "5px 10px", fontSize: 11.5, color: DT.t2, fontWeight: 600 }}>This Month ⌄</div>
       </div>
 
-      {!hasData ? (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 190, color: DT.t3, fontSize: 12.5, textAlign: "center", gap: 6 }}>
-          <div style={{ fontSize: 26 }}>📈</div>
-          <div>No delivered sales yet</div>
-          <div style={{ fontSize: 11 }}>The trend will appear once samples are marked "Delivered"</div>
-        </div>
-      ) : (
-        <div style={{ position: "relative", marginTop: 14 }}>
-          <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}>
-            <defs>
-              <linearGradient id="salesArea" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={DT.accent} stopOpacity="0.35" />
-                <stop offset="100%" stopColor={DT.accent} stopOpacity="0" />
-              </linearGradient>
-            </defs>
-            {[0.25, 0.5, 0.75].map(f => <line key={f} x1={0} x2={W} y1={H * f} y2={H * f} stroke={DT.border} strokeDasharray="4 5" />)}
-            {areaPath && <path d={areaPath} fill="url(#salesArea)" />}
-            {linePath && <path d={linePath} fill="none" stroke={DT.accent} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />}
-            {hi && <circle cx={hi[0]} cy={hi[1]} r="4.5" fill={DT.bg} stroke={DT.accent} strokeWidth="2.5" />}
-            {hi && <line x1={hi[0]} x2={hi[0]} y1={hi[1]} y2={H} stroke={DT.borderHi} strokeDasharray="3 4" />}
-          </svg>
-          {hi && (
-            <div style={{ position: "absolute", left: `calc(${(hi[0] / W) * 100}% - 46px)`, top: Math.max(hi[1] - 46, 0), background: DT.cardHi, border: `1px solid ${DT.borderHi}`, borderRadius: 8, padding: "6px 10px", fontSize: 10.5, color: DT.t1, whiteSpace: "nowrap", boxShadow: "0 8px 20px rgba(0,0,0,0.35)" }}>
-              <div style={{ fontWeight: 700 }}>{orderedDates[hiIdx]}</div>
-              <div style={{ color: DT.accent, fontWeight: 700 }}>{bestDay} KG</div>
-            </div>
-          )}
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
-            {orderedDates.map(d => <span key={d} style={{ fontSize: 10.5, color: DT.t3 }}>{d}</span>)}
+      <div style={{ position: "relative", marginTop: 14 }}>
+        <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}>
+          <defs>
+            <linearGradient id="salesArea" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={DT.accent} stopOpacity="0.35" />
+              <stop offset="100%" stopColor={DT.accent} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {[0.25, 0.5, 0.75].map(f => <line key={f} x1={0} x2={W} y1={H * f} y2={H * f} stroke={DT.border} strokeDasharray="4 5" />)}
+          {hasData && areaPath && <path d={areaPath} fill="url(#salesArea)" />}
+          {hasData && linePath && <path d={linePath} fill="none" stroke={DT.accent} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />}
+          {!hasData && <line x1={PAD} x2={W - PAD} y1={H - PAD} y2={H - PAD} stroke={DT.borderHi} strokeWidth="2" />}
+          {hi && <circle cx={hi[0]} cy={hi[1]} r="4.5" fill={DT.bg} stroke={DT.accent} strokeWidth="2.5" />}
+          {hi && <line x1={hi[0]} x2={hi[0]} y1={hi[1]} y2={H} stroke={DT.borderHi} strokeDasharray="3 4" />}
+        </svg>
+        {hi && (
+          <div style={{ position: "absolute", left: `calc(${(hi[0] / W) * 100}% - 46px)`, top: Math.max(hi[1] - 46, 0), background: DT.cardHi, border: `1px solid ${DT.borderHi}`, borderRadius: 8, padding: "6px 10px", fontSize: 10.5, color: DT.t1, whiteSpace: "nowrap", boxShadow: "0 8px 20px rgba(0,0,0,0.35)" }}>
+            <div style={{ fontWeight: 700 }}>{orderedDates[hiIdx]}</div>
+            <div style={{ color: DT.accent, fontWeight: 700 }}>{bestDay} KG</div>
           </div>
+        )}
+        {!hasData && (
+          <div style={{ position: "absolute", left: "50%", top: "38%", transform: "translate(-50%, -50%)", color: DT.t3, fontSize: 12.5, textAlign: "center", width: "80%" }}>
+            <div style={{ fontSize: 22, marginBottom: 4 }}>📈</div>
+            <div>No delivered sales yet</div>
+            <div style={{ fontSize: 11, marginTop: 2 }}>The trend will appear once samples are marked "Delivered"</div>
+          </div>
+        )}
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+          {fallbackDates.map((d, i) => <span key={d + i} style={{ fontSize: 10.5, color: DT.t3 }}>{d}</span>)}
         </div>
-      )}
+      </div>
 
       <div style={{ display: "flex", gap: 22, marginTop: 16, borderTop: `1px solid ${DT.border}`, paddingTop: 14, flexWrap: "wrap" }}>
         {[
