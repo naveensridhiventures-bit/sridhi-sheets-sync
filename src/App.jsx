@@ -1726,6 +1726,157 @@ function Pipeline() {
   leads.forEach(l => { stageCounts[l.stage] = (stageCounts[l.stage]||0) + 1; });
   const stages = PIPELINE_STAGES.map(s => ({ ...s, count: stageCounts[s.id]||0 }));
   const total = leads.length;
+  const [exporting, setExporting] = useState(false);
+
+  // ── Excel export (styled HTML table, opens natively in Excel) ──
+  const downloadPipelineExcel = () => {
+    setExporting(true);
+    const today = new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
+    const rowsHtml = PIPELINE_STAGES.map(stage => {
+      const stageLeads = leads.filter(l => l.stage === stage.id);
+      if (stageLeads.length === 0) return "";
+      return stageLeads.map((l,i) => `
+        <tr>
+          ${i===0 ? `<td rowspan="${stageLeads.length}" style="background:${stage.color};color:#fff;font-weight:bold;text-align:center;vertical-align:middle;">${stage.id}</td>` : ""}
+          <td>${l.name||""}</td>
+          <td>${l.business||""}</td>
+          <td>${l.contact||""}</td>
+          <td>${l.area||""}</td>
+          <td>${l.type||""}</td>
+          <td>${l.telecaller||""}</td>
+          <td style="font-weight:bold;color:${l.priority==="High"?"#F43F5E":l.priority==="Medium"?"#F59E0B":"#7B9DC4"}">${l.priority||"Medium"}</td>
+          <td>${l.lastContact||""}</td>
+          <td>${l.source||""}</td>
+          <td>${(l.remarks&&l.remarks.length) ? l.remarks[l.remarks.length-1].replace(/^\[.+?\]\s*/,"") : ""}</td>
+        </tr>`).join("");
+    }).join("");
+
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="UTF-8"/>
+<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>
+<x:Name>Pipeline</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
+</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
+<style>
+  table { border-collapse:collapse; font-family:Calibri,Arial,sans-serif; font-size:11pt; }
+  th { background:#060B16; color:#00C9A7; padding:10px 12px; text-align:left; border:1px solid #060B16; text-transform:uppercase; font-size:9pt; }
+  td { padding:8px 12px; border:1px solid #d9e2f0; }
+  tr:nth-child(even) td { background:#f4f8ff; }
+  .title { font-size:20pt; font-weight:bold; color:#00C9A7; }
+  .subtitle { font-size:10pt; color:#7B9DC4; }
+</style>
+</head>
+<body>
+<table>
+  <tr><td colspan="10" class="title">⚡ Sridhi Ventures — Telecalling Pipeline</td></tr>
+  <tr><td colspan="10" class="subtitle">Exported ${today} · ${total} total leads across all stages</td></tr>
+  <tr><td colspan="10">&nbsp;</td></tr>
+  <tr>
+    <th>Stage</th><th>Name</th><th>Business</th><th>Contact</th><th>Area</th><th>Type</th>
+    <th>Telecaller</th><th>Priority</th><th>Last Contact</th><th>Source</th><th>Latest Remark</th>
+  </tr>
+  ${rowsHtml || `<tr><td colspan="10" style="text-align:center;color:#999">No leads in pipeline</td></tr>`}
+</table>
+</body>
+</html>`;
+
+    const blob = new Blob(["\uFEFF"+html], { type:"application/vnd.ms-excel;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "sridhi-pipeline-" + new Date().toISOString().slice(0,10) + ".xls";
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); setExporting(false); }, 1000);
+  };
+
+  // ── PDF export (styled printable report, grouped by stage) ──
+  const downloadPipelinePDF = () => {
+    setExporting(true);
+    const today = new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
+    const stageSections = PIPELINE_STAGES.map(stage => {
+      const stageLeads = leads.filter(l => l.stage === stage.id);
+      if (stageLeads.length === 0) return "";
+      return `
+      <div class="stage-section">
+        <div class="stage-header" style="border-left-color:${stage.color}">
+          <span class="stage-dot" style="background:${stage.color}"></span>
+          <span class="stage-name">${stage.id}</span>
+          <span class="stage-count" style="background:${stage.color}22;color:${stage.color}">${stageLeads.length}</span>
+        </div>
+        <table>
+          <tr><th>Name</th><th>Business</th><th>Contact</th><th>Area</th><th>Telecaller</th><th>Priority</th><th>Last Contact</th></tr>
+          ${stageLeads.map(l => `<tr>
+            <td><strong>${l.name||""}</strong></td>
+            <td>${l.business||""}</td>
+            <td>${l.contact||""}</td>
+            <td>${l.area||""}</td>
+            <td>${l.telecaller||""}</td>
+            <td><span class="badge" style="background:${getPriorityColor(l.priority||"Medium")}22;color:${getPriorityColor(l.priority||"Medium")}">${l.priority||"Medium"}</span></td>
+            <td>${l.lastContact||""}</td>
+          </tr>`).join("")}
+        </table>
+      </div>`;
+    }).join("");
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, sans-serif; background:#fff; color:#1a1a2e; padding:40px; }
+  .header { background:linear-gradient(135deg,#060B16,#0F1C33); color:white; padding:32px; border-radius:16px; margin-bottom:24px; display:flex; justify-content:space-between; align-items:center; }
+  .logo { font-size:28px; font-weight:900; color:#00C9A7; letter-spacing:-1px; }
+  .sub { font-size:12px; color:#7B9DC4; margin-top:4px; text-transform:uppercase; letter-spacing:2px; }
+  .date { font-size:12px; color:#7B9DC4; text-align:right; }
+  .overview { display:flex; gap:12px; margin-bottom:28px; }
+  .kpi { flex:1; background:#f8faff; border:1px solid #e0eaff; border-radius:12px; padding:16px; text-align:center; }
+  .kpi-val { font-size:24px; font-weight:900; color:#00C9A7; }
+  .kpi-label { font-size:10px; color:#666; margin-top:4px; font-weight:600; text-transform:uppercase; }
+  .stage-section { margin-bottom:20px; page-break-inside:avoid; }
+  .stage-header { display:flex; align-items:center; gap:10px; padding:10px 14px; background:#f8faff; border-left:4px solid; border-radius:6px; margin-bottom:10px; }
+  .stage-dot { width:9px; height:9px; border-radius:50%; }
+  .stage-name { font-size:13px; font-weight:800; color:#060B16; flex:1; text-transform:uppercase; letter-spacing:0.5px; }
+  .stage-count { font-size:12px; font-weight:800; padding:2px 10px; border-radius:20px; }
+  table { width:100%; border-collapse:collapse; font-size:11px; }
+  th { background:#060B16; color:#00C9A7; padding:8px 10px; text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; }
+  td { padding:7px 10px; border-bottom:1px solid #f0f0f0; }
+  tr:nth-child(even) td { background:#fafcff; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:20px; font-size:9px; font-weight:700; }
+  .footer { margin-top:32px; padding-top:16px; border-top:2px solid #00C9A7; display:flex; justify-content:space-between; color:#999; font-size:10px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <div class="logo">⚡ Sridhi Ventures</div>
+    <div class="sub">Telecalling Pipeline Report</div>
+  </div>
+  <div class="date">
+    <div style="font-size:20px;font-weight:900;color:#00C9A7">${today}</div>
+    <div style="margin-top:4px">Bengaluru · Food Distribution</div>
+  </div>
+</div>
+<div class="overview">
+  <div class="kpi"><div class="kpi-val">${total}</div><div class="kpi-label">Total Leads</div></div>
+  <div class="kpi"><div class="kpi-val">${stages.filter(s=>s.count>0).length}</div><div class="kpi-label">Active Stages</div></div>
+  <div class="kpi"><div class="kpi-val">${stageCounts["Active Customer"]||0}</div><div class="kpi-label">Active Customers</div></div>
+</div>
+${stageSections || `<div style="text-align:center;color:#999;padding:40px">No leads in pipeline</div>`}
+<div class="footer">
+  <div>Generated by <strong>Sridhi Ventures BOS v3.0</strong></div>
+  <div>Confidential · Internal Use Only</div>
+  <div>${today}</div>
+</div>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type:"text/html" });
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url, "_blank");
+    if (w) { w.onload = () => { w.print(); }; }
+    setTimeout(() => { URL.revokeObjectURL(url); setExporting(false); }, 3000);
+  };
+
 
   const updateStageP = (id, stage) => setAllLeads(allLeads.map(l => l.id===id ? {...l, stage, lastContact:"Today"} : l));
   const addRemarkP = (id) => {
@@ -1848,6 +1999,23 @@ function Pipeline() {
       <Card accent={T.accent}>
         <Label sub={`${total} total leads across all stages`}>Pipeline Overview</Label>
         <PipelineStrip stages={stages} />
+      </Card>
+      <Card>
+        <Label sub="Downloads real pipeline data">Export Pipeline</Label>
+        <div style={{ display:"flex", gap:10, marginTop:8 }}>
+          <button onClick={downloadPipelineExcel} disabled={exporting}
+            style={{ flex:1, background:"linear-gradient(135deg,#10B981,#00C9A7)", border:"none", borderRadius:14,
+              color:"#060B16", padding:"13px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT,
+              display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+            {exporting ? "⏳ Preparing..." : "📊 Excel"}
+          </button>
+          <button onClick={downloadPipelinePDF} disabled={exporting}
+            style={{ flex:1, background:T.surface, border:`1px solid ${T.border}`, borderRadius:14,
+              color:T.t1, padding:"13px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT,
+              display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+            {exporting ? "⏳ Preparing..." : "📑 PDF"}
+          </button>
+        </div>
       </Card>
       {stages.map(stage => {
         const pct = total > 0 ? ((stage.count/total)*100).toFixed(1) : "0.0";
