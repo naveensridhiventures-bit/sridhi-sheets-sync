@@ -125,6 +125,65 @@ function isFollowUpOverdue(lead) {
   if (!ts) return true; // never logged a contact at all
   return daysSince(ts) > FOLLOWUP_OVERDUE_DAYS;
 }
+// ── Activity Report date/period helpers ───────────────────────────────────
+function pad2(n) { return String(n).padStart(2, "0"); }
+function localISODate(d = new Date()) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+function localISOMonth(d = new Date()) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+}
+function localISOWeek(d = new Date()) {
+  const target = new Date(d.getTime());
+  const dayNr = (d.getDay() + 6) % 7; // Mon=0..Sun=6
+  target.setDate(target.getDate() - dayNr + 3);
+  const firstThursday = target.valueOf();
+  target.setMonth(0, 1);
+  if (target.getDay() !== 4) target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
+  const week = 1 + Math.round((firstThursday - target) / 604800000);
+  return `${d.getFullYear()}-W${pad2(week)}`;
+}
+function dayRangeFromISO(dateStr) {
+  const [y, m, dd] = dateStr.split("-").map(Number);
+  return [new Date(y, m - 1, dd, 0, 0, 0, 0).getTime(), new Date(y, m - 1, dd, 23, 59, 59, 999).getTime()];
+}
+function weekRangeFromISO(weekStr) {
+  const [yearStr, wStr] = weekStr.split("-W");
+  const year = parseInt(yearStr, 10), week = parseInt(wStr, 10);
+  const simple = new Date(year, 0, 1 + (week - 1) * 7);
+  const dow = simple.getDay();
+  const monday = new Date(simple);
+  const diff = dow === 0 ? -6 : 1 - dow;
+  monday.setDate(simple.getDate() + diff);
+  monday.setHours(0, 0, 0, 0);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+  return [monday.getTime(), sunday.getTime()];
+}
+function monthRangeFromISO(monthStr) {
+  const [y, m] = monthStr.split("-").map(Number);
+  return [new Date(y, m - 1, 1, 0, 0, 0, 0).getTime(), new Date(y, m, 0, 23, 59, 59, 999).getTime()];
+}
+// Best-effort parser for the old samples "date" strings like "10 Jul" (no year) —
+// assumes current year; used only as a fallback for samples logged before createdAt existed.
+function guessTsFromShortDate(str) {
+  if (!str) return null;
+  const parsed = Date.parse(str + " " + new Date().getFullYear());
+  return isNaN(parsed) ? null : parsed;
+}
+function eachDayInRange(startTs, endTs) {
+  const days = [];
+  let cur = new Date(startTs);
+  cur.setHours(0, 0, 0, 0);
+  const end = new Date(endTs);
+  while (cur.getTime() <= end.getTime()) {
+    days.push(new Date(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return days;
+}
+
 function useSheetSynced(_endpoint, _key, initialData) {
   // The new useSheets hook uses the tab name (same as _endpoint) and batches all tabs.
   return useSheets(_endpoint, initialData);
@@ -396,6 +455,7 @@ function Stars({ value, onChange, max=5 }) {
 // ─── PROSPECT FINDER ─────────────────────────────────────────────────────────
 function ProspectFinder() {
   const [leads, setLeads] = useSheetSynced("leads","leads",[]);
+  const [activityLog, setActivityLog] = useSheetSynced("activityLog","activityLog",[]);
   const [area, setArea] = useState("T Nagar, Chennai");
   const [type, setType] = useState("restaurant");
   const [results, setResults] = useState([]);
@@ -475,8 +535,12 @@ function ProspectFinder() {
       lastContact: "Not contacted",
       priority: "Medium",
       remarks: form.notes ? ["[Prospect Finder] " + form.notes] : [],
+      createdAt: Date.now(),
+      lastContactAt: Date.now(),
+      orderCount: 0,
     };
     setLeads([newLead, ...leads]);
+    setActivityLog([{ id: Date.now()+"_"+Math.random().toString(36).slice(2,7), type:"lead", label: newLead.name, source:"Prospect Finder", ts: Date.now() }, ...activityLog]);
     setAdded({ ...added, [filling.name]: true });
     setFilling(null);
   }
@@ -1142,6 +1206,7 @@ function WATemplatePicker({ lead, onClose }) {
 function HRLeads() {
   const [hrLeads] = useSheetSynced("hrLeads","hrLeads",[]);
   const [leads, setLeads] = useSheetSynced("leads","leads",[]);
+  const [activityLog, setActivityLog] = useSheetSynced("activityLog","activityLog",[]);
   const [imported, setImported] = useState(() => {
     try { const s = localStorage.getItem("hr_imported"); return s ? JSON.parse(s) : {}; } catch { return {}; }
   });
@@ -1184,7 +1249,11 @@ function HRLeads() {
         lastContact: "Today",
         priority: "Medium",
         remarks: [],
+        createdAt: Date.now(),
+        lastContactAt: Date.now(),
+        orderCount: 0,
       }, ...leads]);
+      setActivityLog([{ id: Date.now()+"_"+Math.random().toString(36).slice(2,7), type:"lead", label: form.name, source:"HR Assignment", ts: Date.now() }, ...activityLog]);
     }
     saveImported({ ...imported, [editingLead]: true });
     setEditingLead(null);
@@ -1403,6 +1472,7 @@ function Leads() {
   const [leads, setLeads, leadsSyncStatus] = useSheetSynced("leads", "leads", INITIAL_LEADS);
   const [expenses, setExpenses] = useSheetSynced("expenses", "expenses", INITIAL_EXPENSES);
   const [repeatCustomers, setRepeatCustomers] = useSheetSynced("repeatCustomers", "repeatCustomers", []);
+  const [activityLog, setActivityLog] = useSheetSynced("activityLog", "activityLog", []);
   const [search, setSearch] = useState("");
   const [filterStage, setFilterStage] = useState("All");
   const [selected, setSelected] = useState(null);
@@ -1555,6 +1625,13 @@ function Leads() {
         }, ...(repeatCustomers||[])]);
       }
     }
+    // Log to the activity feed so daily/weekly/monthly reports stay accurate
+    // (lead.stage can be overwritten later, so this is the durable timestamped record).
+    if (isOrder) {
+      setActivityLog([{ id: Date.now()+"_"+Math.random().toString(36).slice(2,7), type:"order", label: lead.name, source:"Pipeline", ts: Date.now() }, ...activityLog]);
+    } else if (targetStage === "Sample Requested") {
+      setActivityLog([{ id: Date.now()+"_"+Math.random().toString(36).slice(2,7), type:"sample", label: lead.name, source:"Pipeline", ts: Date.now() }, ...activityLog]);
+    }
     setGroupMsg({ lead, targetStage: finalStage, method, kgQty });
     setDeliveryDialog(null);
     setPorterAmt("");
@@ -1563,6 +1640,7 @@ function Leads() {
   const addLead = () => {
     if (!newLead.name || !newLead.contact) return;
     setLeads([{ ...newLead, id:leads.length+1, stage:"New Lead", lastContact:"Today", lastContactAt:Date.now(), createdAt:Date.now(), orderCount:0, priority:"Medium", remarks:[] }, ...leads]);
+    setActivityLog([{ id: Date.now()+"_"+Math.random().toString(36).slice(2,7), type:"lead", label: newLead.name, source: newLead.source||"", ts: Date.now() }, ...activityLog]);
     setShowAdd(false);
     setNewLead({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Priya" });
   };
@@ -2352,6 +2430,7 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
 function Samples() {
   const [samples, setSamples, samplesSyncStatus] = useSheetSynced("samples", "samples", INITIAL_SAMPLES);
   const [leads, setLeads] = useSheetSynced("leads","leads",[]);
+  const [activityLog, setActivityLog] = useSheetSynced("activityLog","activityLog",[]);
   const [showAdd, setShowAdd] = useState(false);
   const [showFeedback, setShowFeedback] = useState(null);
   const [ratings, setRatings] = useState({ taste:0, texture:0, quality:0, pricing:"", competitor:"", interest:"Yes", comments:"" });
@@ -2377,6 +2456,11 @@ function Samples() {
         setLeads(leads.map(l => l.id===matchedLead.id ? { ...l, stage:newStage, lastContact:"Today", remarks:[...(l.remarks||[]), autoRemark] } : l));
       }
     }
+    // Durable timestamped record for reporting — sample.converted can be true/false
+    // but doesn't carry the date it happened, so log the event here.
+    if (isConverted && sample) {
+      setActivityLog([{ id: Date.now()+"_"+Math.random().toString(36).slice(2,7), type:"order", label: sample.customer, source:"Sample Feedback", ts: Date.now() }, ...activityLog]);
+    }
     setShowFeedback(null);
     setRatings({ taste:0, texture:0, quality:0, pricing:"", competitor:"", interest:"Yes", comments:"" });
   };
@@ -2384,7 +2468,8 @@ function Samples() {
   const addSample = () => {
     if (!newSample.customer || !newSample.qty) return;
     const today2 = new Date(); const dateStr = today2.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
-    setSamples([{ ...newSample, id:samples.length+1, qty:parseInt(newSample.qty), unit:"KG", date:dateStr, deliveryCost:parseInt(newSample.deliveryCost)||0, productionCost:parseInt(newSample.qty)*50, status:"Pending", feedback:null, converted:false }, ...samples]);
+    setSamples([{ ...newSample, id:samples.length+1, qty:parseInt(newSample.qty), unit:"KG", date:dateStr, createdAt:Date.now(), deliveryCost:parseInt(newSample.deliveryCost)||0, productionCost:parseInt(newSample.qty)*50, status:"Pending", feedback:null, converted:false }, ...samples]);
+    setActivityLog([{ id: Date.now()+"_"+Math.random().toString(36).slice(2,7), type:"sample", label: newSample.customer, source:"Samples Page", ts: Date.now() }, ...activityLog]);
     setShowAdd(false);
     setNewSample({ customer:"", qty:"", type:"Dosa Batter", exec:"Arjun P.", deliveryCost:"" });
   };
@@ -3066,6 +3151,223 @@ function Marketing() {
 }
 
 // ─── REPORTS ──────────────────────────────────────────────────────────────
+// ─── ACTIVITY REPORT — day / week / month leads, samples & orders ─────────
+function ActivityReport() {
+  const [leads] = useSheetSynced("leads", "leads", []);
+  const [samples] = useSheetSynced("samples", "samples", []);
+  const [activityLog] = useSheetSynced("activityLog", "activityLog", []);
+  const [periodType, setPeriodType] = useState("day"); // day | week | month
+  const [dayVal, setDayVal] = useState(localISODate());
+  const [weekVal, setWeekVal] = useState(localISOWeek());
+  const [monthVal, setMonthVal] = useState(localISOMonth());
+  const [exporting, setExporting] = useState(false);
+
+  const [rangeStart, rangeEnd] =
+    periodType === "day" ? dayRangeFromISO(dayVal) :
+    periodType === "week" ? weekRangeFromISO(weekVal) :
+    monthRangeFromISO(monthVal);
+
+  const periodLabel =
+    periodType === "day" ? new Date(rangeStart).toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"long",year:"numeric"}) :
+    periodType === "week" ? `${new Date(rangeStart).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})} – ${new Date(rangeEnd).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})} (${weekVal})` :
+    new Date(rangeStart).toLocaleDateString("en-IN",{month:"long",year:"numeric"});
+
+  const leadTs = l => l.createdAt || null;
+  const sampleTs = s => s.createdAt || guessTsFromShortDate(s.date);
+
+  const days = eachDayInRange(rangeStart, rangeEnd);
+  const dayRows = days.map(d => {
+    const dStart = new Date(d); dStart.setHours(0,0,0,0);
+    const dEnd = new Date(d); dEnd.setHours(23,59,59,999);
+    const s = dStart.getTime(), e = dEnd.getTime();
+    const leadsCount = leads.filter(l => { const t = leadTs(l); return t && t >= s && t <= e; }).length;
+    const samplesCount = samples.filter(sm => { const t = sampleTs(sm); return t && t >= s && t <= e; }).length;
+    const ordersCount = (activityLog||[]).filter(a => a.type === "order" && a.ts >= s && a.ts <= e).length;
+    return { key: localISODate(dStart), label: dStart.toLocaleDateString("en-IN",{weekday:"short",day:"2-digit",month:"short"}), leadsCount, samplesCount, ordersCount };
+  });
+
+  const totalLeadsInPeriod = dayRows.reduce((a,b)=>a+b.leadsCount,0);
+  const totalSamplesInPeriod = dayRows.reduce((a,b)=>a+b.samplesCount,0);
+  const totalOrdersInPeriod = dayRows.reduce((a,b)=>a+b.ordersCount,0);
+  const convRatePeriod = totalLeadsInPeriod > 0 ? Math.round((totalOrdersInPeriod/totalLeadsInPeriod)*100) : 0;
+  const maxCount = Math.max(1, ...dayRows.map(r => Math.max(r.leadsCount, r.samplesCount, r.ordersCount)));
+
+  const shiftPeriod = dir => {
+    if (periodType === "day") {
+      const d = new Date(rangeStart); d.setDate(d.getDate()+dir); setDayVal(localISODate(d));
+    } else if (periodType === "week") {
+      const d = new Date(rangeStart); d.setDate(d.getDate()+7*dir); setWeekVal(localISOWeek(d));
+    } else {
+      const d = new Date(rangeStart); d.setMonth(d.getMonth()+dir, 1); setMonthVal(localISOMonth(d));
+    }
+  };
+
+  const downloadActivityReport = () => {
+    setExporting(true);
+    const genDate = new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"/><style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, sans-serif; background:#fff; color:#1a1a2e; padding:40px; }
+  .header { background:linear-gradient(135deg,#060B16,#0F1C33); color:white; padding:32px; border-radius:16px; margin-bottom:28px; display:flex; justify-content:space-between; align-items:center; }
+  .logo { font-size:26px; font-weight:900; color:#00C9A7; letter-spacing:-1px; }
+  .sub { font-size:12px; color:#7B9DC4; margin-top:4px; text-transform:uppercase; letter-spacing:2px; }
+  .period { font-size:20px; font-weight:900; color:#00C9A7; text-align:right; }
+  .genned { font-size:11px; color:#7B9DC4; margin-top:4px; text-align:right; }
+  .kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:26px; }
+  .kpi { background:#f8faff; border:1px solid #e0eaff; border-radius:12px; padding:18px 8px; text-align:center; }
+  .kpi-val { font-size:26px; font-weight:900; color:#00C9A7; }
+  .kpi-val.amber { color:#F59E0B; }
+  .kpi-val.blue { color:#818CF8; }
+  .kpi-label { font-size:10px; color:#666; margin-top:6px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; }
+  .section-title { font-size:14px; font-weight:700; color:#060B16; background:#f0f6ff; padding:8px 14px; border-radius:8px; border-left:4px solid #00C9A7; margin-bottom:14px; text-transform:uppercase; letter-spacing:1px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; margin-bottom:8px; }
+  th { background:#060B16; color:#00C9A7; padding:10px 12px; text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; }
+  td { padding:9px 12px; border-bottom:1px solid #f0f0f0; }
+  tr:nth-child(even) td { background:#f8faff; }
+  .bar-cell { display:flex; align-items:center; gap:6px; }
+  .bar-bg { width:80px; height:7px; background:#f0f0f0; border-radius:4px; overflow:hidden; }
+  .bar-fill { height:100%; border-radius:4px; }
+  .legend { display:flex; gap:18px; margin-bottom:14px; font-size:11px; color:#444; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; vertical-align:middle; }
+  .footer { margin-top:32px; padding-top:16px; border-top:2px solid #00C9A7; display:flex; justify-content:space-between; color:#999; font-size:10px; }
+</style></head><body>
+
+<div class="header">
+  <div>
+    <div class="logo">⚡ Sridhi Ventures</div>
+    <div class="sub">Activity Report — ${periodType}</div>
+  </div>
+  <div>
+    <div class="period">${periodLabel}</div>
+    <div class="genned">Generated ${genDate}</div>
+  </div>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi"><div class="kpi-val">${totalLeadsInPeriod}</div><div class="kpi-label">Leads Added</div></div>
+  <div class="kpi"><div class="kpi-val amber">${totalSamplesInPeriod}</div><div class="kpi-label">Samples Given</div></div>
+  <div class="kpi"><div class="kpi-val blue">${totalOrdersInPeriod}</div><div class="kpi-label">Orders Converted</div></div>
+  <div class="kpi"><div class="kpi-val">${convRatePeriod}%</div><div class="kpi-label">Conversion Rate</div></div>
+</div>
+
+<div class="section-title">📅 Day-wise Breakdown</div>
+<div class="legend">
+  <span><span class="dot" style="background:#00C9A7"></span>Leads</span>
+  <span><span class="dot" style="background:#F59E0B"></span>Samples</span>
+  <span><span class="dot" style="background:#818CF8"></span>Orders</span>
+</div>
+<table>
+  <tr><th>Date</th><th>Leads</th><th>Samples</th><th>Orders</th></tr>
+  ${dayRows.map(r => `<tr>
+    <td><strong>${r.label}</strong></td>
+    <td><div class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:${Math.round(r.leadsCount/maxCount*100)}%;background:#00C9A7"></div></div>${r.leadsCount}</div></td>
+    <td><div class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:${Math.round(r.samplesCount/maxCount*100)}%;background:#F59E0B"></div></div>${r.samplesCount}</div></td>
+    <td><div class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:${Math.round(r.ordersCount/maxCount*100)}%;background:#818CF8"></div></div>${r.ordersCount}</div></td>
+  </tr>`).join("")}
+  <tr style="background:#f0f6ff"><td><strong>TOTAL</strong></td><td><strong>${totalLeadsInPeriod}</strong></td><td><strong>${totalSamplesInPeriod}</strong></td><td><strong>${totalOrdersInPeriod}</strong></td></tr>
+</table>
+
+<div class="footer">
+  <div>Generated by <strong>Sridhi Ventures BOS v3.0</strong></div>
+  <div>Confidential · Internal Use Only</div>
+  <div>${genDate}</div>
+</div>
+
+</body></html>`;
+    const blob = new Blob([html], { type:"text/html" });
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url, "_blank");
+    if (w) w.onload = () => { w.print(); };
+    setTimeout(() => { URL.revokeObjectURL(url); setExporting(false); }, 3000);
+  };
+
+  const segBtn = (id, label) => (
+    <button key={id} onClick={() => setPeriodType(id)} style={{
+      flex:1, padding:"9px 0", borderRadius:10, border:"none", cursor:"pointer", fontFamily:FONT,
+      fontSize:12, fontWeight:700, background: periodType===id ? T.accent : "transparent",
+      color: periodType===id ? "#06110D" : T.t2, transition:"all .15s",
+    }}>{label}</button>
+  );
+
+  return (
+    <Card accent={T.accent}>
+      <Label sub="Store every lead, sample & order with date/time — filter by day, week or month">📈 Activity Report</Label>
+
+      <div style={{ display:"flex", gap:4, background:T.surface, borderRadius:12, padding:4, marginTop:10 }}>
+        {segBtn("day","Day")}{segBtn("week","Week")}{segBtn("month","Month")}
+      </div>
+
+      <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:12 }}>
+        <button onClick={() => shiftPeriod(-1)} style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, width:34, height:34, cursor:"pointer", fontSize:14, fontFamily:FONT }}>‹</button>
+        {periodType === "day" && (
+          <input type="date" value={dayVal} onChange={e=>setDayVal(e.target.value)}
+            style={{ flex:1, background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"8px 10px", fontSize:13, fontFamily:FONT, colorScheme:"dark" }} />
+        )}
+        {periodType === "week" && (
+          <input type="week" value={weekVal} onChange={e=>setWeekVal(e.target.value)}
+            style={{ flex:1, background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"8px 10px", fontSize:13, fontFamily:FONT, colorScheme:"dark" }} />
+        )}
+        {periodType === "month" && (
+          <input type="month" value={monthVal} onChange={e=>setMonthVal(e.target.value)}
+            style={{ flex:1, background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"8px 10px", fontSize:13, fontFamily:FONT, colorScheme:"dark" }} />
+        )}
+        <button onClick={() => shiftPeriod(1)} style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, width:34, height:34, cursor:"pointer", fontSize:14, fontFamily:FONT }}>›</button>
+      </div>
+      <div style={{ fontSize:11, color:T.t3, marginTop:6, fontWeight:600 }}>{periodLabel}</div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8, marginTop:14 }}>
+        {[
+          ["Leads Added", totalLeadsInPeriod, T.accent, "🧲"],
+          ["Samples Given", totalSamplesInPeriod, T.amber, "🧪"],
+          ["Orders Converted", totalOrdersInPeriod, T.indigo, "✅"],
+          ["Conv. Rate", convRatePeriod+"%", T.emerald, "🎯"],
+        ].map(([l,v,c,icon]) => (
+          <div key={l} style={{ textAlign:"center", background:T.surface, borderRadius:12, padding:"12px 4px" }}>
+            <div style={{ fontSize:16 }}>{icon}</div>
+            <div style={{ fontSize:17, fontWeight:900, color:c, marginTop:2 }}>{v}</div>
+            <div style={{ fontSize:9.5, color:T.t3, marginTop:3, fontWeight:600 }}>{l}</div>
+          </div>
+        ))}
+      </div>
+
+      {dayRows.length > 1 && (
+        <div style={{ marginTop:16 }}>
+          <Label size={12}>Day-wise breakdown</Label>
+          <div style={{ display:"flex", gap:10, fontSize:10, color:T.t3, margin:"6px 0 8px" }}>
+            <span><span style={{display:"inline-block",width:8,height:8,borderRadius:4,background:T.accent,marginRight:4}}/>Leads</span>
+            <span><span style={{display:"inline-block",width:8,height:8,borderRadius:4,background:T.amber,marginRight:4}}/>Samples</span>
+            <span><span style={{display:"inline-block",width:8,height:8,borderRadius:4,background:T.indigo,marginRight:4}}/>Orders</span>
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:8, maxHeight:280, overflowY:"auto" }}>
+            {dayRows.map(r => (
+              <div key={r.key} style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <div style={{ width:64, fontSize:10.5, color:T.t2, flexShrink:0, fontWeight:600 }}>{r.label}</div>
+                <div style={{ flex:1, display:"flex", gap:3, alignItems:"center" }}>
+                  {[[r.leadsCount,T.accent],[r.samplesCount,T.amber],[r.ordersCount,T.indigo]].map(([val,color],i) => (
+                    <div key={i} style={{ flex:1, height:14, background:T.bg, borderRadius:4, overflow:"hidden", position:"relative" }}>
+                      <div style={{ width:`${Math.round(val/maxCount*100)}%`, height:"100%", background:color, borderRadius:4, transition:"width .3s" }} />
+                    </div>
+                  ))}
+                </div>
+                <div style={{ width:56, fontSize:10, color:T.t3, textAlign:"right", flexShrink:0 }}>{r.leadsCount}/{r.samplesCount}/{r.ordersCount}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <button onClick={downloadActivityReport} disabled={exporting} style={{
+        marginTop:16, background:"linear-gradient(135deg,#1FE0B8,#22D98A)", border:"none", borderRadius:14,
+        color:"#06110D", padding:"13px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT,
+        width:"100%", display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+      }}>
+        {exporting ? "⏳ Generating…" : `📥 Download ${periodType==="day"?"Daily":periodType==="week"?"Weekly":"Monthly"} Report`}
+      </button>
+    </Card>
+  );
+}
+
 function Reports() {
   const [leads] = useSheetSynced("leads","leads",[]);
   const [expenses] = useSheetSynced("expenses","expenses",[]);
@@ -3225,6 +3527,7 @@ function Reports() {
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      <ActivityReport />
       <Card accent={T.emerald}>
         <Label sub="Live data from Google Sheets">Business Summary</Label>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginTop:8 }}>

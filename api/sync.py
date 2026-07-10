@@ -21,10 +21,14 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 TAB_CONFIG = {
     "leads":           {"tab": "Leads",           "headers": ["id","name","contact","business","type","area","address","stage","source","telecaller","lastContact","lastContactAt","createdAt","orderCount","callOutcome","priority","remarks","kgQty"]},
-    "samples":         {"tab": "Samples",          "headers": ["id","customer","leadId","qty","unit","type","date","exec","deliveryCost","productionCost","status","feedback","converted"]},
+    "samples":         {"tab": "Samples",          "headers": ["id","customer","leadId","qty","unit","type","date","createdAt","exec","deliveryCost","productionCost","status","feedback","converted"]},
     "expenses":        {"tab": "Expenses",         "headers": ["id","category","amount","date","type","subtype"]},
     "repeatCustomers": {"tab": "RepeatCustomers",  "headers": ["id","name","area","contact","product","qty","frequency","lastOrder","nextDue","status","revenue"]},
     "hrLeads": {"tab": "HRLeads", "headers": ["contact"]},
+    # Timestamped event feed — one row per lead added / sample dispatched / order converted.
+    # This is the source of truth for the day/week/month Activity Report, since a lead's
+    # or sample's current `stage`/`converted` field gets overwritten and loses history.
+    "activityLog":     {"tab": "ActivityLog",      "headers": ["id","type","label","source","ts"]},
 }
 
 _cache = {}
@@ -109,9 +113,9 @@ def _coerce(tab_key, row):
                 except: pass
             else:
                 row[f] = None if f in ("lastContactAt", "createdAt") else 0
-    elif tab_key in ("samples","expenses","repeatCustomers"):
-        for f in ("id","qty","deliveryCost","productionCost","amount","revenue","leadId"):
-            if f in row:
+    elif tab_key in ("samples","expenses","repeatCustomers","activityLog"):
+        for f in ("id","qty","deliveryCost","productionCost","amount","revenue","leadId","createdAt","ts"):
+            if f in row and row.get(f, "") not in (None, ""):
                 try: row[f] = float(row[f]) if "." in str(row[f]) else int(row[f])
                 except: pass
         if tab_key == "samples":

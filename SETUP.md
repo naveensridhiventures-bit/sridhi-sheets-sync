@@ -24,7 +24,7 @@ Result: **first load ~3–4× faster**, repeat visits instant from cache.
 ## Part 1 — Google Sheet (unchanged from v2)
 
 1. Create a Google Sheet named **Sridhi Ventures BOS Data**.
-2. Create four tabs: `Leads`, `Samples`, `Expenses`, `RepeatCustomers`.
+2. Create five tabs: `Leads`, `Samples`, `Expenses`, `RepeatCustomers`, `ActivityLog`.
 3. Add the header row in each tab (see below).
 4. Copy the **Sheet ID** from the URL (`/d/<THIS PART>/edit`).
 
@@ -37,7 +37,7 @@ id  name  contact  business  type  area  address  stage  source  telecaller  las
 
 **Samples**
 ```
-id  customer  leadId  qty  unit  type  date  exec  deliveryCost  productionCost  status  feedback  converted
+id  customer  leadId  qty  unit  type  date  createdAt  exec  deliveryCost  productionCost  status  feedback  converted
 ```
 
 **Expenses**
@@ -49,6 +49,16 @@ id  category  amount  date  type  subtype
 ```
 id  name  area  contact  product  qty  frequency  lastOrder  nextDue  status  revenue
 ```
+
+**ActivityLog** *(new — powers the day/week/month Activity Report on the Reports page)*
+```
+id  type  label  source  ts
+```
+Each row is one timestamped event: `type` is `lead`, `sample`, or `order`; `label` is the
+lead/customer name; `ts` is the epoch-millisecond time it happened. The app writes to this
+tab automatically whenever a lead is added, a sample is dispatched, or an order is converted
+— you don't need to fill it in by hand, just create the tab with this header row so the sync
+API has somewhere to write.
 
 ---
 
