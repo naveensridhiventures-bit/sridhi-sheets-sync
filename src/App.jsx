@@ -2731,6 +2731,21 @@ function emptyOrderForm(date) {
   return { date: date || todayISO(), customer: "", area: "", orderType: "New Order", kgs: "", telecaller: "" };
 }
 
+// ── CSV report export helpers ──────────────────────────────────────────────
+function csvEscape(v) {
+  const s = v === null || v === undefined ? "" : String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function csvRow(cells) { return cells.map(csvEscape).join(","); }
+function downloadCSV(filename, content) {
+  const blob = new Blob(["\uFEFF" + content], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function DailyOrders() {
   const [orders, setOrders, ordersSyncStatus] = useSheetSynced("dailyOrders", "dailyOrders", INITIAL_DAILY_ORDERS);
   const [leads] = useSheetSynced("leads", "leads", []);
@@ -2742,6 +2757,8 @@ function DailyOrders() {
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelForm, setCancelForm] = useState({ reason: CANCEL_REASONS[0], remarks: "" });
   const [filterDate, setFilterDate] = useState(todayISO());
+  const [reportFrom, setReportFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 29); return d.toISOString().slice(0, 10); });
+  const [reportTo, setReportTo] = useState(todayISO());
 
   // Combined, deduped list of known customers pulled from Leads, RepeatCustomers
   // and every customer name already logged in Daily Orders — so telecallers can
@@ -2824,6 +2841,61 @@ function DailyOrders() {
   };
   const reactivate = (o) => setOrders(orders.map(x => x.id === o.id ? { ...x, status: "Active", cancelReason: "", cancelRemarks: "" } : x));
 
+  const downloadReport = () => {
+    const rangeOrders = orders
+      .filter(o => o.date >= reportFrom && o.date <= reportTo)
+      .sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt || 0) - (b.createdAt || 0));
+    const rangeActive = rangeOrders.filter(o => o.status !== "Cancelled");
+    const rangeCancelled = rangeOrders.filter(o => o.status === "Cancelled");
+
+    const rangeByDate = {};
+    rangeActive.forEach(o => {
+      if (!rangeByDate[o.date]) rangeByDate[o.date] = { newCount: 0, regularCount: 0, kgs: 0, revenue: 0 };
+      const b = rangeByDate[o.date];
+      if (o.orderType === "New Order") b.newCount += 1; else b.regularCount += 1;
+      b.kgs += parseFloat(o.kgs) || 0;
+      b.revenue += parseFloat(o.amount) || 0;
+    });
+
+    const lines = [];
+    lines.push(csvRow(["Sridhi Ventures BOS — Daily Orders Report"]));
+    lines.push(csvRow([`Range: ${formatDateReadable(reportFrom)} to ${formatDateReadable(reportTo)}`]));
+    lines.push(csvRow([`Generated: ${new Date().toLocaleString("en-IN")}`]));
+    lines.push("");
+
+    lines.push(csvRow(["ORDER LOG"]));
+    lines.push(csvRow(["Date", "Customer", "Area", "Order Type", "KG", "Rate/KG (Rs)", "Amount (Rs)", "Telecaller", "Status", "Cancel Reason", "Cancel Remarks"]));
+    rangeOrders.forEach(o => {
+      lines.push(csvRow([formatDateReadable(o.date), o.customer, o.area || "", o.orderType, o.kgs, RATE_PER_KG, o.amount, o.telecaller || "", o.status, o.cancelReason || "", o.cancelRemarks || ""]));
+    });
+    lines.push("");
+
+    lines.push(csvRow(["DAILY SUMMARY (active orders only)"]));
+    lines.push(csvRow(["Date", "New Orders", "Regular Orders", "Total KG", "Revenue (Rs)"]));
+    Object.entries(rangeByDate).sort((a, b) => a[0].localeCompare(b[0])).forEach(([date, s]) => {
+      lines.push(csvRow([formatDateReadable(date), s.newCount, s.regularCount, Math.round(s.kgs), Math.round(s.revenue)]));
+    });
+    const totalNew = rangeActive.filter(o => o.orderType === "New Order").length;
+    const totalRegular = rangeActive.filter(o => o.orderType === "Regular Order").length;
+    const totalKg = rangeActive.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
+    const totalRevenue = rangeActive.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+    lines.push(csvRow(["TOTAL", totalNew, totalRegular, Math.round(totalKg), Math.round(totalRevenue)]));
+    lines.push("");
+
+    lines.push(csvRow(["CANCELLED / STOPPED CUSTOMERS"]));
+    lines.push(csvRow(["Date", "Customer", "Area", "KG", "Cancel Reason", "Remarks"]));
+    rangeCancelled.forEach(o => {
+      lines.push(csvRow([formatDateReadable(o.date), o.customer, o.area || "", o.kgs, o.cancelReason || "", o.cancelRemarks || ""]));
+    });
+    lines.push("");
+    lines.push(csvRow(["Cancellation reason breakdown"]));
+    CANCEL_REASONS.forEach(r => {
+      lines.push(csvRow([r, rangeCancelled.filter(o => o.cancelReason === r).length]));
+    });
+
+    downloadCSV(`daily-orders-report_${reportFrom}_to_${reportTo}.csv`, lines.join("\n"));
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
@@ -2841,6 +2913,21 @@ function DailyOrders() {
         borderRadius: 14, color: T.accent, padding: 13,
         fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FONT,
       }}>+ Log Order (₹{RATE_PER_KG}/KG)</button>
+
+      <Card>
+        <Label sub="Export the order log, daily summary and cancellations as a CSV file (opens in Excel / Sheets)">Download Report</Label>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
+          <div style={{ flex: "1 1 130px" }}>
+            <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>From</div>
+            <input type="date" value={reportFrom} onChange={e => setReportFrom(e.target.value)} style={inputStyle} />
+          </div>
+          <div style={{ flex: "1 1 130px" }}>
+            <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>To</div>
+            <input type="date" value={reportTo} onChange={e => setReportTo(e.target.value)} style={inputStyle} />
+          </div>
+        </div>
+        <Btn label="⬇ Download CSV Report" full onClick={downloadReport} />
+      </Card>
 
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
