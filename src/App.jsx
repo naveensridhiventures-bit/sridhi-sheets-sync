@@ -2713,6 +2713,7 @@ function RepeatOrders() {
 const RATE_PER_KG = 35;
 const ORDER_TYPES = ["New Order", "Regular Order"];
 const CANCEL_REASONS = ["Delivery Issue", "Quality Issue", "Other"];
+const NEW_CUSTOMER_OPTION = "+ Add New Customer";
 const INITIAL_DAILY_ORDERS = [];
 
 function todayISO() {
@@ -2732,12 +2733,33 @@ function emptyOrderForm(date) {
 
 function DailyOrders() {
   const [orders, setOrders, ordersSyncStatus] = useSheetSynced("dailyOrders", "dailyOrders", INITIAL_DAILY_ORDERS);
+  const [leads] = useSheetSynced("leads", "leads", []);
+  const [repeatCustomers] = useSheetSynced("repeatCustomers", "repeatCustomers", []);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyOrderForm());
+  const [customerPick, setCustomerPick] = useState(NEW_CUSTOMER_OPTION);
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelForm, setCancelForm] = useState({ reason: CANCEL_REASONS[0], remarks: "" });
   const [filterDate, setFilterDate] = useState(todayISO());
+
+  // Combined, deduped list of known customers pulled from Leads, RepeatCustomers
+  // and every customer name already logged in Daily Orders — so telecallers can
+  // pick an existing customer instead of retyping their name/area every time.
+  const knownCustomers = (() => {
+    const map = new Map();
+    (leads || []).forEach(l => { const n = (l.name || "").trim(); if (n) map.set(n.toLowerCase(), { name: n, area: l.area || "" }); });
+    (repeatCustomers || []).forEach(c => { const n = (c.name || "").trim(); if (n) map.set(n.toLowerCase(), { name: n, area: c.area || "" }); });
+    orders.forEach(o => { const n = (o.customer || "").trim(); if (n) { const existing = map.get(n.toLowerCase()); map.set(n.toLowerCase(), { name: n, area: o.area || existing?.area || "" }); } });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  })();
+  const customerOptions = [NEW_CUSTOMER_OPTION, ...knownCustomers.map(c => c.name)];
+  const pickCustomer = (value) => {
+    setCustomerPick(value);
+    if (value === NEW_CUSTOMER_OPTION) { setForm(f => ({ ...f, customer: "", area: "" })); return; }
+    const match = knownCustomers.find(c => c.name === value);
+    setForm(f => ({ ...f, customer: value, area: match ? match.area : f.area }));
+  };
 
   const today = todayISO();
   const active = orders.filter(o => o.status !== "Cancelled");
@@ -2768,10 +2790,11 @@ function DailyOrders() {
     reason: r, count: cancelledOrders.filter(o => o.cancelReason === r).length,
   }));
 
-  const openAdd = () => { setEditingId(null); setForm(emptyOrderForm(filterDate)); setShowForm(true); };
+  const openAdd = () => { setEditingId(null); setForm(emptyOrderForm(filterDate)); setCustomerPick(NEW_CUSTOMER_OPTION); setShowForm(true); };
   const openEdit = (o) => {
     setEditingId(o.id);
     setForm({ date: o.date, customer: o.customer, area: o.area || "", orderType: o.orderType, kgs: String(o.kgs ?? ""), telecaller: o.telecaller || "" });
+    setCustomerPick(knownCustomers.some(c => c.name === o.customer) ? o.customer : NEW_CUSTOMER_OPTION);
     setShowForm(true);
   };
 
@@ -2904,8 +2927,15 @@ function DailyOrders() {
 
       <Sheet open={showForm} onClose={() => { setShowForm(false); setEditingId(null); }} title={editingId ? "Edit Order" : "Log Order"}>
         <Field label="Order Date *" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
-        <Field label="Customer Name *" value={form.customer} onChange={e => setForm({ ...form, customer: e.target.value })} placeholder="e.g. Ganesh Stores" />
-        <Field label="Area" value={form.area} onChange={e => setForm({ ...form, area: e.target.value })} placeholder="e.g. Ambattur" />
+        <Dropdown label="Customer *" value={customerPick} onChange={e => pickCustomer(e.target.value)} options={customerOptions} />
+        {customerPick === NEW_CUSTOMER_OPTION ? (
+          <>
+            <Field label="New Customer Name *" value={form.customer} onChange={e => setForm({ ...form, customer: e.target.value })} placeholder="e.g. Ganesh Stores" />
+            <Field label="Area" value={form.area} onChange={e => setForm({ ...form, area: e.target.value })} placeholder="e.g. Ambattur" />
+          </>
+        ) : (
+          <div style={{ fontSize: 11, color: T.t3, marginTop: -8, marginBottom: 14 }}>Area: {form.area || "—"}</div>
+        )}
         <Dropdown label="Order Type" value={form.orderType} onChange={e => setForm({ ...form, orderType: e.target.value })} options={ORDER_TYPES} />
         <Field label="Quantity (KG) *" type="number" value={form.kgs} onChange={e => setForm({ ...form, kgs: e.target.value })} placeholder="e.g. 10" />
         <Field label="Telecaller" value={form.telecaller} onChange={e => setForm({ ...form, telecaller: e.target.value })} placeholder="Your name" />
