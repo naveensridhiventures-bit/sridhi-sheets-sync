@@ -2760,6 +2760,26 @@ function DailyOrders() {
   const [reportFrom, setReportFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 29); return d.toISOString().slice(0, 10); });
   const [reportTo, setReportTo] = useState(todayISO());
   const [generatingPDF, setGeneratingPDF] = useState(false);
+  const [reportPreset, setReportPreset] = useState("last30");
+
+  const applyPreset = (preset) => {
+    setReportPreset(preset);
+    const t = todayISO();
+    if (preset === "today") { setReportFrom(t); setReportTo(t); return; }
+    if (preset === "week") {
+      const d = new Date(); const day = d.getDay(); const diff = day === 0 ? 6 : day - 1;
+      d.setDate(d.getDate() - diff);
+      setReportFrom(d.toISOString().slice(0, 10)); setReportTo(t); return;
+    }
+    if (preset === "month") {
+      const d = new Date();
+      setReportFrom(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`); setReportTo(t); return;
+    }
+    if (preset === "last30") {
+      const d = new Date(); d.setDate(d.getDate() - 29);
+      setReportFrom(d.toISOString().slice(0, 10)); setReportTo(t); return;
+    }
+  };
 
   // Combined, deduped list of known customers pulled from Leads, RepeatCustomers
   // and every customer name already logged in Daily Orders — so telecallers can
@@ -2786,6 +2806,25 @@ function DailyOrders() {
   const todaysRegular = todays.filter(o => o.orderType === "Regular Order");
   const todaysKgs = todays.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
   const todaysRevenue = todays.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+
+  // ── Income overview: today / this week / this month / all-time ─────────
+  const startOfWeekISO = (() => {
+    const d = new Date();
+    const day = d.getDay(); // 0=Sun..6=Sat
+    const diff = day === 0 ? 6 : day - 1; // days since Monday
+    d.setDate(d.getDate() - diff);
+    return d.toISOString().slice(0, 10);
+  })();
+  const startOfMonthISO = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  })();
+  const weekOrders = active.filter(o => o.date >= startOfWeekISO && o.date <= today);
+  const monthOrders = active.filter(o => o.date >= startOfMonthISO && o.date <= today);
+  const weekRevenue = weekOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const monthRevenue = monthOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const allTimeRevenue = active.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const allTimeKgs = active.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
 
   const dateOrders = orders
     .filter(o => o.date === filterDate)
@@ -2841,6 +2880,10 @@ function DailyOrders() {
     setCancelTarget(null);
   };
   const reactivate = (o) => setOrders(orders.map(x => x.id === o.id ? { ...x, status: "Active", cancelReason: "", cancelRemarks: "" } : x));
+
+  const presetLabel = () => ({
+    today: "Daily", week: "Weekly", month: "Monthly", last30: "Last-30-Days", custom: "Custom-Range",
+  }[reportPreset] || "Custom-Range");
 
   const getReportData = () => {
     const rangeOrders = orders
@@ -2901,7 +2944,7 @@ function DailyOrders() {
       lines.push(csvRow([r, rangeCancelled.filter(o => o.cancelReason === r).length]));
     });
 
-    downloadCSV(`daily-orders-report_${reportFrom}_to_${reportTo}.csv`, lines.join("\n"));
+    downloadCSV(`Sridhi-Daily-Orders-${presetLabel()}-Report_${reportFrom}_to_${reportTo}.csv`, lines.join("\n"));
   };
 
   const downloadPDFReport = async () => {
@@ -2941,7 +2984,7 @@ function DailyOrders() {
       doc.text("Sridhi Ventures", margin, 38);
       doc.setFontSize(10.5);
       doc.setTextColor(...TEAL.map(c => Math.min(255, c + 40)));
-      doc.text("DAILY ORDERS REPORT — NEW & REGULAR CONVERSIONS", margin, 56);
+      doc.text(`${presetLabel().toUpperCase().replace(/-/g, " ")} ORDERS REPORT — NEW & REGULAR CONVERSIONS`, margin, 56);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
       doc.setTextColor(190, 198, 216);
@@ -3093,7 +3136,7 @@ function DailyOrders() {
     }
 
     footer();
-    doc.save(`Sridhi-Daily-Orders-Report_${reportFrom}_to_${reportTo}.pdf`);
+    doc.save(`Sridhi-Daily-Orders-${presetLabel()}-Report_${reportFrom}_to_${reportTo}.pdf`);
     } finally {
       setGeneratingPDF(false);
     }
@@ -3111,6 +3154,19 @@ function DailyOrders() {
         <SyncBadge status={ordersSyncStatus} />
       </div>
 
+      <Card accent={T.emerald}>
+        <Label sub="Auto-calculated from every active order — cancelled orders are excluded">Income Overview</Label>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10 }}>
+          <KPI label="Today"      value={Math.round(todaysRevenue)} unit="₹" color={T.emerald} icon="📆" />
+          <KPI label="This Week"  value={Math.round(weekRevenue)}   unit="₹" color={T.sky}     icon="📈" />
+          <KPI label="This Month" value={Math.round(monthRevenue)}  unit="₹" color={T.indigo}  icon="🗓️" />
+          <KPI label="All-Time"   value={Math.round(allTimeRevenue)} unit="₹" color={T.accent} icon="🏆" />
+        </div>
+        <div style={{ marginTop: 10, fontSize: 11.5, color: T.t3 }}>
+          {allTimeKgs.toLocaleString("en-IN", { maximumFractionDigits: 0 })} KG sold overall · avg ₹{allTimeKgs > 0 ? Math.round(allTimeRevenue / allTimeKgs) : RATE_PER_KG}/KG
+        </div>
+      </Card>
+
       <button onClick={openAdd} style={{
         background: T.accentSub, border: `1px solid ${T.accentGlow}`,
         borderRadius: 14, color: T.accent, padding: 13,
@@ -3119,14 +3175,30 @@ function DailyOrders() {
 
       <Card>
         <Label sub="A branded, print-ready report — KPI summary, daily breakdown, order log and cancellations">Download Report</Label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10, marginBottom: 14 }}>
+          {[
+            { id: "today", label: "📆 Daily" },
+            { id: "week",  label: "📈 Weekly" },
+            { id: "month", label: "🗓️ Monthly" },
+            { id: "last30", label: "Last 30 Days" },
+          ].map(p => (
+            <button key={p.id} onClick={() => applyPreset(p.id)} style={{
+              background: reportPreset === p.id ? T.accent : "transparent",
+              color: reportPreset === p.id ? "#060B16" : T.t2,
+              border: `1px solid ${reportPreset === p.id ? T.accent : T.border}`,
+              borderRadius: 20, padding: "7px 14px", fontSize: 12, fontWeight: 700,
+              cursor: "pointer", fontFamily: FONT, transition: "background 0.12s, color 0.12s",
+            }}>{p.label}</button>
+          ))}
+        </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
           <div style={{ flex: "1 1 130px" }}>
             <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>From</div>
-            <input type="date" value={reportFrom} onChange={e => setReportFrom(e.target.value)} style={inputStyle} />
+            <input type="date" value={reportFrom} onChange={e => { setReportFrom(e.target.value); setReportPreset("custom"); }} style={inputStyle} />
           </div>
           <div style={{ flex: "1 1 130px" }}>
             <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>To</div>
-            <input type="date" value={reportTo} onChange={e => setReportTo(e.target.value)} style={inputStyle} />
+            <input type="date" value={reportTo} onChange={e => { setReportTo(e.target.value); setReportPreset("custom"); }} style={inputStyle} />
           </div>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
