@@ -2759,6 +2759,7 @@ function DailyOrders() {
   const [filterDate, setFilterDate] = useState(todayISO());
   const [reportFrom, setReportFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 29); return d.toISOString().slice(0, 10); });
   const [reportTo, setReportTo] = useState(todayISO());
+  const [generatingPDF, setGeneratingPDF] = useState(false);
 
   // Combined, deduped list of known customers pulled from Leads, RepeatCustomers
   // and every customer name already logged in Daily Orders — so telecallers can
@@ -2841,7 +2842,7 @@ function DailyOrders() {
   };
   const reactivate = (o) => setOrders(orders.map(x => x.id === o.id ? { ...x, status: "Active", cancelReason: "", cancelRemarks: "" } : x));
 
-  const downloadReport = () => {
+  const getReportData = () => {
     const rangeOrders = orders
       .filter(o => o.date >= reportFrom && o.date <= reportTo)
       .sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt || 0) - (b.createdAt || 0));
@@ -2857,6 +2858,17 @@ function DailyOrders() {
       b.revenue += parseFloat(o.amount) || 0;
     });
 
+    return {
+      rangeOrders, rangeActive, rangeCancelled, rangeByDate,
+      totalNew: rangeActive.filter(o => o.orderType === "New Order").length,
+      totalRegular: rangeActive.filter(o => o.orderType === "Regular Order").length,
+      totalKg: rangeActive.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
+      totalRevenue: rangeActive.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0),
+    };
+  };
+
+  const downloadCSVReport = () => {
+    const { rangeOrders, rangeActive, rangeCancelled, rangeByDate, totalNew, totalRegular, totalKg, totalRevenue } = getReportData();
     const lines = [];
     lines.push(csvRow(["Sridhi Ventures BOS — Daily Orders Report"]));
     lines.push(csvRow([`Range: ${formatDateReadable(reportFrom)} to ${formatDateReadable(reportTo)}`]));
@@ -2875,10 +2887,6 @@ function DailyOrders() {
     Object.entries(rangeByDate).sort((a, b) => a[0].localeCompare(b[0])).forEach(([date, s]) => {
       lines.push(csvRow([formatDateReadable(date), s.newCount, s.regularCount, Math.round(s.kgs), Math.round(s.revenue)]));
     });
-    const totalNew = rangeActive.filter(o => o.orderType === "New Order").length;
-    const totalRegular = rangeActive.filter(o => o.orderType === "Regular Order").length;
-    const totalKg = rangeActive.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
-    const totalRevenue = rangeActive.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
     lines.push(csvRow(["TOTAL", totalNew, totalRegular, Math.round(totalKg), Math.round(totalRevenue)]));
     lines.push("");
 
@@ -2894,6 +2902,201 @@ function DailyOrders() {
     });
 
     downloadCSV(`daily-orders-report_${reportFrom}_to_${reportTo}.csv`, lines.join("\n"));
+  };
+
+  const downloadPDFReport = async () => {
+    if (generatingPDF) return;
+    setGeneratingPDF(true);
+    try {
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+      import("jspdf"),
+      import("jspdf-autotable"),
+    ]);
+    const { rangeOrders, rangeCancelled, rangeByDate, totalNew, totalRegular, totalKg, totalRevenue } = getReportData();
+
+    const NAVY = [10, 14, 26];
+    const TEAL = [14, 168, 144];
+    const TEAL_TINT = [232, 250, 246];
+    const INDIGO = [79, 70, 229];
+    const AMBER = [180, 110, 5];
+    const ROSE = [190, 24, 72];
+    const ROSE_TINT = [253, 240, 244];
+    const INK = [26, 32, 46];
+    const SUBTLE = [110, 118, 138];
+    const GRID = [228, 231, 238];
+
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+
+    const header = () => {
+      doc.setFillColor(...NAVY);
+      doc.rect(0, 0, pageW, 92, "F");
+      doc.setFillColor(...TEAL);
+      doc.rect(0, 90, pageW, 2, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(19);
+      doc.text("Sridhi Ventures", margin, 38);
+      doc.setFontSize(10.5);
+      doc.setTextColor(...TEAL.map(c => Math.min(255, c + 40)));
+      doc.text("DAILY ORDERS REPORT — NEW & REGULAR CONVERSIONS", margin, 56);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(190, 198, 216);
+      doc.text(`Period: ${formatDateReadable(reportFrom)}  –  ${formatDateReadable(reportTo)}`, margin, 74);
+      doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}`, pageW - margin, 74, { align: "right" });
+    };
+
+    const footer = () => {
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setDrawColor(...GRID);
+        doc.setLineWidth(0.6);
+        doc.line(margin, pageH - 34, pageW - margin, pageH - 34);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(...SUBTLE);
+        doc.text("Sridhi Ventures · Business Operating System", margin, pageH - 20);
+        doc.text(`Page ${i} of ${pageCount}`, pageW - margin, pageH - 20, { align: "right" });
+      }
+    };
+
+    header();
+    let y = 118;
+
+    // ── KPI summary cards ────────────────────────────────────────────────
+    const kpis = [
+      { label: "New Conversions", value: String(totalNew), color: TEAL },
+      { label: "Regular Conversions", value: String(totalRegular), color: INDIGO },
+      { label: "Total KG Sold", value: Math.round(totalKg).toLocaleString("en-IN"), color: AMBER },
+      { label: "Total Revenue", value: `Rs ${Math.round(totalRevenue).toLocaleString("en-IN")}`, color: [16, 150, 110] },
+    ];
+    const gap = 12;
+    const cardW = (pageW - margin * 2 - gap * 3) / 4;
+    const cardH = 62;
+    kpis.forEach((k, i) => {
+      const x = margin + i * (cardW + gap);
+      doc.setFillColor(248, 249, 251);
+      doc.setDrawColor(...GRID);
+      doc.setLineWidth(0.7);
+      doc.roundedRect(x, y, cardW, cardH, 7, 7, "FD");
+      doc.setFillColor(...k.color);
+      doc.roundedRect(x, y, 4, cardH, 2, 2, "F");
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...SUBTLE);
+      doc.text(k.label.toUpperCase(), x + 14, y + 22);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(...INK);
+      doc.text(k.value, x + 14, y + 45);
+    });
+    y += cardH + 30;
+
+    const sectionTitle = (text, color = NAVY) => {
+      doc.setFillColor(...color);
+      doc.roundedRect(margin, y - 12, 4, 14, 2, 2, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11.5);
+      doc.setTextColor(...INK);
+      doc.text(text, margin + 12, y);
+      y += 12;
+    };
+
+    // ── Daily summary table ──────────────────────────────────────────────
+    sectionTitle("Daily Summary — New vs Regular");
+    const summaryBody = Object.entries(rangeByDate).sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, s]) => [formatDateReadable(date), String(s.newCount), String(s.regularCount), Math.round(s.kgs).toLocaleString("en-IN"), `Rs ${Math.round(s.revenue).toLocaleString("en-IN")}`]);
+    autoTable(doc, {
+      startY: y,
+      margin: { left: margin, right: margin, bottom: 50 },
+      head: [["Date", "New", "Regular", "Total KG", "Revenue"]],
+      body: summaryBody.length ? summaryBody : [["—", "—", "—", "—", "—"]],
+      foot: [["TOTAL", String(totalNew), String(totalRegular), Math.round(totalKg).toLocaleString("en-IN"), `Rs ${Math.round(totalRevenue).toLocaleString("en-IN")}`]],
+      theme: "grid",
+      styles: { font: "helvetica", fontSize: 9, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+      headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 },
+      footStyles: { fillColor: TEAL_TINT, textColor: INK, fontStyle: "bold", fontSize: 9 },
+      alternateRowStyles: { fillColor: [249, 250, 252] },
+      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
+    });
+    y = doc.lastAutoTable.finalY + 30;
+
+    // ── Order log table ──────────────────────────────────────────────────
+    if (y > pageH - 160) { doc.addPage(); header(); y = 118; }
+    sectionTitle("Order Log", TEAL);
+    const orderBody = rangeOrders.map(o => [
+      formatDateReadable(o.date), o.customer, o.area || "—", o.orderType.replace(" Order", ""),
+      String(o.kgs), `Rs ${(o.amount || 0).toLocaleString("en-IN")}`, o.telecaller || "—", o.status,
+    ]);
+    autoTable(doc, {
+      startY: y,
+      margin: { left: margin, right: margin, bottom: 50 },
+      head: [["Date", "Customer", "Area", "Type", "KG", "Amount", "Telecaller", "Status"]],
+      body: orderBody.length ? orderBody : [["—", "No orders in this range", "—", "—", "—", "—", "—", "—"]],
+      theme: "grid",
+      styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5.5, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+      headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+      alternateRowStyles: { fillColor: [249, 250, 252] },
+      columnStyles: { 4: { halign: "right" }, 5: { halign: "right" } },
+      didParseCell: (data) => {
+        if (data.section === "body" && data.column.index === 3) {
+          data.cell.styles.textColor = data.cell.raw === "New" ? TEAL : INDIGO;
+          data.cell.styles.fontStyle = "bold";
+        }
+        if (data.section === "body" && data.column.index === 7) {
+          data.cell.styles.textColor = data.cell.raw === "Cancelled" ? ROSE : [16, 150, 110];
+          data.cell.styles.fontStyle = "bold";
+        }
+      },
+    });
+    y = doc.lastAutoTable.finalY + 30;
+
+    // ── Cancelled customers ──────────────────────────────────────────────
+    if (rangeCancelled.length) {
+      if (y > pageH - 160) { doc.addPage(); header(); y = 118; }
+      sectionTitle("Cancelled / Stopped Customers", ROSE);
+      const cancelBody = rangeCancelled.map(o => [formatDateReadable(o.date), o.customer, o.area || "—", String(o.kgs), o.cancelReason || "Other", o.cancelRemarks || "—"]);
+      autoTable(doc, {
+        startY: y,
+        margin: { left: margin, right: margin, bottom: 50 },
+        head: [["Date", "Customer", "Area", "KG", "Reason", "Remarks"]],
+        body: cancelBody,
+        theme: "grid",
+        styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5.5, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+        headStyles: { fillColor: ROSE, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+        alternateRowStyles: { fillColor: ROSE_TINT },
+      });
+      y = doc.lastAutoTable.finalY + 18;
+
+      if (y > pageH - 90) { doc.addPage(); header(); y = 118; }
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(...INK);
+      doc.text("Reason breakdown:", margin, y);
+      let bx = margin + 88;
+      CANCEL_REASONS.forEach(r => {
+        const count = rangeCancelled.filter(o => o.cancelReason === r).length;
+        const label = `${r}: ${count}`;
+        doc.setFillColor(...ROSE_TINT);
+        const w = doc.getTextWidth(label) + 16;
+        doc.roundedRect(bx, y - 11, w, 16, 8, 8, "F");
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(...ROSE);
+        doc.text(label, bx + 8, y);
+        bx += w + 8;
+      });
+    }
+
+    footer();
+    doc.save(`Sridhi-Daily-Orders-Report_${reportFrom}_to_${reportTo}.pdf`);
+    } finally {
+      setGeneratingPDF(false);
+    }
   };
 
   return (
@@ -2915,7 +3118,7 @@ function DailyOrders() {
       }}>+ Log Order (₹{RATE_PER_KG}/KG)</button>
 
       <Card>
-        <Label sub="Export the order log, daily summary and cancellations as a CSV file (opens in Excel / Sheets)">Download Report</Label>
+        <Label sub="A branded, print-ready report — KPI summary, daily breakdown, order log and cancellations">Download Report</Label>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
           <div style={{ flex: "1 1 130px" }}>
             <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>From</div>
@@ -2926,7 +3129,10 @@ function DailyOrders() {
             <input type="date" value={reportTo} onChange={e => setReportTo(e.target.value)} style={inputStyle} />
           </div>
         </div>
-        <Btn label="⬇ Download CSV Report" full onClick={downloadReport} />
+        <div style={{ display: "flex", gap: 10 }}>
+          <Btn label={generatingPDF ? "Generating…" : "📄 Download PDF Report"} full onClick={downloadPDFReport} />
+          <Btn label="Raw CSV" color={T.t2} ghost onClick={downloadCSVReport} />
+        </div>
       </Card>
 
       <Card>
