@@ -2709,6 +2709,233 @@ function RepeatOrders() {
   );
 }
 
+// ─── DAILY ORDERS (telecaller: new vs regular conversions, kg-wise) ───────
+const RATE_PER_KG = 35;
+const ORDER_TYPES = ["New Order", "Regular Order"];
+const CANCEL_REASONS = ["Delivery Issue", "Quality Issue", "Other"];
+const INITIAL_DAILY_ORDERS = [];
+
+function todayISO() {
+  const d = new Date();
+  const tz = d.getTimezoneOffset() * 60000;
+  return new Date(d - tz).toISOString().slice(0, 10);
+}
+function formatDateReadable(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso + "T00:00:00");
+  if (isNaN(d)) return iso;
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+function emptyOrderForm(date) {
+  return { date: date || todayISO(), customer: "", area: "", orderType: "New Order", kgs: "", telecaller: "" };
+}
+
+function DailyOrders() {
+  const [orders, setOrders, ordersSyncStatus] = useSheetSynced("dailyOrders", "dailyOrders", INITIAL_DAILY_ORDERS);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState(emptyOrderForm());
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelForm, setCancelForm] = useState({ reason: CANCEL_REASONS[0], remarks: "" });
+  const [filterDate, setFilterDate] = useState(todayISO());
+
+  const today = todayISO();
+  const active = orders.filter(o => o.status !== "Cancelled");
+  const todays = active.filter(o => o.date === today);
+  const todaysNew = todays.filter(o => o.orderType === "New Order");
+  const todaysRegular = todays.filter(o => o.orderType === "Regular Order");
+  const todaysKgs = todays.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
+  const todaysRevenue = todays.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+
+  const dateOrders = orders
+    .filter(o => o.date === filterDate)
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  // Date-wise summary: new vs regular conversions, kgs and revenue per day
+  const byDate = {};
+  active.forEach(o => {
+    if (!byDate[o.date]) byDate[o.date] = { newCount: 0, regularCount: 0, kgs: 0, revenue: 0 };
+    const b = byDate[o.date];
+    if (o.orderType === "New Order") b.newCount += 1; else b.regularCount += 1;
+    b.kgs += parseFloat(o.kgs) || 0;
+    b.revenue += parseFloat(o.amount) || 0;
+  });
+  const summaryRows = Object.entries(byDate).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 21);
+
+  const cancelledOrders = orders.filter(o => o.status === "Cancelled")
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const cancelReasonCounts = CANCEL_REASONS.map(r => ({
+    reason: r, count: cancelledOrders.filter(o => o.cancelReason === r).length,
+  }));
+
+  const openAdd = () => { setEditingId(null); setForm(emptyOrderForm(filterDate)); setShowForm(true); };
+  const openEdit = (o) => {
+    setEditingId(o.id);
+    setForm({ date: o.date, customer: o.customer, area: o.area || "", orderType: o.orderType, kgs: String(o.kgs ?? ""), telecaller: o.telecaller || "" });
+    setShowForm(true);
+  };
+
+  const saveOrder = () => {
+    if (!form.customer.trim() || !form.kgs || !form.date) return;
+    const kgs = parseFloat(form.kgs) || 0;
+    const amount = Math.round(kgs * RATE_PER_KG);
+    if (editingId) {
+      setOrders(orders.map(o => o.id === editingId ? { ...o, ...form, kgs, amount } : o));
+    } else {
+      setOrders([{
+        id: Date.now(), ...form, kgs, amount,
+        status: "Active", cancelReason: "", cancelRemarks: "",
+        createdAt: Date.now(),
+      }, ...orders]);
+    }
+    setShowForm(false); setEditingId(null); setForm(emptyOrderForm(filterDate));
+  };
+
+  const openCancel = (o) => { setCancelTarget(o); setCancelForm({ reason: CANCEL_REASONS[0], remarks: "" }); };
+  const confirmCancel = () => {
+    if (!cancelTarget) return;
+    setOrders(orders.map(o => o.id === cancelTarget.id
+      ? { ...o, status: "Cancelled", cancelReason: cancelForm.reason, cancelRemarks: cancelForm.remarks }
+      : o));
+    setCancelTarget(null);
+  };
+  const reactivate = (o) => setOrders(orders.map(x => x.id === o.id ? { ...x, status: "Active", cancelReason: "", cancelRemarks: "" } : x));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+        <KPI label="Today · New"     value={todaysNew.length}          color={T.accent}  icon="🆕" />
+        <KPI label="Today · Regular" value={todaysRegular.length}      color={T.indigo}  icon="🔁" />
+        <KPI label="Today · KGs"     value={Math.round(todaysKgs)}     unit="KG" color={T.amber}   icon="⚖️" />
+        <KPI label="Today · Revenue" value={Math.round(todaysRevenue)} unit="₹"  color={T.emerald} icon="💰" />
+      </div>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <SyncBadge status={ordersSyncStatus} />
+      </div>
+
+      <button onClick={openAdd} style={{
+        background: T.accentSub, border: `1px solid ${T.accentGlow}`,
+        borderRadius: 14, color: T.accent, padding: 13,
+        fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FONT,
+      }}>+ Log Order (₹{RATE_PER_KG}/KG)</button>
+
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
+          <Label sub="Pick any date to view, edit or backfill that day's orders">Orders by Date</Label>
+          <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ ...inputStyle, width: "auto" }} />
+        </div>
+
+        {dateOrders.length === 0 && (
+          <div style={{ textAlign: "center", padding: "24px 12px", color: T.t3, fontSize: 12 }}>
+            No orders logged for {formatDateReadable(filterDate)} yet.
+          </div>
+        )}
+
+        {dateOrders.map(o => {
+          const cancelled = o.status === "Cancelled";
+          return (
+            <div key={o.id} style={{ padding: "14px 0", borderBottom: `1px solid ${T.border}`, opacity: cancelled ? 0.6 : 1 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: T.t1 }}>{o.customer}</div>
+                <div style={{ fontSize: 11, color: T.t3, marginTop: 2, fontWeight: 500 }}>
+                  {[o.area, o.telecaller].filter(Boolean).join(" · ") || "—"}
+                </div>
+                <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <Chip label={o.orderType} color={o.orderType === "New Order" ? T.accent : T.indigo} />
+                  <Chip label={`${o.kgs} KG`} color={T.amber} />
+                  <Chip label={`₹${(o.amount || 0).toLocaleString("en-IN")}`} color={T.emerald} />
+                  {cancelled && <Chip label={`Cancelled · ${o.cancelReason || "—"}`} color={T.rose} />}
+                </div>
+                {cancelled && o.cancelRemarks && (
+                  <div style={{ fontSize: 11, color: T.t3, marginTop: 6 }}>Note: {o.cancelRemarks}</div>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <Btn label="Edit" color={T.sky} ghost small onClick={() => openEdit(o)} />
+                {!cancelled
+                  ? <Btn label="Customer Stopped / Cancel" color={T.rose} ghost small onClick={() => openCancel(o)} />
+                  : <Btn label="Reactivate" color={T.emerald} ghost small onClick={() => reactivate(o)} />}
+              </div>
+            </div>
+          );
+        })}
+      </Card>
+
+      <Card>
+        <Label sub="New vs regular conversions, total KGs and revenue, day by day">Daily Summary</Label>
+        {summaryRows.length === 0 && (
+          <div style={{ textAlign: "center", padding: "16px", color: T.t3, fontSize: 12 }}>No orders logged yet.</div>
+        )}
+        {summaryRows.map(([date, s]) => (
+          <div key={date} style={{ padding: "10px 0", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: T.t1 }}>{formatDateReadable(date)}</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <Chip label={`${s.newCount} New`} color={T.accent} small />
+              <Chip label={`${s.regularCount} Regular`} color={T.indigo} small />
+              <Chip label={`${Math.round(s.kgs)} KG`} color={T.amber} small />
+              <Chip label={`₹${Math.round(s.revenue).toLocaleString("en-IN")}`} color={T.emerald} small />
+            </div>
+          </div>
+        ))}
+      </Card>
+
+      {cancelledOrders.length > 0 && (
+        <Card>
+          <Label sub="Customers who stopped buying — grouped by reason">Cancelled / Stopped Customers</Label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+            {cancelReasonCounts.map(c => (
+              <Chip key={c.reason} label={`${c.reason}: ${c.count}`} color={c.reason === "Delivery Issue" ? T.orange : c.reason === "Quality Issue" ? T.rose : T.t2} />
+            ))}
+          </div>
+          {cancelledOrders.slice(0, 20).map(o => (
+            <div key={o.id} style={{ padding: "10px 0", borderBottom: `1px solid ${T.border}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.t1 }}>{o.customer}</div>
+                  <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>{formatDateReadable(o.date)} · {o.area || "—"}</div>
+                </div>
+                <Chip label={o.cancelReason || "Other"} color={T.rose} small />
+              </div>
+              {o.cancelRemarks && <div style={{ fontSize: 11, color: T.t3, marginTop: 4 }}>{o.cancelRemarks}</div>}
+            </div>
+          ))}
+        </Card>
+      )}
+
+      <Sheet open={showForm} onClose={() => { setShowForm(false); setEditingId(null); }} title={editingId ? "Edit Order" : "Log Order"}>
+        <Field label="Order Date *" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+        <Field label="Customer Name *" value={form.customer} onChange={e => setForm({ ...form, customer: e.target.value })} placeholder="e.g. Ganesh Stores" />
+        <Field label="Area" value={form.area} onChange={e => setForm({ ...form, area: e.target.value })} placeholder="e.g. Ambattur" />
+        <Dropdown label="Order Type" value={form.orderType} onChange={e => setForm({ ...form, orderType: e.target.value })} options={ORDER_TYPES} />
+        <Field label="Quantity (KG) *" type="number" value={form.kgs} onChange={e => setForm({ ...form, kgs: e.target.value })} placeholder="e.g. 10" />
+        <Field label="Telecaller" value={form.telecaller} onChange={e => setForm({ ...form, telecaller: e.target.value })} placeholder="Your name" />
+        <div style={{ fontSize: 12, color: T.t2, marginBottom: 14 }}>
+          Amount: <span style={{ color: T.emerald, fontWeight: 700 }}>₹{Math.round((parseFloat(form.kgs) || 0) * RATE_PER_KG).toLocaleString("en-IN")}</span>
+          <span style={{ color: T.t3 }}> ({form.kgs || 0} KG × ₹{RATE_PER_KG})</span>
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <Btn label="Cancel" color={T.t2} ghost full onClick={() => { setShowForm(false); setEditingId(null); }} />
+          <Btn label={editingId ? "Save Changes" : "Log Order"} full onClick={saveOrder} />
+        </div>
+      </Sheet>
+
+      <Sheet open={!!cancelTarget} onClose={() => setCancelTarget(null)} title="Customer Stopped Buying">
+        {cancelTarget && (
+          <div style={{ fontSize: 12, color: T.t2, marginBottom: 14 }}>
+            {cancelTarget.customer} · {formatDateReadable(cancelTarget.date)} · {cancelTarget.kgs} KG
+          </div>
+        )}
+        <Dropdown label="Reason for cancellation" value={cancelForm.reason} onChange={e => setCancelForm({ ...cancelForm, reason: e.target.value })} options={CANCEL_REASONS} />
+        <Field label="Remarks (optional)" value={cancelForm.remarks} onChange={e => setCancelForm({ ...cancelForm, remarks: e.target.value })} placeholder="Any extra detail" />
+        <div style={{ display: "flex", gap: 10 }}>
+          <Btn label="Back" color={T.t2} ghost full onClick={() => setCancelTarget(null)} />
+          <Btn label="Confirm Cancel" color={T.rose} full onClick={confirmCancel} />
+        </div>
+      </Sheet>
+    </div>
+  );
+}
+
 // ─── EXPENSES ─────────────────────────────────────────────────────────────
 function Expenses() {
   const [expenses, setExpenses, expensesSyncStatus] = useSheetSynced("expenses", "expenses", INITIAL_EXPENSES);
@@ -3683,6 +3910,7 @@ const NAV = [
   { id:"more",      label:"More",     icon:"more"      },
 ];
 const MORE_MENU = [
+  { id:"dailyorders", label:"Daily Orders", icon:"📦" },
   { id:"samples",   label:"Samples",       icon:"🧪" },
   { id:"repeat",    label:"Repeat Orders", icon:"🔁" },
   { id:"expenses",  label:"Expenses",      icon:"💸" },
@@ -3788,6 +4016,7 @@ const DESKTOP_NAV = [
   { id: "leads",     label: "CRM",          icon: "crm" },
   { id: "pipeline",  label: "Pipeline",     icon: "pipeline" },
   { id: "repeat",    label: "Orders",       icon: "orders" },
+  { id: "dailyorders", label: "Daily Orders", icon: "cart" },
   { id: "fieldsync", label: "Dispatch",     icon: "dispatch" },
   { id: "samples",   label: "Samples",      icon: "samples" },
   { id: "today",     label: "Telecalling",  icon: "phone" },
@@ -4389,7 +4618,7 @@ export default function App() {
 
   useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; }, [activeTab]);
 
-  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads", today:"Today Tasks", prospects:"Find Prospects" };
+  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", dailyorders:"Daily Orders", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads", today:"Today Tasks", prospects:"Find Prospects" };
 
   // ── INSTALL BANNER ──
   const InstallBanner = () => showInstall ? (
@@ -4483,6 +4712,7 @@ export default function App() {
       case "fieldsync": return <FieldSync />;
       case "samples":   return <Samples />;
       case "repeat":    return <RepeatOrders />;
+      case "dailyorders": return <DailyOrders />;
       case "expenses":  return <Expenses />;
       case "marketing": return <Marketing />;
       case "reports":   return <Reports />;

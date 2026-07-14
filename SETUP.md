@@ -24,7 +24,7 @@ Result: **first load ~3–4× faster**, repeat visits instant from cache.
 ## Part 1 — Google Sheet (unchanged from v2)
 
 1. Create a Google Sheet named **Sridhi Ventures BOS Data**.
-2. Create four tabs: `Leads`, `Samples`, `Expenses`, `RepeatCustomers`.
+2. Create tabs: `Leads`, `Samples`, `Expenses`, `RepeatCustomers`, `DailyOrders`.
 3. Add the header row in each tab (see below).
 4. Copy the **Sheet ID** from the URL (`/d/<THIS PART>/edit`).
 
@@ -49,6 +49,18 @@ id  category  amount  date  type  subtype
 ```
 id  name  area  contact  product  qty  frequency  lastOrder  nextDue  status  revenue
 ```
+
+**DailyOrders** *(telecaller daily order log — New vs Regular conversions, priced at ₹35/KG)*
+```
+id  date  customer  area  orderType  kgs  amount  telecaller  status  cancelReason  cancelRemarks  createdAt
+```
+- `orderType` is either `New Order` or `Regular Order`.
+- `amount` is auto-calculated in the app as `kgs × 35`.
+- `status` is `Active` or `Cancelled`. When a telecaller marks a customer as
+  stopped/cancelled, `cancelReason` is one of `Delivery Issue`, `Quality Issue`,
+  `Other`, with optional free-text detail in `cancelRemarks`.
+- Telecallers can revisit any past date from the app's date picker on the
+  **Daily Orders** screen to add, edit, or cancel entries for that day.
 
 ---
 

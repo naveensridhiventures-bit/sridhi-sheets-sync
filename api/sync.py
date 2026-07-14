@@ -25,6 +25,7 @@ TAB_CONFIG = {
     "expenses":        {"tab": "Expenses",         "headers": ["id","category","amount","date","type","subtype"]},
     "repeatCustomers": {"tab": "RepeatCustomers",  "headers": ["id","name","area","contact","product","qty","frequency","lastOrder","nextDue","status","revenue"]},
     "hrLeads": {"tab": "HRLeads", "headers": ["contact"]},
+    "dailyOrders": {"tab": "DailyOrders", "headers": ["id","date","customer","area","orderType","kgs","amount","telecaller","status","cancelReason","cancelRemarks","createdAt"]},
 }
 
 _cache = {}
@@ -109,14 +110,16 @@ def _coerce(tab_key, row):
                 except: pass
             else:
                 row[f] = None if f in ("lastContactAt", "createdAt") else 0
-    elif tab_key in ("samples","expenses","repeatCustomers"):
-        for f in ("id","qty","deliveryCost","productionCost","amount","revenue","leadId"):
+    elif tab_key in ("samples","expenses","repeatCustomers","dailyOrders"):
+        for f in ("id","qty","deliveryCost","productionCost","amount","revenue","leadId","kgs","createdAt"):
             if f in row:
                 try: row[f] = float(row[f]) if "." in str(row[f]) else int(row[f])
                 except: pass
         if tab_key == "samples":
             row["converted"] = str(row.get("converted","")).lower() in ("true","1","yes")
             if not row.get("feedback","").strip(): row["feedback"] = None
+        if tab_key == "dailyOrders":
+            if not row.get("status","").strip(): row["status"] = "Active"
     return row
 
 def _decoerce_leads(lead):
