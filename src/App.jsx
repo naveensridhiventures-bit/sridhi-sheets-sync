@@ -3694,6 +3694,21 @@ function Reports() {
   const [samples] = useSheetSynced("samples","samples",[]);
   const [repeatCustomers] = useSheetSynced("repeatCustomers","repeatCustomers",[]);
   const [exporting, setExporting] = useState(false);
+  const [leadsPreset, setLeadsPreset] = useState("all");
+
+  // ── Leads date-range filter for export (Today / This Week / This Month / All Time) ──
+  const leadsRangeStart = (() => {
+    const now = new Date();
+    if (leadsPreset === "today") { const d = new Date(now); d.setHours(0,0,0,0); return d.getTime(); }
+    if (leadsPreset === "week") {
+      const d = new Date(now); const day = d.getDay(); const diff = day === 0 ? 6 : day - 1;
+      d.setDate(d.getDate() - diff); d.setHours(0,0,0,0); return d.getTime();
+    }
+    if (leadsPreset === "month") { return new Date(now.getFullYear(), now.getMonth(), 1).getTime(); }
+    return null; // "all"
+  })();
+  const filteredLeads = leadsRangeStart == null ? leads : leads.filter(l => (l.createdAt || 0) >= leadsRangeStart);
+  const leadsPresetLabel = { today: "Today's", week: "This Week's", month: "This Month's", all: "All-Time" }[leadsPreset];
 
   // ── Compute real metrics from data ──
   const totalLeads = leads.length;
@@ -3755,7 +3770,7 @@ function Reports() {
 <div class="header">
   <div>
     <div class="logo">⚡ Sridhi Ventures</div>
-    <div class="sub">Business Operating System — Monthly Report</div>
+    <div class="sub">Business Operating System — ${leadsPresetLabel} Leads Report</div>
   </div>
   <div class="date">
     <div style="font-size:20px;font-weight:900;color:#00C9A7">${today}</div>
@@ -3803,11 +3818,11 @@ function Reports() {
 </div>
 
 <div class="section">
-  <div class="section-title">👥 Recent Leads</div>
+  <div class="section-title">👥 ${leadsPresetLabel} Leads (${filteredLeads.length})</div>
   <table>
     <tr><th>Name</th><th>Area</th><th>Stage</th><th>Telecaller</th></tr>
-    ${leads.slice(0,10).map(l => `<tr><td><strong>${l.name||""}</strong></td><td>${l.area||""}</td><td>${l.stage||""}</td><td>${l.telecaller||""}</td></tr>`).join("")}
-    ${leads.length === 0 ? "<tr><td colspan='4' style='text-align:center;color:#999'>No leads recorded</td></tr>" : ""}
+    ${filteredLeads.slice(0,50).map(l => `<tr><td><strong>${l.name||""}</strong></td><td>${l.area||""}</td><td>${l.stage||""}</td><td>${l.telecaller||""}</td></tr>`).join("")}
+    ${filteredLeads.length === 0 ? `<tr><td colspan='4' style='text-align:center;color:#999'>No leads in this period</td></tr>` : ""}
   </table>
 </div>
 
@@ -3834,13 +3849,13 @@ function Reports() {
     setExporting(true);
     const rows = [
       ["Name","Contact","Business","Area","Stage","Source","Telecaller","Last Contact","Priority"],
-      ...leads.map(l => [l.name,l.contact,l.business,l.area,l.stage,l.source,l.telecaller,l.lastContact,l.priority])
+      ...filteredLeads.map(l => [l.name,l.contact,l.business,l.area,l.stage,l.source,l.telecaller,l.lastContact,l.priority])
     ];
     const csv = rows.map(r => r.map(c => `"${c||""}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type:"text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "sridhi-leads-" + new Date().toISOString().slice(0,10) + ".csv";
+    a.download = `sridhi-leads-${leadsPreset}-` + new Date().toISOString().slice(0,10) + ".csv";
     a.click();
     setTimeout(() => setExporting(false), 1000);
   };
@@ -3891,7 +3906,23 @@ function Reports() {
       </Card>
 
       <Card>
-        <Label sub="Downloads real data">Export Report</Label>
+        <Label sub={`${filteredLeads.length} lead${filteredLeads.length === 1 ? "" : "s"} in this period`}>Download Leads Report</Label>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:10, marginBottom:14 }}>
+          {[
+            { id: "today", label: "📆 Today" },
+            { id: "week",  label: "📈 This Week" },
+            { id: "month", label: "🗓️ This Month" },
+            { id: "all",   label: "🏆 All Time" },
+          ].map(p => (
+            <button key={p.id} onClick={() => setLeadsPreset(p.id)} style={{
+              background: leadsPreset === p.id ? T.accent : "transparent",
+              color: leadsPreset === p.id ? "#060B16" : T.t2,
+              border: `1px solid ${leadsPreset === p.id ? T.accent : T.border}`,
+              borderRadius: 20, padding: "7px 14px", fontSize: 12, fontWeight: 700,
+              cursor: "pointer", fontFamily: FONT, transition: "background 0.12s, color 0.12s",
+            }}>{p.label}</button>
+          ))}
+        </div>
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
           <button onClick={downloadPDF} disabled={exporting}
             style={{ background:"linear-gradient(135deg,#00C9A7,#10B981)", border:"none", borderRadius:14,
