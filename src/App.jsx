@@ -3039,6 +3039,44 @@ function DailyOrders() {
     });
     y += cardH + 30;
 
+    // ── Today's Snapshot banner — only shown on the Daily report ──────────
+    if (reportPreset === "today") {
+      const bannerH = 46;
+      doc.setFillColor(...TEAL_TINT);
+      doc.setDrawColor(...TEAL);
+      doc.setLineWidth(1);
+      doc.roundedRect(margin, y, pageW - margin * 2, bannerH, 8, 8, "FD");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9.5);
+      doc.setTextColor(...TEAL);
+      doc.text(`TODAY'S SNAPSHOT — ${formatDateReadable(today)}`, margin + 16, y + 18);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor(...SUBTLE);
+      doc.text("Total quantity moved and revenue booked today", margin + 16, y + 32);
+
+      const snapW = 150;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(15);
+      doc.setTextColor(...INK);
+      doc.text(`${Math.round(todaysKgs).toLocaleString("en-IN")} KG`, pageW - margin - snapW - 100, y + 28, { align: "right" });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...SUBTLE);
+      doc.text("TODAY'S KG", pageW - margin - snapW - 100, y + 39, { align: "right" });
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(15);
+      doc.setTextColor(16, 150, 110);
+      doc.text(`Rs ${Math.round(todaysRevenue).toLocaleString("en-IN")}`, pageW - margin - 16, y + 28, { align: "right" });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...SUBTLE);
+      doc.text("TODAY'S AMOUNT", pageW - margin - 16, y + 39, { align: "right" });
+
+      y += bannerH + 22;
+    }
+
     const sectionTitle = (text, color = NAVY) => {
       doc.setFillColor(...color);
       doc.roundedRect(margin, y - 12, 4, 14, 2, 2, "F");
