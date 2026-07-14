@@ -4396,8 +4396,34 @@ function DesktopSidebar({ activeTab, setActiveTab, collapsed, setCollapsed, lead
   );
 }
 
-function DesktopTopbar({ role, setRole, search, setSearch, collapsed, setCollapsed, notifCount }) {
+function DesktopTopbar({ role, setRole, search, setSearch, collapsed, setCollapsed, notifCount, setActiveTab }) {
   const todayStr = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const [leads] = useSheetSynced("leads", "leads", []);
+  const [repeatCustomers] = useSheetSynced("repeatCustomers", "repeatCustomers", []);
+  const [orders] = useSheetSynced("dailyOrders", "dailyOrders", []);
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef(null);
+
+  useEffect(() => {
+    function onClick(e) { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); }
+    function onKey(e) { if (e.key === "Escape") setOpen(false); }
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onClick); document.removeEventListener("keydown", onKey); };
+  }, []);
+
+  const q = search.trim().toLowerCase();
+  const matches = (val) => (val || "").toString().toLowerCase().includes(q);
+
+  const leadResults = q ? (leads || []).filter(l => matches(l.name) || matches(l.area) || matches(l.contact)).slice(0, 5) : [];
+  const repeatResults = q ? (repeatCustomers || []).filter(c => matches(c.name) || matches(c.area) || matches(c.contact)).slice(0, 5) : [];
+  const orderResults = q ? (orders || []).filter(o => matches(o.customer) || matches(o.area)).slice(0, 5) : [];
+  const totalResults = leadResults.length + repeatResults.length + orderResults.length;
+
+  function goTo(tab) {
+    setActiveTab(tab);
+    setOpen(false);
+  }
 
   return (
     <div style={{
@@ -4409,10 +4435,75 @@ function DesktopTopbar({ role, setRole, search, setSearch, collapsed, setCollaps
         <DIcon id="chevron" size={14} color={DT.t2} strokeWidth={2.4} style={{ transform: collapsed ? "rotate(180deg)" : "none" }} />
       </button>
 
-      <div style={{ position: "relative", width: 320 }}>
+      <div ref={boxRef} style={{ position: "relative", width: 320 }}>
         <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}><DIcon id="search" size={15} color={DT.t3} /></span>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search leads, customers, tasks..."
+        <input value={search}
+          onChange={e => { setSearch(e.target.value); setOpen(true); }}
+          onFocus={() => { if (search.trim()) setOpen(true); }}
+          placeholder="Search leads, customers, tasks..."
           style={{ width: "100%", background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 10, padding: "9px 12px 9px 34px", fontSize: 12.5, color: DT.t1, fontFamily: FONT, outline: "none" }} />
+
+        {open && q && (
+          <div style={{
+            position: "absolute", top: "calc(100% + 6px)", left: 0, width: 380, maxHeight: 420, overflowY: "auto",
+            background: DT.card, border: `1px solid ${DT.borderHi}`, borderRadius: 12, boxShadow: "0 16px 40px rgba(0,0,0,0.35)", zIndex: 60,
+          }}>
+            {totalResults === 0 ? (
+              <div style={{ padding: "18px 16px", fontSize: 12.5, color: DT.t3, textAlign: "center" }}>No matches for "{search}"</div>
+            ) : (
+              <>
+                {leadResults.length > 0 && (
+                  <div>
+                    <div style={{ padding: "10px 14px 4px", fontSize: 10, fontWeight: 800, color: DT.t3, letterSpacing: "0.05em", textTransform: "uppercase" }}>Leads</div>
+                    {leadResults.map((l, i) => (
+                      <div key={"l" + i} onClick={() => goTo("leads")}
+                        style={{ padding: "8px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}
+                        onMouseEnter={e => e.currentTarget.style.background = DT.cardHi} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: DT.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.name}</div>
+                          <div style={{ fontSize: 11, color: DT.t3 }}>{l.area || "—"}{l.stage ? " · " + l.stage : ""}</div>
+                        </div>
+                        <DIcon id="chevron" size={12} color={DT.t3} style={{ transform: "rotate(-90deg)", flexShrink: 0 }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {repeatResults.length > 0 && (
+                  <div>
+                    <div style={{ padding: "10px 14px 4px", fontSize: 10, fontWeight: 800, color: DT.t3, letterSpacing: "0.05em", textTransform: "uppercase" }}>Repeat Customers</div>
+                    {repeatResults.map((c, i) => (
+                      <div key={"c" + i} onClick={() => goTo("repeat")}
+                        style={{ padding: "8px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}
+                        onMouseEnter={e => e.currentTarget.style.background = DT.cardHi} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: DT.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
+                          <div style={{ fontSize: 11, color: DT.t3 }}>{c.area || "—"}</div>
+                        </div>
+                        <DIcon id="chevron" size={12} color={DT.t3} style={{ transform: "rotate(-90deg)", flexShrink: 0 }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {orderResults.length > 0 && (
+                  <div>
+                    <div style={{ padding: "10px 14px 4px", fontSize: 10, fontWeight: 800, color: DT.t3, letterSpacing: "0.05em", textTransform: "uppercase" }}>Daily Orders</div>
+                    {orderResults.map((o, i) => (
+                      <div key={"o" + i} onClick={() => goTo("dailyorders")}
+                        style={{ padding: "8px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}
+                        onMouseEnter={e => e.currentTarget.style.background = DT.cardHi} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: DT.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.customer}</div>
+                          <div style={{ fontSize: 11, color: DT.t3 }}>{o.area || "—"}{o.date ? " · " + o.date : ""}</div>
+                        </div>
+                        <DIcon id="chevron" size={12} color={DT.t3} style={{ transform: "rotate(-90deg)", flexShrink: 0 }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       <div style={{ flex: 1 }} />
@@ -4863,7 +4954,7 @@ function DesktopShell({ activeTab, setActiveTab, role, setRole, leadsCount, rend
       `}</style>
       <DesktopSidebar activeTab={activeTab} setActiveTab={setActiveTab} collapsed={collapsed} setCollapsed={setCollapsed} leadsCount={leadsCount} />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <DesktopTopbar role={role} setRole={setRole} search={search} setSearch={setSearch} collapsed={collapsed} setCollapsed={setCollapsed} notifCount={3} />
+        <DesktopTopbar role={role} setRole={setRole} search={search} setSearch={setSearch} collapsed={collapsed} setCollapsed={setCollapsed} notifCount={3} setActiveTab={setActiveTab} />
         <div style={{ flex: 1, padding: "24px 28px 60px" }}>
           {activeTab === "dashboard" ? (
             <DesktopDashboardHome setActiveTab={setActiveTab} />
