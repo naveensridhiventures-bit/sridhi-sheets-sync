@@ -67,11 +67,12 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
           {
-            urlPattern: /^https?:\/\/.*\/api\/sheets/,
-            handler: "StaleWhileRevalidate",
+            urlPattern: /^https?:\/\/.*\/api\/sync/,
+            handler: "NetworkFirst",
             options: {
-              cacheName: "sheets-api-cache",
-              expiration: { maxEntries: 20, maxAgeSeconds: 120 },
+              cacheName: "sync-api-cache",
+              networkTimeoutSeconds: 6,
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 },
               cacheableResponse: { statuses: [0, 200] },
             },
           },

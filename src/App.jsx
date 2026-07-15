@@ -136,7 +136,7 @@ function SyncBadge({ status }) {
     loading: { label: "Loading…",   color: T.t2     },
     syncing: { label: "Syncing…",   color: T.amber  },
     synced:  { label: "Synced",     color: T.emerald},
-    error:   { label: "Sync failed",color: T.rose   },
+    error:   { label: "Retrying save…", color: T.rose   },
     offline: { label: "Offline copy",color: T.t3    },
   };
   const s = map[status] || map.offline;

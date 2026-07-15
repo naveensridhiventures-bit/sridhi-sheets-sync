@@ -3,8 +3,12 @@
  * 1 fetch loads all tabs, stale-while-revalidate, short in-memory cache,
  * with write-through cache patching so a save in one screen is instantly
  * visible on every other screen (no more "reverts to old data" glitch),
- * plus background polling + refresh-on-focus so changes made by other
- * telecallers/devices show up without a manual reload.
+ * background polling + refresh-on-focus so changes made by other
+ * telecallers/devices show up without a manual reload, AND durable saves:
+ * every write is mirrored to localStorage until the server confirms it,
+ * and retried automatically (with backoff) on failure or reload — so a
+ * flaky connection can no longer silently lose an entry a telecaller
+ * just typed in.
  */
 
 import { useState, useEffect, useRef } from "react";
@@ -15,7 +19,7 @@ const SYNC_ENABLED = API_KEY !== "" && API_KEY !== "YOUR-API-KEY";
 
 // in-memory cache shared across hook instances
 const _mem = {};
-const MEM_TTL = 20_000;      // how long a cached tab is considered "fresh" on mount
+const MEM_TTL = 20_000;       // how long a cached tab is considered "fresh" on mount
 const POLL_INTERVAL = 15_000; // background refresh cadence while a screen is open
 const QUIET_WINDOW = 4_000;   // don't let a background poll clobber a very-recent local edit
 
@@ -48,6 +52,23 @@ function memSet(key, data, { touchAll = true } = {}) {
   notify(key, data);
 }
 
+// ── Durable pending-write persistence (survives reloads / crashes) ────────
+function pendingKey(tab) { return `bos_pending_${tab}`; }
+function loadPending(tab) {
+  try {
+    const raw = localStorage.getItem(pendingKey(tab));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed?.data) ? parsed : null;
+  } catch { return null; }
+}
+function savePending(tab, data) {
+  try { localStorage.setItem(pendingKey(tab), JSON.stringify({ data, ts: Date.now() })); } catch {}
+}
+function clearPending(tab) {
+  try { localStorage.removeItem(pendingKey(tab)); } catch {}
+}
+
 function getHeaders() {
   return {
     "Content-Type": "application/json",
@@ -74,7 +95,8 @@ async function fetchAll({ force = false } = {}) {
       Object.entries(data).forEach(([k, v]) => {
         const existing = _mem[k];
         const recentLocalWrite = existing && Date.now() - existing.ts < QUIET_WINDOW;
-        if (!recentLocalWrite) {
+        const hasPending = !!loadPending(k); // an unsynced write is waiting — never clobber it
+        if (!recentLocalWrite && !hasPending) {
           _mem[k] = { data: v, ts: Date.now() };
           notify(k, v);
         }
@@ -96,17 +118,50 @@ async function pushTab(tab, data) {
   if (!r.ok) throw new Error("HTTP " + r.status);
 }
 
+// Push with automatic retry + backoff. Always sends whatever is currently
+// the latest pending payload for the tab, so a rapid string of edits during
+// a retry backoff still ends up sending the newest data, not a stale one.
+const _retryTimers = {};
+const _retryAttempt = {};
+function schedulePush(tab, data, setStatus) {
+  savePending(tab, data);
+  setStatus("syncing");
+  clearTimeout(_retryTimers[tab]);
+  _retryAttempt[tab] = 0;
+
+  const attemptPush = () => {
+    const toSend = loadPending(tab)?.data ?? data;
+    pushTab(tab, toSend)
+      .then(() => {
+        // Only clear if nothing newer has been queued while this was in flight.
+        const stillPending = loadPending(tab);
+        if (stillPending && JSON.stringify(stillPending.data) === JSON.stringify(toSend)) {
+          clearPending(tab);
+        }
+        setStatus("synced");
+      })
+      .catch(() => {
+        setStatus("error");
+        _retryAttempt[tab] = (_retryAttempt[tab] || 0) + 1;
+        const delay = Math.min(2000 * 2 ** _retryAttempt[tab], 30_000);
+        _retryTimers[tab] = setTimeout(attemptPush, delay);
+      });
+  };
+  _retryTimers[tab] = setTimeout(attemptPush, 400);
+}
+
 export function useSheets(tab, initialData) {
+  const pendingAtInit = loadPending(tab);
   const [data, setDataRaw] = useState(() => {
+    if (pendingAtInit) return pendingAtInit.data;
     const cached = memGet(tab, { ignoreTTL: true });
     return Array.isArray(cached) ? cached : initialData;
   });
   const [status, setStatus] = useState(SYNC_ENABLED ? "loading" : "offline");
 
   const skipPush    = useRef(true);
-  const pushTimer   = useRef(null);
   const latestData  = useRef(data);
-  const lastLocalWriteTs = useRef(0);
+  const lastLocalWriteTs = useRef(pendingAtInit ? Date.now() : 0);
   latestData.current = data;
 
   // Any other hook instance (another open screen) writing this tab should
@@ -122,14 +177,25 @@ export function useSheets(tab, initialData) {
 
   useEffect(() => {
     if (!SYNC_ENABLED) return;
+
+    // Recover any write that never made it to the server (crash, closed
+    // tab, dead network) and retry it right away — this is what stops a
+    // freshly-entered record from vanishing after a reload.
+    const pending = loadPending(tab);
+    if (pending) {
+      memSet(tab, pending.data);
+      schedulePush(tab, pending.data, setStatus);
+    }
+
     const stale = memGet(tab, { ignoreTTL: true });
     if (Array.isArray(stale)) {
       skipPush.current = true;
       setDataRaw(stale);
-      setStatus("synced");
+      if (!pending) setStatus("synced");
     }
     fetchAll()
       .then((all) => {
+        if (loadPending(tab)) return; // don't let a fetch overwrite an unsynced write
         const fresh = all[tab];
         if (Array.isArray(fresh)) {
           skipPush.current = true;
@@ -167,14 +233,7 @@ export function useSheets(tab, initialData) {
   useEffect(() => {
     if (!SYNC_ENABLED) return;
     if (skipPush.current) { skipPush.current = false; return; }
-    setStatus("syncing");
-    if (pushTimer.current) clearTimeout(pushTimer.current);
-    pushTimer.current = setTimeout(() => {
-      pushTab(tab, latestData.current)
-        .then(() => setStatus("synced"))
-        .catch(() => setStatus("error"));
-    }, 400);
-    return () => { if (pushTimer.current) clearTimeout(pushTimer.current); };
+    schedulePush(tab, latestData.current, setStatus);
   }, [data, tab]);
 
   const setData = (action) => {
@@ -182,6 +241,7 @@ export function useSheets(tab, initialData) {
       const next = typeof action === "function" ? action(prev) : action;
       lastLocalWriteTs.current = Date.now();
       memSet(tab, next);
+      savePending(tab, next); // persist immediately, before the push debounce even fires
       return next;
     });
   };
