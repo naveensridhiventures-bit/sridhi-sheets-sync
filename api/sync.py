@@ -87,6 +87,41 @@ def write_tab(tab_name, headers, records, token):
     data_rows = [[str(r.get(h, "") or "") for h in headers] for r in records]
     sheets_update(sheet_id, tab_name, [headers] + data_rows, token)
 
+# Tabs are never hard-deleted from in this app (everything is soft-managed via
+# a status/cancel field), so it's always safe to upsert-merge rather than
+# blindly overwrite. This is what prevents a second telecaller's save from
+# silently erasing a row the first telecaller just added a moment earlier.
+ID_FIELD = {"hrLeads": "contact"}
+
+def _merge_key(row, id_field):
+    v = row.get(id_field, "")
+    if v not in (None, ""):
+        return str(v)
+    # No id at all (legacy row) — key on full content so it still dedupes
+    # exact repeats but never collides with a genuinely different row.
+    return "row::" + json.dumps(row, sort_keys=True, default=str)
+
+def merge_records(existing_rows, incoming_records, tab_key):
+    """Upsert incoming_records onto existing_rows by id, preserving any row
+    that exists on the sheet but wasn't included in this particular write
+    (i.e. rows another telecaller/device saved that this client doesn't know
+    about yet). Incoming rows win on id collisions since they're the newer,
+    intentional edit."""
+    id_field = ID_FIELD.get(tab_key, "id")
+    merged = {}
+    order = []
+    for row in existing_rows:
+        k = _merge_key(row, id_field)
+        if k not in merged:
+            order.append(k)
+        merged[k] = row
+    for row in incoming_records:
+        k = _merge_key(row, id_field)
+        if k not in merged:
+            order.append(k)
+        merged[k] = row
+    return [merged[k] for k in order]
+
 def _normalize_phone(phone):
     """Normalize phone numbers to 10 digits: strip +91, 091, spaces, dashes."""
     import re
@@ -201,9 +236,11 @@ class handler(BaseHTTPRequestHandler):
                         sheet_id = os.environ["GOOGLE_SHEET_ID"]
                         actual_tabs = get_sheet_tabs(sheet_id, token)
                         matched = next((t for t in actual_tabs if t.strip().lower() == cfg["tab"].lower()), cfg["tab"])
-                        write_tab(matched, cfg["headers"], records, token)
+                        existing = read_tab(matched, token)
+                        merged = merge_records(existing, records, tab)
+                        write_tab(matched, cfg["headers"], merged, token)
                         _cache.clear()
-                        self._send(200, {"ok": True, "count": len(records)})
+                        self._send(200, {"ok": True, "count": len(merged)})
                         return
                 except Exception as exc:
                     import traceback
@@ -240,9 +277,16 @@ class handler(BaseHTTPRequestHandler):
             records = [_decoerce_leads(r) for r in records]
         try:
             token = get_token()
-            write_tab(cfg["tab"], cfg["headers"], records, token)
+            actual_tabs = get_sheet_tabs(os.environ["GOOGLE_SHEET_ID"], token)
+            matched = next((t for t in actual_tabs if t.strip().lower() == cfg["tab"].lower()), cfg["tab"])
+            # Re-read fresh (not the 60s cache) right before merging+writing —
+            # keeps the race window to milliseconds instead of minutes, and the
+            # merge itself means even a same-instant collision can't drop rows.
+            existing = read_tab(matched, token)
+            merged = merge_records(existing, records, tab)
+            write_tab(matched, cfg["headers"], merged, token)
             _cache.clear()
-            self._send(200, {"ok": True, "count": len(records)})
+            self._send(200, {"ok": True, "count": len(merged)})
         except Exception as exc:
             import traceback
             self._send(500, {"error": str(exc), "trace": traceback.format_exc()})
