@@ -2733,7 +2733,17 @@ function formatDateReadable(iso) {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 function emptyOrderForm(date) {
-  return { date: date || todayISO(), customer: "", area: "", orderType: "New Order", product: PRODUCTS[0].name, kgs: "", telecaller: "" };
+  return {
+    date: date || todayISO(), customer: "", area: "", orderType: "New Order",
+    items: PRODUCTS.map(p => ({ product: p.name, kgs: "" })),
+    telecaller: "",
+  };
+}
+// Returns the line items for an order, whether it's a new-style multi-product
+// order (o.items) or an old-style single-product order (o.product/o.kgs).
+function orderLineItems(o) {
+  if (Array.isArray(o.items) && o.items.length) return o.items;
+  return [{ product: o.product || PRODUCTS[0].name, kgs: parseFloat(o.kgs) || 0, rate: o.rate ?? rateForProduct(o.product), amount: o.amount || 0 }];
 }
 
 // ── CSV report export helpers ──────────────────────────────────────────────
@@ -2841,11 +2851,11 @@ function DailyOrders() {
     kgs: dateActiveOrders.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
     revenue: dateActiveOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0),
   };
-  const dateTotalsByProduct = PRODUCTS.map(p => ({
-    name: p.name,
-    kgs: dateActiveOrders.filter(o => (o.product || PRODUCTS[0].name) === p.name).reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
-    revenue: dateActiveOrders.filter(o => (o.product || PRODUCTS[0].name) === p.name).reduce((a, o) => a + (parseFloat(o.amount) || 0), 0),
-  })).filter(p => p.kgs > 0);
+  const dateTotalsByProduct = PRODUCTS.map(p => {
+    let kgs = 0, revenue = 0;
+    dateActiveOrders.forEach(o => orderLineItems(o).forEach(i => { if (i.product === p.name) { kgs += i.kgs; revenue += i.amount; } }));
+    return { name: p.name, kgs, revenue };
+  }).filter(p => p.kgs > 0);
 
   // Date-wise summary: new vs regular conversions, kgs and revenue per day
   const byDate = {};
@@ -2867,21 +2877,34 @@ function DailyOrders() {
   const openAdd = () => { setEditingId(null); setForm(emptyOrderForm(filterDate)); setCustomerPick(NEW_CUSTOMER_OPTION); setShowForm(true); };
   const openEdit = (o) => {
     setEditingId(o.id);
-    setForm({ date: o.date, customer: o.customer, area: o.area || "", orderType: o.orderType, product: o.product || PRODUCTS[0].name, kgs: String(o.kgs ?? ""), telecaller: o.telecaller || "" });
+    const existing = orderLineItems(o);
+    setForm({
+      date: o.date, customer: o.customer, area: o.area || "", orderType: o.orderType,
+      items: PRODUCTS.map(p => {
+        const match = existing.find(i => i.product === p.name);
+        return { product: p.name, kgs: match ? String(match.kgs) : "" };
+      }),
+      telecaller: o.telecaller || "",
+    });
     setCustomerPick(knownCustomers.some(c => c.name === o.customer) ? o.customer : NEW_CUSTOMER_OPTION);
     setShowForm(true);
   };
 
   const saveOrder = () => {
-    if (!form.customer.trim() || !form.kgs || !form.date) return;
-    const kgs = parseFloat(form.kgs) || 0;
-    const rate = rateForProduct(form.product);
-    const amount = Math.round(kgs * rate);
+    const items = form.items
+      .map(i => ({ product: i.product, kgs: parseFloat(i.kgs) || 0, rate: rateForProduct(i.product) }))
+      .filter(i => i.kgs > 0)
+      .map(i => ({ ...i, amount: Math.round(i.kgs * i.rate) }));
+    if (!form.customer.trim() || !items.length || !form.date) return;
+    const kgs = items.reduce((a, i) => a + i.kgs, 0);
+    const amount = items.reduce((a, i) => a + i.amount, 0);
+    const product = items.map(i => i.product).join(" + ");
+    const { items: _formItems, ...formRest } = form;
     if (editingId) {
-      setOrders(orders.map(o => o.id === editingId ? { ...o, ...form, kgs, rate, amount } : o));
+      setOrders(orders.map(o => o.id === editingId ? { ...o, ...formRest, items, kgs, amount, product } : o));
     } else {
       setOrders([{
-        id: Date.now(), ...form, kgs, rate, amount,
+        id: Date.now(), ...formRest, items, kgs, amount, product,
         status: "Active", cancelReason: "", cancelRemarks: "",
         createdAt: Date.now(),
       }, ...orders]);
@@ -2937,9 +2960,10 @@ function DailyOrders() {
     lines.push("");
 
     lines.push(csvRow(["ORDER LOG"]));
-    lines.push(csvRow(["Date", "Customer", "Area", "Order Type", "Product", "KG", "Rate/KG (Rs)", "Amount (Rs)", "Telecaller", "Status", "Cancel Reason", "Cancel Remarks"]));
+    lines.push(csvRow(["Date", "Customer", "Area", "Order Type", "Product Breakdown", "Total KG", "Amount (Rs)", "Telecaller", "Status", "Cancel Reason", "Cancel Remarks"]));
     rangeOrders.forEach(o => {
-      lines.push(csvRow([formatDateReadable(o.date), o.customer, o.area || "", o.orderType, o.product || PRODUCTS[0].name, o.kgs, o.rate ?? RATE_PER_KG, o.amount, o.telecaller || "", o.status, o.cancelReason || "", o.cancelRemarks || ""]));
+      const breakdown = orderLineItems(o).map(i => `${i.product}: ${i.kgs}KG @ Rs${i.rate}`).join(" | ");
+      lines.push(csvRow([formatDateReadable(o.date), o.customer, o.area || "", o.orderType, breakdown, o.kgs, o.amount, o.telecaller || "", o.status, o.cancelReason || "", o.cancelRemarks || ""]));
     });
     lines.push("");
 
@@ -3129,7 +3153,7 @@ function DailyOrders() {
     sectionTitle("Order Log", TEAL);
     const orderBody = rangeOrders.map(o => [
       formatDateReadable(o.date), o.customer, o.area || "—", o.orderType.replace(" Order", ""),
-      o.product || PRODUCTS[0].name, String(o.kgs), `Rs ${(o.amount || 0).toLocaleString("en-IN")}`, o.telecaller || "—", o.status,
+      orderLineItems(o).map(i => `${i.product}: ${i.kgs}KG`).join(", "), String(o.kgs), `Rs ${(o.amount || 0).toLocaleString("en-IN")}`, o.telecaller || "—", o.status,
     ]);
     autoTable(doc, {
       startY: y,
@@ -3307,8 +3331,9 @@ function DailyOrders() {
                 </div>
                 <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <Chip label={o.orderType} color={o.orderType === "New Order" ? T.accent : T.indigo} />
-                  <Chip label={o.product || PRODUCTS[0].name} color={T.sky} />
-                  <Chip label={`${o.kgs} KG`} color={T.amber} />
+                  {orderLineItems(o).map((i, idx) => (
+                    <Chip key={idx} label={`${i.product}: ${i.kgs} KG`} color={T.sky} />
+                  ))}
                   <Chip label={`₹${(o.amount || 0).toLocaleString("en-IN")}`} color={T.emerald} />
                   {cancelled && <Chip label={`Cancelled · ${o.cancelReason || "—"}`} color={T.rose} />}
                 </div>
@@ -3380,12 +3405,30 @@ function DailyOrders() {
           <div style={{ fontSize: 11, color: T.t3, marginTop: -8, marginBottom: 14 }}>Area: {form.area || "—"}</div>
         )}
         <Dropdown label="Order Type" value={form.orderType} onChange={e => setForm({ ...form, orderType: e.target.value })} options={ORDER_TYPES} />
-        <Dropdown label="Product *" value={form.product} onChange={e => setForm({ ...form, product: e.target.value })} options={PRODUCTS.map(p => p.name)} />
-        <Field label="Quantity (KG) *" type="number" value={form.kgs} onChange={e => setForm({ ...form, kgs: e.target.value })} placeholder="e.g. 10" />
+        <div style={{ fontSize: 11, fontWeight: 700, color: T.t3, letterSpacing: 0.3, marginBottom: 8 }}>PRODUCTS · enter KG for each you're logging</div>
+        {form.items.map((item, idx) => (
+          <Field
+            key={item.product}
+            label={`${item.product} (₹${rateForProduct(item.product)}/KG)`}
+            type="number"
+            value={item.kgs}
+            onChange={e => {
+              const items = form.items.map((it, i) => i === idx ? { ...it, kgs: e.target.value } : it);
+              setForm({ ...form, items });
+            }}
+            placeholder="e.g. 10"
+          />
+        ))}
         <Field label="Telecaller" value={form.telecaller} onChange={e => setForm({ ...form, telecaller: e.target.value })} placeholder="Your name" />
         <div style={{ fontSize: 12, color: T.t2, marginBottom: 14 }}>
-          Amount: <span style={{ color: T.emerald, fontWeight: 700 }}>₹{Math.round((parseFloat(form.kgs) || 0) * rateForProduct(form.product)).toLocaleString("en-IN")}</span>
-          <span style={{ color: T.t3 }}> ({form.kgs || 0} KG × ₹{rateForProduct(form.product)})</span>
+          {form.items.filter(i => parseFloat(i.kgs) > 0).map(i => (
+            <div key={i.product} style={{ color: T.t3 }}>{i.product}: {i.kgs} KG × ₹{rateForProduct(i.product)} = ₹{Math.round((parseFloat(i.kgs) || 0) * rateForProduct(i.product)).toLocaleString("en-IN")}</div>
+          ))}
+          <div style={{ marginTop: 4 }}>
+            Total Amount: <span style={{ color: T.emerald, fontWeight: 700 }}>
+              ₹{form.items.reduce((a, i) => a + Math.round((parseFloat(i.kgs) || 0) * rateForProduct(i.product)), 0).toLocaleString("en-IN")}
+            </span>
+          </div>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           <Btn label="Cancel" color={T.t2} ghost full onClick={() => { setShowForm(false); setEditingId(null); }} />
