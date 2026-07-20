@@ -2711,6 +2711,11 @@ function RepeatOrders() {
 
 // ─── DAILY ORDERS (telecaller: new vs regular conversions, kg-wise) ───────
 const RATE_PER_KG = 35;
+const PRODUCTS = [
+  { name: "Rice", rate: 35 },
+  { name: "Vada Batter", rate: 100 },
+];
+const rateForProduct = (name) => (PRODUCTS.find(p => p.name === name) || PRODUCTS[0]).rate;
 const ORDER_TYPES = ["New Order", "Regular Order"];
 const CANCEL_REASONS = ["Delivery Issue", "Quality Issue", "Other"];
 const NEW_CUSTOMER_OPTION = "+ Add New Customer";
@@ -2728,7 +2733,7 @@ function formatDateReadable(iso) {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 function emptyOrderForm(date) {
-  return { date: date || todayISO(), customer: "", area: "", orderType: "New Order", kgs: "", telecaller: "" };
+  return { date: date || todayISO(), customer: "", area: "", orderType: "New Order", product: PRODUCTS[0].name, kgs: "", telecaller: "" };
 }
 
 // ── CSV report export helpers ──────────────────────────────────────────────
@@ -2829,6 +2834,18 @@ function DailyOrders() {
   const dateOrders = orders
     .filter(o => o.date === filterDate)
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const dateActiveOrders = dateOrders.filter(o => o.status !== "Cancelled");
+  const dateTotals = {
+    newCount: dateActiveOrders.filter(o => o.orderType === "New Order").length,
+    regularCount: dateActiveOrders.filter(o => o.orderType === "Regular Order").length,
+    kgs: dateActiveOrders.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
+    revenue: dateActiveOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0),
+  };
+  const dateTotalsByProduct = PRODUCTS.map(p => ({
+    name: p.name,
+    kgs: dateActiveOrders.filter(o => (o.product || PRODUCTS[0].name) === p.name).reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
+    revenue: dateActiveOrders.filter(o => (o.product || PRODUCTS[0].name) === p.name).reduce((a, o) => a + (parseFloat(o.amount) || 0), 0),
+  })).filter(p => p.kgs > 0);
 
   // Date-wise summary: new vs regular conversions, kgs and revenue per day
   const byDate = {};
@@ -2850,7 +2867,7 @@ function DailyOrders() {
   const openAdd = () => { setEditingId(null); setForm(emptyOrderForm(filterDate)); setCustomerPick(NEW_CUSTOMER_OPTION); setShowForm(true); };
   const openEdit = (o) => {
     setEditingId(o.id);
-    setForm({ date: o.date, customer: o.customer, area: o.area || "", orderType: o.orderType, kgs: String(o.kgs ?? ""), telecaller: o.telecaller || "" });
+    setForm({ date: o.date, customer: o.customer, area: o.area || "", orderType: o.orderType, product: o.product || PRODUCTS[0].name, kgs: String(o.kgs ?? ""), telecaller: o.telecaller || "" });
     setCustomerPick(knownCustomers.some(c => c.name === o.customer) ? o.customer : NEW_CUSTOMER_OPTION);
     setShowForm(true);
   };
@@ -2858,12 +2875,13 @@ function DailyOrders() {
   const saveOrder = () => {
     if (!form.customer.trim() || !form.kgs || !form.date) return;
     const kgs = parseFloat(form.kgs) || 0;
-    const amount = Math.round(kgs * RATE_PER_KG);
+    const rate = rateForProduct(form.product);
+    const amount = Math.round(kgs * rate);
     if (editingId) {
-      setOrders(orders.map(o => o.id === editingId ? { ...o, ...form, kgs, amount } : o));
+      setOrders(orders.map(o => o.id === editingId ? { ...o, ...form, kgs, rate, amount } : o));
     } else {
       setOrders([{
-        id: Date.now(), ...form, kgs, amount,
+        id: Date.now(), ...form, kgs, rate, amount,
         status: "Active", cancelReason: "", cancelRemarks: "",
         createdAt: Date.now(),
       }, ...orders]);
@@ -2919,9 +2937,9 @@ function DailyOrders() {
     lines.push("");
 
     lines.push(csvRow(["ORDER LOG"]));
-    lines.push(csvRow(["Date", "Customer", "Area", "Order Type", "KG", "Rate/KG (Rs)", "Amount (Rs)", "Telecaller", "Status", "Cancel Reason", "Cancel Remarks"]));
+    lines.push(csvRow(["Date", "Customer", "Area", "Order Type", "Product", "KG", "Rate/KG (Rs)", "Amount (Rs)", "Telecaller", "Status", "Cancel Reason", "Cancel Remarks"]));
     rangeOrders.forEach(o => {
-      lines.push(csvRow([formatDateReadable(o.date), o.customer, o.area || "", o.orderType, o.kgs, RATE_PER_KG, o.amount, o.telecaller || "", o.status, o.cancelReason || "", o.cancelRemarks || ""]));
+      lines.push(csvRow([formatDateReadable(o.date), o.customer, o.area || "", o.orderType, o.product || PRODUCTS[0].name, o.kgs, o.rate ?? RATE_PER_KG, o.amount, o.telecaller || "", o.status, o.cancelReason || "", o.cancelRemarks || ""]));
     });
     lines.push("");
 
@@ -3111,24 +3129,24 @@ function DailyOrders() {
     sectionTitle("Order Log", TEAL);
     const orderBody = rangeOrders.map(o => [
       formatDateReadable(o.date), o.customer, o.area || "—", o.orderType.replace(" Order", ""),
-      String(o.kgs), `Rs ${(o.amount || 0).toLocaleString("en-IN")}`, o.telecaller || "—", o.status,
+      o.product || PRODUCTS[0].name, String(o.kgs), `Rs ${(o.amount || 0).toLocaleString("en-IN")}`, o.telecaller || "—", o.status,
     ]);
     autoTable(doc, {
       startY: y,
       margin: { left: margin, right: margin, bottom: 50 },
-      head: [["Date", "Customer", "Area", "Type", "KG", "Amount", "Telecaller", "Status"]],
-      body: orderBody.length ? orderBody : [["—", "No orders in this range", "—", "—", "—", "—", "—", "—"]],
+      head: [["Date", "Customer", "Area", "Type", "Product", "KG", "Amount", "Telecaller", "Status"]],
+      body: orderBody.length ? orderBody : [["—", "No orders in this range", "—", "—", "—", "—", "—", "—", "—"]],
       theme: "grid",
       styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5.5, lineColor: GRID, lineWidth: 0.6, textColor: INK },
       headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
       alternateRowStyles: { fillColor: [249, 250, 252] },
-      columnStyles: { 4: { halign: "right" }, 5: { halign: "right" } },
+      columnStyles: { 5: { halign: "right" }, 6: { halign: "right" } },
       didParseCell: (data) => {
         if (data.section === "body" && data.column.index === 3) {
           data.cell.styles.textColor = data.cell.raw === "New" ? TEAL : INDIGO;
           data.cell.styles.fontStyle = "bold";
         }
-        if (data.section === "body" && data.column.index === 7) {
+        if (data.section === "body" && data.column.index === 8) {
           data.cell.styles.textColor = data.cell.raw === "Cancelled" ? ROSE : [16, 150, 110];
           data.cell.styles.fontStyle = "bold";
         }
@@ -3251,6 +3269,27 @@ function DailyOrders() {
           <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ ...inputStyle, width: "auto" }} />
         </div>
 
+        {dateOrders.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "12px 14px", marginBottom: 14, borderRadius: 12, background: T.cardHigh, border: `1px solid ${T.border}` }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: T.t3, letterSpacing: 0.3 }}>
+              TOTAL FOR {formatDateReadable(filterDate).toUpperCase()}
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <Chip label={`${dateTotals.newCount} New`} color={T.accent} />
+              <Chip label={`${dateTotals.regularCount} Regular`} color={T.indigo} />
+              <Chip label={`${dateTotals.kgs.toLocaleString("en-IN", { maximumFractionDigits: 1 })} KG`} color={T.amber} />
+              <Chip label={`₹${Math.round(dateTotals.revenue).toLocaleString("en-IN")}`} color={T.emerald} />
+            </div>
+            {dateTotalsByProduct.length > 0 && (
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11, color: T.t3, marginTop: 2 }}>
+                {dateTotalsByProduct.map(p => (
+                  <span key={p.name}>{p.name}: {p.kgs.toLocaleString("en-IN", { maximumFractionDigits: 1 })} KG · ₹{Math.round(p.revenue).toLocaleString("en-IN")}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {dateOrders.length === 0 && (
           <div style={{ textAlign: "center", padding: "24px 12px", color: T.t3, fontSize: 12 }}>
             No orders logged for {formatDateReadable(filterDate)} yet.
@@ -3268,6 +3307,7 @@ function DailyOrders() {
                 </div>
                 <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <Chip label={o.orderType} color={o.orderType === "New Order" ? T.accent : T.indigo} />
+                  <Chip label={o.product || PRODUCTS[0].name} color={T.sky} />
                   <Chip label={`${o.kgs} KG`} color={T.amber} />
                   <Chip label={`₹${(o.amount || 0).toLocaleString("en-IN")}`} color={T.emerald} />
                   {cancelled && <Chip label={`Cancelled · ${o.cancelReason || "—"}`} color={T.rose} />}
@@ -3340,11 +3380,12 @@ function DailyOrders() {
           <div style={{ fontSize: 11, color: T.t3, marginTop: -8, marginBottom: 14 }}>Area: {form.area || "—"}</div>
         )}
         <Dropdown label="Order Type" value={form.orderType} onChange={e => setForm({ ...form, orderType: e.target.value })} options={ORDER_TYPES} />
+        <Dropdown label="Product *" value={form.product} onChange={e => setForm({ ...form, product: e.target.value })} options={PRODUCTS.map(p => p.name)} />
         <Field label="Quantity (KG) *" type="number" value={form.kgs} onChange={e => setForm({ ...form, kgs: e.target.value })} placeholder="e.g. 10" />
         <Field label="Telecaller" value={form.telecaller} onChange={e => setForm({ ...form, telecaller: e.target.value })} placeholder="Your name" />
         <div style={{ fontSize: 12, color: T.t2, marginBottom: 14 }}>
-          Amount: <span style={{ color: T.emerald, fontWeight: 700 }}>₹{Math.round((parseFloat(form.kgs) || 0) * RATE_PER_KG).toLocaleString("en-IN")}</span>
-          <span style={{ color: T.t3 }}> ({form.kgs || 0} KG × ₹{RATE_PER_KG})</span>
+          Amount: <span style={{ color: T.emerald, fontWeight: 700 }}>₹{Math.round((parseFloat(form.kgs) || 0) * rateForProduct(form.product)).toLocaleString("en-IN")}</span>
+          <span style={{ color: T.t3 }}> ({form.kgs || 0} KG × ₹{rateForProduct(form.product)})</span>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           <Btn label="Cancel" color={T.t2} ghost full onClick={() => { setShowForm(false); setEditingId(null); }} />
