@@ -241,13 +241,13 @@ function MobileStatCard({ icon, title, value, sub, color }) {
   return (
     <div style={{
       flex:"1 1 190px", minWidth:170, borderRadius:16, padding:16,
-      background:`linear-gradient(160deg, ${color}26, ${T.card} 65%)`,
-      border:`1px solid ${color}33`, position:"relative", overflow:"hidden",
+      background:`radial-gradient(130% 130% at 12% 15%, ${color}3D 0%, ${color}14 32%, ${T.card} 62%)`,
+      border:`1px solid ${color}40`, position:"relative", overflow:"hidden",
     }}>
       <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
         <div style={{
           width:36, height:36, borderRadius:11, flexShrink:0,
-          background:color+"2A", border:`1px solid ${color}55`,
+          background:`linear-gradient(135deg, ${color}F2 0%, ${color}B8 100%)`, boxShadow:`0 4px 12px ${color}4D`,
           display:"flex", alignItems:"center", justifyContent:"center", fontSize:16,
         }}>{icon}</div>
         <div style={{ fontSize:12, fontWeight:700, color:T.t1 }}>{title}</div>
