@@ -4902,9 +4902,19 @@ function StatCard({ icon, iconBg, label, value, unit, change, color }) {
   const up = change >= 0;
   const spark = seededWave(label.length + value.toString().length, 8, 10, 8);
   return (
-    <div style={{ flex: 1, minWidth: 175, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
+    <div style={{
+      flex: 1,
+      minWidth: 175,
+      background: `radial-gradient(130% 130% at 12% 15%, ${color}3D 0%, ${color}14 32%, ${DT.card} 62%)`,
+      border: `1px solid ${color}40`,
+      borderRadius: 16,
+      padding: "16px 18px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 12,
+    }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 36, height: 36, borderRadius: 10, background: iconBg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{icon}</div>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: `linear-gradient(135deg, ${color}F2 0%, ${color}B8 100%)`, boxShadow: `0 4px 12px ${color}4D`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{icon}</div>
         <span style={{ fontSize: 12.5, color: DT.t3, fontWeight: 600 }}>{label}</span>
       </div>
       <div style={{ fontSize: 22, fontWeight: 800, color: DT.t1, letterSpacing: "-0.02em" }}>
