@@ -150,6 +150,13 @@ function getStageColor(stage) {
 function getPriorityColor(p) {
   return p === "High" ? T.rose : p === "Medium" ? T.amber : T.t2;
 }
+function leadTypeIcon(type) {
+  const map = {
+    Restaurant: "🍽️", Mess: "🍲", Hotel: "🏨", Bakery: "🥐",
+    "Cloud Kitchen": "👨‍🍳", Distributor: "📦", Retailer: "🏪",
+  };
+  return map[type] || "🏢";
+}
 
 // ─── DESIGN PRIMITIVES ────────────────────────────────────────────────────
 function Card({ children, style = {}, accent, noPad }) {
@@ -1894,50 +1901,56 @@ function Leads() {
 
       {filtered.map(lead => {
         const overdue = isFollowUpOverdue(lead);
+        const stageColor = getStageColor(lead.stage);
         return (
         <div key={lead.contact || lead.id} onClick={() => setSelected(lead.contact || lead.id)}
           style={{
             background:T.card, border:`1px solid ${overdue ? T.rose+"55" : T.border}`,
-            borderRadius:16, padding:14, cursor:"pointer",
-            borderLeft:`3px solid ${getStageColor(lead.stage)}`,
+            borderRadius:16, padding:16, cursor:"pointer",
+            borderLeft:`4px solid ${stageColor}`,
             transition:"background 0.15s",
           }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:9 }}>
-            <div>
-              <div style={{ fontSize:14, fontWeight:700, color:T.t1 }}>{lead.name}</div>
-              <div style={{ fontSize:11, color:T.t3, marginTop:2, fontWeight:500 }}>{lead.type} · {lead.area}</div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:11, gap:10 }}>
+            <div style={{ display:"flex", gap:11, alignItems:"flex-start", minWidth:0 }}>
+              <div style={{
+                width:42, height:42, borderRadius:12, flexShrink:0,
+                background:stageColor+"1F", border:`1px solid ${stageColor}40`,
+                display:"flex", alignItems:"center", justifyContent:"center", fontSize:18,
+              }}>{leadTypeIcon(lead.type)}</div>
+              <div style={{ minWidth:0 }}>
+                <div style={{ fontSize:14.5, fontWeight:700, color:T.t1 }}>{lead.name}</div>
+                <div style={{ fontSize:11, color:T.t3, marginTop:2, fontWeight:500 }}>{lead.type} · {lead.area}</div>
+                <div style={{ marginTop:7 }}><Chip label={lead.stage} color={stageColor} /></div>
+              </div>
             </div>
-            <Chip label={lead.priority} color={getPriorityColor(lead.priority)} />
-          </div>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <Chip label={lead.stage} color={getStageColor(lead.stage)} />
-            <div style={{ display:"flex", gap:10 }}>
-              <span style={{ fontSize:10, color:T.t3 }}>{lead.contact}</span>
-              <span style={{ fontSize:10, color: overdue ? T.rose : T.t3, fontWeight: overdue ? 700 : 400 }}>{overdue ? "⏰ " : ""}{formatLastContact(lead.lastContactAt, lead.lastContact)}</span>
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6, flexShrink:0 }}>
+              <Chip label={lead.priority} color={getPriorityColor(lead.priority)} />
+              <span style={{ fontSize:10.5, color:T.t3, fontWeight:600, whiteSpace:"nowrap" }}>{lead.contact}</span>
+              <span style={{ fontSize:10.5, color: overdue ? T.rose : T.t3, fontWeight: overdue ? 700 : 500, whiteSpace:"nowrap" }}>{overdue ? "⏰ " : ""}{formatLastContact(lead.lastContactAt, lead.lastContact)}</span>
             </div>
           </div>
           {lead.remarks?.length>0 && (
-            <div style={{ marginTop:10, fontSize:11, color:T.t2, background:T.surface, borderRadius:8, padding:"7px 10px", lineHeight:1.5 }}>
+            <div style={{ marginBottom:11, fontSize:11, color:T.t2, background:T.surface, borderRadius:8, padding:"7px 10px", lineHeight:1.5 }}>
               {lead.remarks[lead.remarks.length-1]}
             </div>
           )}
-          <div style={{ display:"flex", gap:8, marginTop:11 }} onClick={e => e.stopPropagation()}>
+          <div style={{ display:"flex", gap:8 }} onClick={e => e.stopPropagation()}>
             <button onClick={() => { const p=(lead.contact||"").replace(/[^0-9]/g,""); if(p) window.location.href="tel:+91"+p; }}
               style={{
                 flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:6,
                 background:T.emerald+"14", border:`1px solid ${T.emerald}33`, borderRadius:10,
-                color:T.emerald, padding:"8px 0", fontSize:11.5, fontWeight:700, cursor:"pointer", fontFamily:FONT,
+                color:T.emerald, padding:"10px 0", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:FONT,
               }}>📞 Call</button>
             <button onClick={() => setCallLogFor(lead)}
               style={{
                 flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:6,
                 background:T.indigo+"14", border:`1px solid ${T.indigo}33`, borderRadius:10,
-                color:T.indigo, padding:"8px 0", fontSize:11.5, fontWeight:700, cursor:"pointer", fontFamily:FONT,
+                color:T.indigo, padding:"10px 0", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:FONT,
               }}>📝 Log Call</button>
             <select value={lead.stage} onChange={e => updateStage(lead.contact || lead.id, e.target.value)}
               style={{
-                flex:1.4, background:T.accent+"14", border:`1px solid ${T.accent}33`, borderRadius:10,
-                color:T.accent, padding:"8px 6px", fontSize:11.5, fontWeight:700, cursor:"pointer",
+                flex:1.4, background:stageColor+"14", border:`1px solid ${stageColor}33`, borderRadius:10,
+                color:stageColor, padding:"10px 6px", fontSize:12, fontWeight:700, cursor:"pointer",
                 fontFamily:FONT, appearance:"none", textAlign:"center",
               }}>
               {PIPELINE_STAGES.map(s => <option key={s.id} value={s.id}>{s.id}</option>)}
@@ -2940,8 +2953,16 @@ function DailyOrders() {
       b.revenue += parseFloat(o.amount) || 0;
     });
 
+    const rangeByProduct = PRODUCTS.map(p => {
+      let kgs = 0, revenue = 0, orderCount = 0;
+      rangeActive.forEach(o => orderLineItems(o).forEach(i => {
+        if (i.product === p.name && (parseFloat(i.kgs) || 0) > 0) { kgs += parseFloat(i.kgs) || 0; revenue += parseFloat(i.amount) || 0; orderCount += 1; }
+      }));
+      return { name: p.name, rate: p.rate, kgs, revenue, orderCount };
+    });
+
     return {
-      rangeOrders, rangeActive, rangeCancelled, rangeByDate,
+      rangeOrders, rangeActive, rangeCancelled, rangeByDate, rangeByProduct,
       totalNew: rangeActive.filter(o => o.orderType === "New Order").length,
       totalRegular: rangeActive.filter(o => o.orderType === "Regular Order").length,
       totalKg: rangeActive.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
@@ -2950,7 +2971,7 @@ function DailyOrders() {
   };
 
   const downloadCSVReport = () => {
-    const { rangeOrders, rangeActive, rangeCancelled, rangeByDate, totalNew, totalRegular, totalKg, totalRevenue } = getReportData();
+    const { rangeOrders, rangeActive, rangeCancelled, rangeByDate, rangeByProduct, totalNew, totalRegular, totalKg, totalRevenue } = getReportData();
     const lines = [];
     lines.push(csvRow(["Sridhi Ventures BOS — Daily Orders Report"]));
     lines.push(csvRow([`Range: ${formatDateReadable(reportFrom)} to ${formatDateReadable(reportTo)}`]));
@@ -2962,6 +2983,13 @@ function DailyOrders() {
     rangeOrders.forEach(o => {
       const breakdown = orderLineItems(o).map(i => `${i.product}: ${i.kgs}KG @ Rs${i.rate}`).join(" | ");
       lines.push(csvRow([formatDateReadable(o.date), o.customer, o.area || "", o.orderType, breakdown, o.kgs, o.amount, o.telecaller || "", o.status, o.cancelReason || "", o.cancelRemarks || ""]));
+    });
+    lines.push("");
+
+    lines.push(csvRow(["PRODUCT SUMMARY (active orders only)"]));
+    lines.push(csvRow(["Product", "Rate (Rs/KG)", "Orders", "Total KG", "Revenue (Rs)"]));
+    rangeByProduct.forEach(p => {
+      lines.push(csvRow([p.name, p.rate, p.orderCount, Math.round(p.kgs), Math.round(p.revenue)]));
     });
     lines.push("");
 
@@ -2995,7 +3023,7 @@ function DailyOrders() {
       import("jspdf"),
       import("jspdf-autotable"),
     ]);
-    const { rangeOrders, rangeCancelled, rangeByDate, totalNew, totalRegular, totalKg, totalRevenue } = getReportData();
+    const { rangeOrders, rangeCancelled, rangeByDate, rangeByProduct, totalNew, totalRegular, totalKg, totalRevenue } = getReportData();
 
     const NAVY = [10, 14, 26];
     const TEAL = [14, 168, 144];
@@ -3126,6 +3154,41 @@ function DailyOrders() {
       doc.text(text, margin + 12, y);
       y += 12;
     };
+
+    // ── Product summary — KG & revenue broken out per product ─────────────
+    if (y > pageH - 160) { doc.addPage(); header(); y = 118; }
+    sectionTitle("Product Summary", TEAL);
+    const productColors = [AMBER, INDIGO, ROSE, [16, 150, 110], [56, 189, 248]];
+    const pGap = 12;
+    const pCardW = (pageW - margin * 2 - pGap * (rangeByProduct.length - 1)) / Math.max(rangeByProduct.length, 1);
+    const pCardH = 68;
+    rangeByProduct.forEach((p, i) => {
+      const x = margin + i * (pCardW + pGap);
+      const color = productColors[i % productColors.length];
+      doc.setFillColor(248, 249, 251);
+      doc.setDrawColor(...GRID);
+      doc.setLineWidth(0.7);
+      doc.roundedRect(x, y, pCardW, pCardH, 7, 7, "FD");
+      doc.setFillColor(...color);
+      doc.roundedRect(x, y, pCardW, 4, 2, 2, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9.5);
+      doc.setTextColor(...INK);
+      doc.text(p.name, x + 14, y + 22);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...SUBTLE);
+      doc.text(`Rs ${p.rate}/KG · ${p.orderCount} order${p.orderCount === 1 ? "" : "s"}`, x + 14, y + 33);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13.5);
+      doc.setTextColor(...color);
+      doc.text(`${Math.round(p.kgs).toLocaleString("en-IN")} KG`, x + 14, y + 51);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10.5);
+      doc.setTextColor(...INK);
+      doc.text(`Rs ${Math.round(p.revenue).toLocaleString("en-IN")}`, x + pCardW - 14, y + 51, { align: "right" });
+    });
+    y += pCardH + 30;
 
     // ── Daily summary table ──────────────────────────────────────────────
     sectionTitle("Daily Summary — New vs Regular");
