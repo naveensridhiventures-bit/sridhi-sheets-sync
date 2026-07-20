@@ -2712,7 +2712,7 @@ function RepeatOrders() {
 // ─── DAILY ORDERS (telecaller: new vs regular conversions, kg-wise) ───────
 const RATE_PER_KG = 35;
 const PRODUCTS = [
-  { name: "Rice", rate: 35 },
+  { name: "Idli Dosa Batter", rate: 35 },
   { name: "Vada Batter", rate: 100 },
 ];
 const rateForProduct = (name) => (PRODUCTS.find(p => p.name === name) || PRODUCTS[0]).rate;
