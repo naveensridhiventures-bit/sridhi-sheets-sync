@@ -1524,13 +1524,11 @@ function Leads() {
     } : l));
     // Log expense if Porter
     if (method === "porter" && porterAmt) {
-      const today = new Date();
-      const dateStr = today.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
       const newExp = {
         id: expenses.length + Date.now(),
         category: "Porter Delivery — " + lead.name,
         amount: parseInt(porterAmt) || 0,
-        date: dateStr,
+        date: todayISO(),
         type: "Delivery",
         subtype: "Porter"
       };
@@ -3458,7 +3456,7 @@ function Expenses() {
   const [expenses, setExpenses, expensesSyncStatus] = useSheetSynced("expenses", "expenses", INITIAL_EXPENSES);
   const [showAdd, setShowAdd] = useState(false);
   const [filterType, setFilterType] = useState("All");
-  const [newExp, setNewExp] = useState({ category:"", amount:"", type:"Marketing", subtype:"Facebook" });
+  const [newExp, setNewExp] = useState({ category:"", amount:"", type:"Marketing", subtype:"Facebook", date: todayISO() });
 
   const typeColor = { Marketing:T.indigo, Delivery:T.amber, Sample:T.accent, Employee:T.sky };
   const filtered = expenses.filter(e => filterType==="All" || e.type===filterType);
@@ -3467,9 +3465,9 @@ function Expenses() {
 
   const addExpense = () => {
     if (!newExp.category || !newExp.amount) return;
-    setExpenses([{ ...newExp, id:expenses.length+1, amount:parseInt(newExp.amount), date:"Jun 25" }, ...expenses]);
+    setExpenses([{ ...newExp, id:expenses.length+1, amount:parseInt(newExp.amount), date: newExp.date || todayISO() }, ...expenses]);
     setShowAdd(false);
-    setNewExp({ category:"", amount:"", type:"Marketing", subtype:"Facebook" });
+    setNewExp({ category:"", amount:"", type:"Marketing", subtype:"Facebook", date: todayISO() });
   };
 
   return (
@@ -3531,7 +3529,7 @@ function Expenses() {
           <div key={e.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0", borderBottom:`1px solid ${T.border}` }}>
             <div style={{ flex:1 }}>
               <div style={{ fontSize:13, fontWeight:600, color:T.t1 }}>{e.category}</div>
-              <div style={{ fontSize:11, color:T.t3, marginTop:2, fontWeight:500 }}>{e.date}</div>
+              <div style={{ fontSize:11, color:T.t3, marginTop:2, fontWeight:500 }}>{/^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? formatDateReadable(e.date) : (e.date || "—")}</div>
             </div>
             <div style={{ display:"flex", alignItems:"center", gap:10 }}>
               <Chip label={e.type} color={typeColor[e.type]} />
@@ -3543,6 +3541,7 @@ function Expenses() {
 
       <Sheet open={showAdd} onClose={() => setShowAdd(false)} title="Add Expense">
         <Field label="Description" value={newExp.category} onChange={e => setNewExp({...newExp,category:e.target.value})} placeholder="e.g. Facebook Ads — June Week 3" />
+        <Field label="Date" type="date" value={newExp.date} onChange={e => setNewExp({...newExp,date:e.target.value})} />
         <Field label="Amount (₹)" value={newExp.amount} onChange={e => setNewExp({...newExp,amount:e.target.value})} type="number" placeholder="0" />
         <Dropdown label="Category" value={newExp.type} onChange={e => setNewExp({...newExp,type:e.target.value})} options={["Marketing","Delivery","Sample","Employee"]} />
         <div style={{ display:"flex", gap:10 }}>
@@ -5104,25 +5103,34 @@ function DesktopDashboardHome({ setActiveTab }) {
   const [leads] = useSheetSynced("leads", "leads", []);
   const [samples] = useSheetSynced("samples", "samples", []);
   const [repeatCustomers] = useSheetSynced("repeatCustomers", "repeatCustomers", []);
+  const [dailyOrders] = useSheetSynced("dailyOrders", "dailyOrders", []);
+  const [expenses] = useSheetSynced("expenses", "expenses", []);
 
   const activeLeads = (leads || []).filter(l => l && l.name && l.stage);
   const activeCustomers = activeLeads.filter(l => l.stage === "Active Customer").length;
   const ordersReceived = activeLeads.filter(l => ["Order Received", "Active Customer", "Repeat Order Follow-up"].includes(l.stage));
   const convRate = activeLeads.length > 0 ? Math.round((ordersReceived.length / activeLeads.length) * 100) : 0;
 
-  const orderKg = activeLeads
-    .filter(l => ["Order Received", "Active Customer", "Repeat Order Follow-up"].includes(l.stage))
-    .reduce((a, l) => {
-      const fromField = Number(l.kgQty) || 0;
-      if (fromField > 0) return a + fromField;
-      const lastRemark = (l.remarks || []).slice(-1)[0] || "";
-      const match = lastRemark.match(/(\d+)\s*(?:kg|KG|Kg)/);
-      return a + (match ? Number(match[1]) : 0);
-    }, 0);
-  const samplesDeliveredKg = (samples || []).filter(s => s.status === "Delivered").reduce((a, b) => a + (Number(b.qty) || 0), 0);
-  const totalKg = samplesDeliveredKg + orderKg;
-  const totalRevenue = totalKg * 120;
   const samplesSentKg = (samples || []).reduce((a, b) => a + (Number(b.qty) || 0), 0);
+
+  // ── Revenue & Sales — sourced directly from Daily Orders (matches the Daily Orders page exactly) ──
+  const today = todayISO();
+  const yesterday = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); })();
+  const activeOrders = (dailyOrders || []).filter(o => o.status !== "Cancelled");
+  const todaysOrders = activeOrders.filter(o => o.date === today);
+  const yesterdaysOrders = activeOrders.filter(o => o.date === yesterday);
+  const totalRevenue = todaysOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const totalKg = todaysOrders.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
+  const yestRevenue = yesterdaysOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const yestKg = yesterdaysOrders.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
+  const revenueChange = yestRevenue > 0 ? Math.round(((totalRevenue - yestRevenue) / yestRevenue) * 100) : (totalRevenue > 0 ? 100 : 0);
+  const kgChange = yestKg > 0 ? Math.round(((totalKg - yestKg) / yestKg) * 100) : (totalKg > 0 ? 100 : 0);
+
+  // ── Expenses — pulled from the Expenses log for today ──────────────────
+  const todaysExpenses = (expenses || []).filter(e => e.date === today).reduce((a, e) => a + (Number(e.amount) || 0), 0);
+  const yesterdaysExpenses = (expenses || []).filter(e => e.date === yesterday).reduce((a, e) => a + (Number(e.amount) || 0), 0);
+  const netToday = totalRevenue - todaysExpenses;
+  const expenseChange = yesterdaysExpenses > 0 ? Math.round(((todaysExpenses - yesterdaysExpenses) / yesterdaysExpenses) * 100) : (todaysExpenses > 0 ? 100 : 0);
 
   const stageCounts = {};
   activeLeads.forEach(l => { stageCounts[l.stage] = (stageCounts[l.stage] || 0) + 1; });
@@ -5131,8 +5139,10 @@ function DesktopDashboardHome({ setActiveTab }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
-        <StatCard icon="💰" iconBg={DT.purple + "26"} label="Today's Revenue" value={"₹" + totalRevenue.toLocaleString("en-IN")} change={totalRevenue > 0 ? 18 : 0} color={DT.purple} />
-        <StatCard icon="🛍️" iconBg={DT.emerald + "26"} label="Today's Sales" value={totalKg} unit="KG" change={totalKg > 0 ? 12 : 0} color={DT.emerald} />
+        <StatCard icon="💰" iconBg={DT.purple + "26"} label="Today's Revenue" value={"₹" + totalRevenue.toLocaleString("en-IN")} change={revenueChange} color={DT.purple} />
+        <StatCard icon="🛍️" iconBg={DT.emerald + "26"} label="Today's Sales" value={totalKg} unit="KG" change={kgChange} color={DT.emerald} />
+        <StatCard icon="💸" iconBg={DT.rose + "26"} label="Today's Expenses" value={"₹" + todaysExpenses.toLocaleString("en-IN")} change={expenseChange} color={DT.rose} />
+        <StatCard icon="📈" iconBg={(netToday >= 0 ? DT.emerald : DT.rose) + "26"} label="Net Profit (Today)" value={"₹" + netToday.toLocaleString("en-IN")} change={netToday >= 0 ? 1 : -1} color={netToday >= 0 ? DT.emerald : DT.rose} />
         <StatCard icon="🎯" iconBg={DT.sky + "26"} label="Conversion Rate" value={convRate + "%"} change={convRate > 0 ? 8 : 0} color={DT.sky} />
         <StatCard icon="🏪" iconBg={DT.orange + "26"} label="Active Customers" value={activeCustomers} change={activeCustomers > 0 ? 5 : 0} color={DT.orange} />
         <StatCard icon="🧪" iconBg={DT.purple + "26"} label="Samples Sent" value={samplesSentKg} unit="KG" change={samplesSentKg > 0 ? -4 : 0} color={DT.purple} />
