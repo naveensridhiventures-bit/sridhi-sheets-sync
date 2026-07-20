@@ -82,9 +82,18 @@ def read_tab(tab_name, token):
         for row in rows if any(str(c).strip() for c in row)
     ]
 
+def _cell_str(v):
+    # Lists/dicts (e.g. a dailyOrders row's multi-product "items" array) must
+    # round-trip through JSON, not Python's str()/repr(), or they come back
+    # as unparsable text on read (breaking anything keyed off that field,
+    # like per-product totals for a newer product such as Vada Batter).
+    if isinstance(v, (list, dict)):
+        return json.dumps(v)
+    return str(v or "")
+
 def write_tab(tab_name, headers, records, token):
     sheet_id = os.environ["GOOGLE_SHEET_ID"]
-    data_rows = [[str(r.get(h, "") or "") for h in headers] for r in records]
+    data_rows = [[_cell_str(r.get(h, "")) for h in headers] for r in records]
     sheets_update(sheet_id, tab_name, [headers] + data_rows, token)
 
 # Tabs are never hard-deleted from in this app (everything is soft-managed via
@@ -155,6 +164,24 @@ def _coerce(tab_key, row):
             if not row.get("feedback","").strip(): row["feedback"] = None
         if tab_key == "dailyOrders":
             if not row.get("status","").strip(): row["status"] = "Active"
+            raw_items = row.get("items", "")
+            if isinstance(raw_items, str) and raw_items.strip():
+                try:
+                    parsed = json.loads(raw_items)
+                    if isinstance(parsed, list):
+                        for it in parsed:
+                            if isinstance(it, dict):
+                                for nf in ("kgs", "rate", "amount"):
+                                    if nf in it:
+                                        try: it[nf] = float(it[nf]) if "." in str(it[nf]) else int(it[nf])
+                                        except: pass
+                        row["items"] = parsed
+                    else:
+                        row["items"] = []
+                except Exception:
+                    row["items"] = []
+            elif not isinstance(raw_items, list):
+                row["items"] = []
     return row
 
 def _decoerce_leads(lead):

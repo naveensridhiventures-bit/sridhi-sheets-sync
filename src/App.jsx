@@ -159,9 +159,9 @@ function leadTypeIcon(type) {
 }
 
 // ─── DESIGN PRIMITIVES ────────────────────────────────────────────────────
-function Card({ children, style = {}, accent, noPad }) {
+function Card({ children, style = {}, accent, noPad, id }) {
   return (
-    <div style={{
+    <div id={id} style={{
       background: T.card,
       border: `1px solid ${accent ? accent + "30" : T.border}`,
       borderRadius: 20,
@@ -2794,7 +2794,7 @@ function downloadCSV(filename, content) {
   URL.revokeObjectURL(url);
 }
 
-function DailyOrders() {
+function DailyOrders({ embedded = false } = {}) {
   const [orders, setOrders, ordersSyncStatus] = useSheetSynced("dailyOrders", "dailyOrders", INITIAL_DAILY_ORDERS);
   const [leads] = useSheetSynced("leads", "leads", []);
   const [repeatCustomers] = useSheetSynced("repeatCustomers", "repeatCustomers", []);
@@ -3307,28 +3307,32 @@ function DailyOrders() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        <MobileStatCard icon="🆕" title="Today's Orders" value={todaysNew.length} sub="New Orders" color={T.accent} />
-        <MobileStatCard icon="🔁" title="Regular Orders" value={todaysRegular.length} sub="Today · Regular" color={T.sky} />
-        <MobileStatCard icon="⚖️" title="Total KGs" value={`${Math.round(todaysKgs).toLocaleString("en-IN")} KG`} sub="Today" color={T.indigo} />
-        <MobileStatCard icon="💰" title="Today Revenue" value={`₹${Math.round(todaysRevenue).toLocaleString("en-IN")}`} sub="Today" color={T.amber} />
-      </div>
+      {!embedded && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          <MobileStatCard icon="🆕" title="Today's Orders" value={todaysNew.length} sub="New Orders" color={T.accent} />
+          <MobileStatCard icon="🔁" title="Regular Orders" value={todaysRegular.length} sub="Today · Regular" color={T.sky} />
+          <MobileStatCard icon="⚖️" title="Total KGs" value={`${Math.round(todaysKgs).toLocaleString("en-IN")} KG`} sub="Today" color={T.indigo} />
+          <MobileStatCard icon="💰" title="Today Revenue" value={`₹${Math.round(todaysRevenue).toLocaleString("en-IN")}`} sub="Today" color={T.amber} />
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <SyncBadge status={ordersSyncStatus} />
       </div>
 
-      <Card accent={T.emerald}>
-        <Label sub="Auto-calculated from every active order — cancelled orders are excluded">Income Overview</Label>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10 }}>
-          <MobileStatCard icon="📆" title="Today" value={`₹${Math.round(todaysRevenue).toLocaleString("en-IN")}`} color={T.emerald} />
-          <MobileStatCard icon="📈" title="This Week" value={`₹${Math.round(weekRevenue).toLocaleString("en-IN")}`} color={T.sky} />
-          <MobileStatCard icon="🗓️" title="This Month" value={`₹${Math.round(monthRevenue).toLocaleString("en-IN")}`} color={T.indigo} />
-          <MobileStatCard icon="🏆" title="All-Time" value={`₹${Math.round(allTimeRevenue).toLocaleString("en-IN")}`} color={T.accent} />
-        </div>
-        <div style={{ marginTop: 10, fontSize: 11.5, color: T.t3 }}>
-          {allTimeKgs.toLocaleString("en-IN", { maximumFractionDigits: 0 })} KG sold overall · avg ₹{allTimeKgs > 0 ? Math.round(allTimeRevenue / allTimeKgs) : RATE_PER_KG}/KG
-        </div>
-      </Card>
+      {!embedded && (
+        <Card accent={T.emerald}>
+          <Label sub="Auto-calculated from every active order — cancelled orders are excluded">Income Overview</Label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10 }}>
+            <MobileStatCard icon="📆" title="Today" value={`₹${Math.round(todaysRevenue).toLocaleString("en-IN")}`} color={T.emerald} />
+            <MobileStatCard icon="📈" title="This Week" value={`₹${Math.round(weekRevenue).toLocaleString("en-IN")}`} color={T.sky} />
+            <MobileStatCard icon="🗓️" title="This Month" value={`₹${Math.round(monthRevenue).toLocaleString("en-IN")}`} color={T.indigo} />
+            <MobileStatCard icon="🏆" title="All-Time" value={`₹${Math.round(allTimeRevenue).toLocaleString("en-IN")}`} color={T.accent} />
+          </div>
+          <div style={{ marginTop: 10, fontSize: 11.5, color: T.t3 }}>
+            {allTimeKgs.toLocaleString("en-IN", { maximumFractionDigits: 0 })} KG sold overall · avg ₹{allTimeKgs > 0 ? Math.round(allTimeRevenue / allTimeKgs) : RATE_PER_KG}/KG
+          </div>
+        </Card>
+      )}
 
       <button onClick={openAdd} style={{
         background: T.accentSub, border: `1px solid ${T.accentGlow}`,
@@ -3370,7 +3374,7 @@ function DailyOrders() {
         </div>
       </Card>
 
-      <Card>
+      <Card id="orders-by-date-section">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
           <Label sub="Pick any date to view, edit or backfill that day's orders">Orders by Date</Label>
           <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ ...inputStyle, width: "auto" }} />
@@ -3452,24 +3456,26 @@ function DailyOrders() {
         })}
       </Card>
 
-      <Card>
-        <Label sub="New vs regular conversions, total KGs and revenue, day by day">Daily Summary</Label>
-        {summaryRows.length === 0 && (
-          <div style={{ textAlign: "center", padding: "16px", color: T.t3, fontSize: 12 }}>No orders logged yet.</div>
-        )}
-        {summaryRows.map(([date, s]) => (
-          <div key={date} style={{ padding: "12px 0", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: T.t1, minWidth: 100 }}>{formatDateReadable(date)}</div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-              <Chip label={`${s.newCount} NEW`} color={T.accent} small />
-              <Chip label={`${s.regularCount} REGULAR`} color={T.sky} small />
-              <Chip label={`${Math.round(s.kgs)} KG`} color={T.amber} small />
-              <Chip label={`₹${Math.round(s.revenue).toLocaleString("en-IN")}`} color={T.emerald} small />
-              <span style={{ color:T.t4, fontSize:14, marginLeft:4 }}>›</span>
+      {!embedded && (
+        <Card id="daily-summary-section">
+          <Label sub="New vs regular conversions, total KGs and revenue, day by day">Daily Summary</Label>
+          {summaryRows.length === 0 && (
+            <div style={{ textAlign: "center", padding: "16px", color: T.t3, fontSize: 12 }}>No orders logged yet.</div>
+          )}
+          {summaryRows.map(([date, s]) => (
+            <div key={date} style={{ padding: "12px 0", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: T.t1, minWidth: 100 }}>{formatDateReadable(date)}</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                <Chip label={`${s.newCount} NEW`} color={T.accent} small />
+                <Chip label={`${s.regularCount} REGULAR`} color={T.sky} small />
+                <Chip label={`${Math.round(s.kgs)} KG`} color={T.amber} small />
+                <Chip label={`₹${Math.round(s.revenue).toLocaleString("en-IN")}`} color={T.emerald} small />
+                <span style={{ color:T.t4, fontSize:14, marginLeft:4 }}>›</span>
+              </div>
             </div>
-          </div>
-        ))}
-      </Card>
+          ))}
+        </Card>
+      )}
 
       {cancelledOrders.length > 0 && (
         <Card>
@@ -5372,7 +5378,7 @@ function TodaysOrdersDesktop({ orders, setActiveTab }) {
           <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Today's Orders</div>
           <div style={{ fontSize: 11, color: DT.t3, marginTop: 2 }}>All orders placed today</div>
         </div>
-        <button onClick={() => setActiveTab("dailyorders")} style={{ background: "none", border: "none", color: DT.accent, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>View All</button>
+        <button onClick={() => document.getElementById("orders-by-date-section")?.scrollIntoView({ behavior: "smooth", block: "start" })} style={{ background: "none", border: "none", color: DT.accent, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>View All</button>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 14 }}>
         {list.length === 0 && <div style={{ fontSize: 12, color: DT.t3, padding: "20px 0", textAlign: "center" }}>No orders logged today yet.</div>}
@@ -5424,7 +5430,7 @@ function DailySummaryDesktop({ orders, setActiveTab }) {
           <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Daily Summary</div>
           <div style={{ fontSize: 11, color: DT.t3, marginTop: 2 }}>New vs regular, total KGs and revenue</div>
         </div>
-        <button onClick={() => setActiveTab("dailyorders")} style={{ background: "none", border: "none", color: DT.accent, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>View Full History</button>
+        <button onClick={() => document.getElementById("orders-by-date-section")?.scrollIntoView({ behavior: "smooth", block: "start" })} style={{ background: "none", border: "none", color: DT.accent, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>View Full History</button>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 14 }}>
         {rows.length === 0 && <div style={{ fontSize: 12, color: DT.t3, padding: "20px 0", textAlign: "center" }}>No orders logged yet.</div>}
@@ -5536,7 +5542,7 @@ function DesktopShell({ activeTab, setActiveTab, role, setRole, leadsCount, rend
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <DesktopDailyOrdersHome setActiveTab={setActiveTab} />
               <div style={{ background: T.bg, borderRadius: 16, overflow: "hidden" }}>
-                {renderModule()}
+                {renderModule({ embedded: true })}
               </div>
             </div>
           ) : (
@@ -5697,7 +5703,7 @@ export default function App() {
     );
   }
 
-  const renderModule = () => {
+  const renderModule = (moduleProps = {}) => {
     switch (activeTab) {
       case "dashboard": return <Dashboard />;
       case "leads":     return <Leads />;
@@ -5705,7 +5711,7 @@ export default function App() {
       case "fieldsync": return <FieldSync />;
       case "samples":   return <Samples />;
       case "repeat":    return <RepeatOrders />;
-      case "dailyorders": return <DailyOrders />;
+      case "dailyorders": return <DailyOrders {...moduleProps} />;
       case "expenses":  return <Expenses />;
       case "marketing": return <Marketing />;
       case "reports":   return <Reports />;
