@@ -4811,36 +4811,38 @@ function StatCard({ icon, iconBg, label, value, unit, change, color }) {
 }
 
 // ── Sales trend area chart ───────────────────────────────────────────────
-// Built from real delivered-sample records (date + qty). No fabricated data:
-// if there isn't enough real history yet, an empty state is shown instead
-// of a randomly-generated wave.
-function SalesTrendChart({ samples = [], pricePerKg = 120 }) {
-  const delivered = (samples || []).filter(s => s.status === "Delivered" && s.date && Number(s.qty) > 0);
+// Built from real Daily Orders records (date + kgs + amount) for the last
+// 14 days. No fabricated data: if there isn't enough real history yet, an
+// empty state is shown instead of a randomly-generated wave.
+function SalesTrendChart({ orders = [] }) {
+  const active = (orders || []).filter(o => o.status !== "Cancelled" && o.date);
 
-  // Aggregate real qty by date string (e.g. "09 Jul")
-  const byDate = {};
-  delivered.forEach(s => { byDate[s.date] = (byDate[s.date] || 0) + Number(s.qty); });
-
-  // Preserve chronological order of first appearance in the data (sheet order),
-  // since the date strings have no year and can't be reliably re-sorted.
-  const orderedDates = [];
-  delivered.forEach(s => { if (!orderedDates.includes(s.date)) orderedDates.push(s.date); });
-
-  const hasData = orderedDates.length > 0;
-
-  // When there's no real data yet, still show a scale: the last 7 calendar
-  // days, all at zero, so the axis/gridlines render instead of a blank card.
-  const fallbackDates = hasData ? orderedDates : Array.from({ length: 7 }, (_, i) => {
+  // Real rolling 14-day window ending today, so the axis always makes sense
+  // even before any orders exist.
+  const days = Array.from({ length: 14 }, (_, i) => {
     const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+    d.setDate(d.getDate() - (13 - i));
+    return d.toISOString().slice(0, 10);
   });
 
-  const points = hasData ? orderedDates.map(d => byDate[d]) : fallbackDates.map(() => 0);
+  const byDate = {};
+  active.forEach(o => {
+    if (!byDate[o.date]) byDate[o.date] = { kg: 0, revenue: 0, orders: 0 };
+    byDate[o.date].kg += parseFloat(o.kgs) || 0;
+    byDate[o.date].revenue += parseFloat(o.amount) || 0;
+    byDate[o.date].orders += 1;
+  });
+
+  const hasData = days.some(d => byDate[d]);
+  const points = days.map(d => byDate[d]?.kg || 0);
+  const revenuePoints = days.map(d => byDate[d]?.revenue || 0);
+  const labelDates = days.map(d => formatDateReadable(d).replace(/, \d{4}$/, ""));
+
   const totalSales = points.reduce((a, b) => a + b, 0);
-  const bestDay = hasData ? Math.max(...points) : 0;
-  const avgDay = hasData ? Math.round(totalSales / points.length) : 0;
-  const orders = delivered.length;
+  const totalRevenue = revenuePoints.reduce((a, b) => a + b, 0);
+  const bestDay = Math.max(...points, 0);
+  const avgDay = days.length ? Math.round(totalSales / days.length) : 0;
+  const ordersCount = days.reduce((a, d) => a + (byDate[d]?.orders || 0), 0);
 
   const W = 640, H = 190, PAD = 8;
   const maxV = Math.max(...points, 1);
@@ -4849,16 +4851,19 @@ function SalesTrendChart({ samples = [], pricePerKg = 120 }) {
   const linePath = coords.length ? coords.map((c, i) => (i === 0 ? "M" : "L") + c[0] + "," + c[1]).join(" ") : "";
   const areaPath = coords.length ? linePath + ` L${coords[coords.length - 1][0]},${H} L${coords[0][0]},${H} Z` : "";
   const hiIdx = hasData ? points.indexOf(bestDay) : -1;
-  const hi = hiIdx >= 0 ? coords[hiIdx] : null;
+  const hi = hiIdx >= 0 && bestDay > 0 ? coords[hiIdx] : null;
+
+  // Thin x-axis labels so 14 dates don't overlap — show every other one.
+  const shownLabels = labelDates.map((d, i) => (i % 2 === 0 || i === labelDates.length - 1) ? d : "");
 
   return (
     <div style={{ flex: 1.4, minWidth: 380, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Sales Trend</div>
-          <div style={{ fontSize: 11.5, color: DT.t3, marginTop: 2 }}>Sales performance overview</div>
+          <div style={{ fontSize: 11.5, color: DT.t3, marginTop: 2 }}>From Daily Orders — last 14 days</div>
         </div>
-        <div style={{ background: DT.cardHi, border: `1px solid ${DT.borderHi}`, borderRadius: 8, padding: "5px 10px", fontSize: 11.5, color: DT.t2, fontWeight: 600 }}>This Month ⌄</div>
+        <div style={{ background: DT.cardHi, border: `1px solid ${DT.borderHi}`, borderRadius: 8, padding: "5px 10px", fontSize: 11.5, color: DT.t2, fontWeight: 600 }}>Last 14 Days</div>
       </div>
 
       <div style={{ position: "relative", marginTop: 14 }}>
@@ -4878,29 +4883,29 @@ function SalesTrendChart({ samples = [], pricePerKg = 120 }) {
         </svg>
         {hi && (
           <div style={{ position: "absolute", left: `calc(${(hi[0] / W) * 100}% - 46px)`, top: Math.max(hi[1] - 46, 0), background: DT.cardHi, border: `1px solid ${DT.borderHi}`, borderRadius: 8, padding: "6px 10px", fontSize: 10.5, color: DT.t1, whiteSpace: "nowrap", boxShadow: "0 8px 20px rgba(0,0,0,0.35)" }}>
-            <div style={{ fontWeight: 700 }}>{orderedDates[hiIdx]}</div>
-            <div style={{ color: DT.accent, fontWeight: 700 }}>{bestDay} KG</div>
+            <div style={{ fontWeight: 700 }}>{labelDates[hiIdx]}</div>
+            <div style={{ color: DT.accent, fontWeight: 700 }}>{bestDay.toLocaleString("en-IN", { maximumFractionDigits: 1 })} KG</div>
           </div>
         )}
         {!hasData && (
           <div style={{ position: "absolute", left: "50%", top: "38%", transform: "translate(-50%, -50%)", color: DT.t3, fontSize: 12.5, textAlign: "center", width: "80%" }}>
             <div style={{ fontSize: 22, marginBottom: 4 }}>📈</div>
-            <div>No delivered sales yet</div>
-            <div style={{ fontSize: 11, marginTop: 2 }}>The trend will appear once samples are marked "Delivered"</div>
+            <div>No orders in the last 14 days yet</div>
+            <div style={{ fontSize: 11, marginTop: 2 }}>The trend will appear once orders are logged in Daily Orders</div>
           </div>
         )}
         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
-          {fallbackDates.map((d, i) => <span key={d + i} style={{ fontSize: 10.5, color: DT.t3 }}>{d}</span>)}
+          {shownLabels.map((d, i) => <span key={i} style={{ fontSize: 10.5, color: DT.t3 }}>{d}</span>)}
         </div>
       </div>
 
       <div style={{ display: "flex", gap: 22, marginTop: 16, borderTop: `1px solid ${DT.border}`, paddingTop: 14, flexWrap: "wrap" }}>
         {[
-          ["Total Sales", totalSales.toLocaleString("en-IN") + " KG"],
-          ["Average / Day", avgDay + " KG"],
-          ["Best Day", bestDay + " KG"],
-          ["Orders", orders],
-          ["Revenue", "₹" + (totalSales * pricePerKg).toLocaleString("en-IN")],
+          ["Total Sales", totalSales.toLocaleString("en-IN", { maximumFractionDigits: 1 }) + " KG"],
+          ["Average / Day", avgDay.toLocaleString("en-IN") + " KG"],
+          ["Best Day", bestDay.toLocaleString("en-IN", { maximumFractionDigits: 1 }) + " KG"],
+          ["Orders", ordersCount],
+          ["Revenue", "₹" + Math.round(totalRevenue).toLocaleString("en-IN")],
         ].map(([l, v]) => (
           <div key={l}>
             <div style={{ fontSize: 14, fontWeight: 800, color: DT.t1 }}>{v}</div>
@@ -5149,7 +5154,7 @@ function DesktopDashboardHome({ setActiveTab }) {
       </div>
 
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "stretch" }}>
-        <SalesTrendChart samples={samples || []} pricePerKg={120} />
+        <SalesTrendChart orders={dailyOrders || []} />
         <PipelineFunnelDesktop liveStages={liveStages} totalLeads={activeLeads.length} />
         <TodayTasksDesktop leads={activeLeads} samples={samples || []} repeatCustomers={repeatCustomers || []} setActiveTab={setActiveTab} />
       </div>
