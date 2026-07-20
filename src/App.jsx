@@ -919,6 +919,8 @@ function Dashboard() {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
 
+      <BatterGrinderHero theme={T} kgToday={totalKg} compact />
+
       {/* KPIs */}
       <div style={{ display:"flex", flexWrap:"wrap", gap:10 }}>
         <KPI label="Sales this month" value={totalKg}   unit="KG" change={0} color={T.accent}  icon="📦" />
@@ -4919,6 +4921,122 @@ function StatCard({ icon, iconBg, label, value, unit, change, color }) {
   );
 }
 
+// ── Batter Grinder Hero — animated illustration of the traditional wet ───
+// grinder churning out fresh idli/dosa/vada batter. Purely decorative +
+// a live "KG ground today" readout, used to open both the mobile and
+// desktop dashboards with something warmer than another stat card.
+function BatterGrinderHero({ theme = DT, kgToday = 0, compact = false }) {
+  const stone   = "#5B6B8C";
+  const stoneHi = "#7688AD";
+  const batter  = "#F7EFE0";
+  const wood    = "#8A5A3A";
+  const skin    = theme.accent || "#14C9A6";
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        overflow: "hidden",
+        borderRadius: 18,
+        border: `1px solid ${theme.border}`,
+        background: `linear-gradient(120deg, ${theme.surface || theme.card} 0%, ${theme.card} 55%, ${theme.cardHi || theme.cardHigh || theme.card} 100%)`,
+        padding: compact ? "16px 18px" : "20px 26px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 18,
+        flexWrap: "wrap",
+      }}
+    >
+      <style>{`
+        @keyframes grinderSpin      { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes grinderCrank     { 0%,100% { transform: rotate(-10deg); } 50% { transform: rotate(14deg); } }
+        @keyframes grinderShoulder  { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1.5px); } }
+        @keyframes grinderDrip1     { 0% { opacity:0; transform: translateY(0) scale(0.5); } 25% { opacity:1; } 85% { opacity:1; } 100% { opacity:0; transform: translateY(20px) scale(1); } }
+        @keyframes grinderDrip2     { 0% { opacity:0; transform: translateY(0) scale(0.4); } 35% { opacity:1; } 90% { opacity:1; } 100% { opacity:0; transform: translateY(18px) scale(0.9); } }
+        @keyframes grinderRipple    { 0%,100% { transform: scaleX(1); opacity:0.9; } 50% { transform: scaleX(1.08); opacity:0.5; } }
+        @keyframes grinderSteam     { 0% { opacity:0; transform: translateY(0) scale(0.85); } 30% { opacity:0.8; } 100% { opacity:0; transform: translateY(-18px) scale(1.25); } }
+        @keyframes grinderDust      { 0%,100% { transform: translateY(0); opacity:0.35; } 50% { transform: translateY(-5px); opacity:0.9; } }
+        @keyframes grinderPulseDot  { 0%,100% { opacity:0.35; transform: scale(0.8); } 50% { opacity:1; transform: scale(1.15); } }
+      `}</style>
+
+      {/* Text side */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 180 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ position: "relative", width: 8, height: 8, borderRadius: "50%", background: theme.emerald, display: "inline-block" }}>
+            <span style={{ position: "absolute", inset: -4, borderRadius: "50%", background: theme.emerald, animation: "grinderPulseDot 1.6s ease-in-out infinite" }} />
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: theme.emerald, textTransform: "uppercase" }}>Live in the kitchen</span>
+        </div>
+        <div style={{ fontSize: compact ? 15 : 18, fontWeight: 800, color: theme.t1, letterSpacing: "-0.01em" }}>
+          Fresh batter, ground daily
+        </div>
+        <div style={{ fontSize: compact ? 20 : 26, fontWeight: 800, color: theme.t1 }}>
+          {Math.round(kgToday).toLocaleString("en-IN")}
+          <span style={{ fontSize: 13, color: theme.t3, fontWeight: 600 }}> KG ground today</span>
+        </div>
+        <div style={{ fontSize: 11.5, color: theme.t3, fontWeight: 500 }}>Idli · Dosa · Vada — straight off the stone</div>
+      </div>
+
+      {/* Animated illustration */}
+      <svg viewBox="0 0 300 150" width={compact ? 190 : 250} height={compact ? 95 : 125} style={{ flexShrink: 0 }}>
+        {/* dust / flour sparkles */}
+        <circle cx="30" cy="34" r="2" fill={batter} opacity="0.6" style={{ animation: "grinderDust 2.4s ease-in-out infinite" }} />
+        <circle cx="255" cy="26" r="1.6" fill={batter} opacity="0.5" style={{ animation: "grinderDust 2.8s ease-in-out infinite 0.5s" }} />
+        <circle cx="205" cy="18" r="1.8" fill={batter} opacity="0.5" style={{ animation: "grinderDust 2s ease-in-out infinite 0.9s" }} />
+
+        {/* steam curls above the drum */}
+        <g stroke={batter} strokeWidth="2.2" fill="none" strokeLinecap="round">
+          <path d="M120 44 Q126 34 120 26 Q114 18 120 10" style={{ animation: "grinderSteam 3s ease-out infinite" }} />
+          <path d="M138 44 Q144 35 138 27 Q132 19 138 11" style={{ animation: "grinderSteam 3s ease-out infinite 1s" }} />
+          <path d="M156 44 Q162 34 156 26 Q150 18 156 10" style={{ animation: "grinderSteam 3s ease-out infinite 2s" }} />
+        </g>
+
+        {/* stand legs */}
+        <path d="M108 128 L100 148 M180 128 L188 148 M120 128 L116 148 M168 128 L172 148" stroke={wood} strokeWidth="4" strokeLinecap="round" />
+
+        {/* drum body */}
+        <rect x="102" y="70" width="86" height="58" rx="14" fill={stone} />
+        <rect x="102" y="70" width="86" height="20" rx="10" fill={stoneHi} />
+        <ellipse cx="145" cy="70" rx="43" ry="10" fill={stoneHi} />
+
+        {/* rotating grinding window */}
+        <g transform="translate(145,70)">
+          <ellipse cx="0" cy="0" rx="30" ry="7" fill={batter} />
+          <g style={{ transformOrigin: "0px 0px", animation: "grinderSpin 2.2s linear infinite" }}>
+            <ellipse cx="0" cy="0" rx="30" ry="7" fill="none" stroke={stone} strokeWidth="2" strokeDasharray="10 10" />
+          </g>
+        </g>
+
+        {/* spout + pouring batter */}
+        <path d="M102 108 Q80 110 76 118" stroke={stone} strokeWidth="8" fill="none" strokeLinecap="round" />
+        <path d="M78 120 Q76 132 78 144" stroke={batter} strokeWidth="5" fill="none" strokeLinecap="round" opacity="0.95" />
+        <circle cx="78" cy="128" r="3" fill={batter} style={{ animation: "grinderDrip1 1.4s ease-in infinite" }} />
+        <circle cx="79" cy="118" r="2.4" fill={batter} style={{ animation: "grinderDrip2 1.4s ease-in infinite 0.6s" }} />
+
+        {/* bowl catching the batter */}
+        <ellipse cx="80" cy="146" rx="24" ry="7" fill={wood} opacity="0.9" />
+        <ellipse cx="80" cy="143" rx="19" ry="4.5" fill={batter} style={{ animation: "grinderRipple 2.4s ease-in-out infinite", transformOrigin: "80px 143px" }} />
+
+        {/* person cranking the grinder */}
+        <g style={{ animation: "grinderShoulder 1.6s ease-in-out infinite" }}>
+          {/* head */}
+          <circle cx="222" cy="66" r="11" fill={skin} />
+          {/* torso */}
+          <path d="M208 128 Q206 92 222 88 Q238 92 238 128 Z" fill={skin} opacity="0.92" />
+          {/* upper arm (fixed) */}
+          <path d="M212 98 Q198 100 192 104" stroke={skin} strokeWidth="8" strokeLinecap="round" fill="none" />
+          {/* forearm + hand cranking the wheel */}
+          <g transform="translate(192,104)" style={{ animation: "grinderCrank 1.1s ease-in-out infinite" }}>
+            <path d="M0 0 Q-8 10 -4 20" stroke={skin} strokeWidth="7" strokeLinecap="round" fill="none" />
+            <circle cx="-4" cy="21" r="4.5" fill={wood} />
+          </g>
+        </g>
+      </svg>
+    </div>
+  );
+}
+
 // ── Sales trend area chart ───────────────────────────────────────────────
 // Built from real Daily Orders records (date + kgs + amount) for the last
 // 14 days. No fabricated data: if there isn't enough real history yet, an
@@ -5252,6 +5370,8 @@ function DesktopDashboardHome({ setActiveTab }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <BatterGrinderHero theme={DT} kgToday={totalKg} />
+
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
         <StatCard icon="💰" iconBg={DT.purple + "26"} label="Today's Revenue" value={"₹" + totalRevenue.toLocaleString("en-IN")} change={revenueChange} color={DT.purple} />
         <StatCard icon="🛍️" iconBg={DT.emerald + "26"} label="Today's Sales" value={totalKg} unit="KG" change={kgChange} color={DT.emerald} />
