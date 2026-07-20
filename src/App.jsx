@@ -236,6 +236,28 @@ function KPI({ label, value, unit, change, color, icon }) {
   );
 }
 
+// ─── STAT CARD (gradient tinted, icon circle + big number) ───────────────
+function MobileStatCard({ icon, title, value, sub, color }) {
+  return (
+    <div style={{
+      flex:"1 1 190px", minWidth:170, borderRadius:16, padding:16,
+      background:`linear-gradient(160deg, ${color}26, ${T.card} 65%)`,
+      border:`1px solid ${color}33`, position:"relative", overflow:"hidden",
+    }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+        <div style={{
+          width:36, height:36, borderRadius:11, flexShrink:0,
+          background:color+"2A", border:`1px solid ${color}55`,
+          display:"flex", alignItems:"center", justifyContent:"center", fontSize:16,
+        }}>{icon}</div>
+        <div style={{ fontSize:12, fontWeight:700, color:T.t1 }}>{title}</div>
+      </div>
+      <div style={{ fontSize:24, fontWeight:800, color:T.t1, letterSpacing:"-0.02em" }}>{value}</div>
+      {sub && <div style={{ fontSize:11, color:T.t3, marginTop:3, fontWeight:500 }}>{sub}</div>}
+    </div>
+  );
+}
+
 // ─── BAR CHART ────────────────────────────────────────────────────────────
 function BarChart({ data, color, height = 64 }) {
   const max = Math.max(...data.map(d => d.val), 1);
@@ -3286,10 +3308,10 @@ function DailyOrders() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        <KPI label="Today · New"     value={todaysNew.length}          color={T.accent}  icon="🆕" />
-        <KPI label="Today · Regular" value={todaysRegular.length}      color={T.indigo}  icon="🔁" />
-        <KPI label="Today · KGs"     value={Math.round(todaysKgs)}     unit="KG" color={T.amber}   icon="⚖️" />
-        <KPI label="Today · Revenue" value={Math.round(todaysRevenue)} unit="₹"  color={T.emerald} icon="💰" />
+        <MobileStatCard icon="🆕" title="Today's Orders" value={todaysNew.length} sub="New Orders" color={T.accent} />
+        <MobileStatCard icon="🔁" title="Regular Orders" value={todaysRegular.length} sub="Today · Regular" color={T.sky} />
+        <MobileStatCard icon="⚖️" title="Total KGs" value={`${Math.round(todaysKgs).toLocaleString("en-IN")} KG`} sub="Today" color={T.indigo} />
+        <MobileStatCard icon="💰" title="Today Revenue" value={`₹${Math.round(todaysRevenue).toLocaleString("en-IN")}`} sub="Today" color={T.amber} />
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <SyncBadge status={ordersSyncStatus} />
@@ -3298,10 +3320,10 @@ function DailyOrders() {
       <Card accent={T.emerald}>
         <Label sub="Auto-calculated from every active order — cancelled orders are excluded">Income Overview</Label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10 }}>
-          <KPI label="Today"      value={Math.round(todaysRevenue)} unit="₹" color={T.emerald} icon="📆" />
-          <KPI label="This Week"  value={Math.round(weekRevenue)}   unit="₹" color={T.sky}     icon="📈" />
-          <KPI label="This Month" value={Math.round(monthRevenue)}  unit="₹" color={T.indigo}  icon="🗓️" />
-          <KPI label="All-Time"   value={Math.round(allTimeRevenue)} unit="₹" color={T.accent} icon="🏆" />
+          <MobileStatCard icon="📆" title="Today" value={`₹${Math.round(todaysRevenue).toLocaleString("en-IN")}`} color={T.emerald} />
+          <MobileStatCard icon="📈" title="This Week" value={`₹${Math.round(weekRevenue).toLocaleString("en-IN")}`} color={T.sky} />
+          <MobileStatCard icon="🗓️" title="This Month" value={`₹${Math.round(monthRevenue).toLocaleString("en-IN")}`} color={T.indigo} />
+          <MobileStatCard icon="🏆" title="All-Time" value={`₹${Math.round(allTimeRevenue).toLocaleString("en-IN")}`} color={T.accent} />
         </div>
         <div style={{ marginTop: 10, fontSize: 11.5, color: T.t3 }}>
           {allTimeKgs.toLocaleString("en-IN", { maximumFractionDigits: 0 })} KG sold overall · avg ₹{allTimeKgs > 0 ? Math.round(allTimeRevenue / allTimeKgs) : RATE_PER_KG}/KG
@@ -3384,11 +3406,28 @@ function DailyOrders() {
         {dateOrders.map(o => {
           const cancelled = o.status === "Cancelled";
           return (
-            <div key={o.id} style={{ padding: "14px 0", borderBottom: `1px solid ${T.border}`, opacity: cancelled ? 0.6 : 1 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: T.t1 }}>{o.customer}</div>
-                <div style={{ fontSize: 11, color: T.t3, marginTop: 2, fontWeight: 500 }}>
-                  {[o.area, o.telecaller].filter(Boolean).join(" · ") || "—"}
+            <div key={o.id} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "14px 0", borderBottom: `1px solid ${T.border}`, opacity: cancelled ? 0.6 : 1 }}>
+              <div style={{
+                width:38, height:38, borderRadius:11, flexShrink:0, marginTop:1,
+                background: (o.orderType === "New Order" ? T.accent : T.indigo)+"22",
+                border:`1px solid ${(o.orderType === "New Order" ? T.accent : T.indigo)}44`,
+                display:"flex", alignItems:"center", justifyContent:"center",
+                fontSize:14, fontWeight:800, color: o.orderType === "New Order" ? T.accent : T.indigo,
+              }}>{(o.customer || "?").trim().charAt(0).toUpperCase()}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{o.customer}</div>
+                    <div style={{ fontSize:11, color:T.t3, marginTop:2, fontWeight:500 }}>
+                      {[o.area, o.telecaller].filter(Boolean).join(" · ") || "—"}
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                    <span style={{ fontSize:11, color:T.t3, fontWeight:600, whiteSpace:"nowrap" }}>
+                      {o.createdAt ? new Date(o.createdAt).toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit" }) : ""}
+                    </span>
+                    <span style={{ color:T.t4, fontSize:14 }}>›</span>
+                  </div>
                 </div>
                 <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <Chip label={o.orderType} color={o.orderType === "New Order" ? T.accent : T.indigo} />
@@ -3401,12 +3440,12 @@ function DailyOrders() {
                 {cancelled && o.cancelRemarks && (
                   <div style={{ fontSize: 11, color: T.t3, marginTop: 6 }}>Note: {o.cancelRemarks}</div>
                 )}
-              </div>
-              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                <Btn label="Edit" color={T.sky} ghost small onClick={() => openEdit(o)} />
-                {!cancelled
-                  ? <Btn label="Customer Stopped / Cancel" color={T.rose} ghost small onClick={() => openCancel(o)} />
-                  : <Btn label="Reactivate" color={T.emerald} ghost small onClick={() => reactivate(o)} />}
+                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                  <Btn label="Edit" color={T.sky} ghost small onClick={() => openEdit(o)} />
+                  {!cancelled
+                    ? <Btn label="Customer Stopped / Cancel" color={T.rose} ghost small onClick={() => openCancel(o)} />
+                    : <Btn label="Reactivate" color={T.emerald} ghost small onClick={() => reactivate(o)} />}
+                </div>
               </div>
             </div>
           );
@@ -3419,13 +3458,14 @@ function DailyOrders() {
           <div style={{ textAlign: "center", padding: "16px", color: T.t3, fontSize: 12 }}>No orders logged yet.</div>
         )}
         {summaryRows.map(([date, s]) => (
-          <div key={date} style={{ padding: "10px 0", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: T.t1 }}>{formatDateReadable(date)}</div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <Chip label={`${s.newCount} New`} color={T.accent} small />
-              <Chip label={`${s.regularCount} Regular`} color={T.indigo} small />
+          <div key={date} style={{ padding: "12px 0", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: T.t1, minWidth: 100 }}>{formatDateReadable(date)}</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <Chip label={`${s.newCount} NEW`} color={T.accent} small />
+              <Chip label={`${s.regularCount} REGULAR`} color={T.sky} small />
               <Chip label={`${Math.round(s.kgs)} KG`} color={T.amber} small />
               <Chip label={`₹${Math.round(s.revenue).toLocaleString("en-IN")}`} color={T.emerald} small />
+              <span style={{ color:T.t4, fontSize:14, marginLeft:4 }}>›</span>
             </div>
           </div>
         ))}
@@ -5230,6 +5270,235 @@ function DesktopDashboardHome({ setActiveTab }) {
   );
 }
 
+// ── Product Overview (desktop) — proportional bar per product, KG-wise ───
+function ProductOverviewDesktop({ orders }) {
+  const today = todayISO();
+  const monthStart = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`;
+  const monthOrders = (orders || []).filter(o => o.status !== "Cancelled" && o.date >= monthStart && o.date <= today);
+  const totals = PRODUCTS.map(p => {
+    let kgs = 0;
+    monthOrders.forEach(o => orderLineItems(o).forEach(i => { if (i.product === p.name) kgs += parseFloat(i.kgs) || 0; }));
+    return { name: p.name, kgs };
+  });
+  const totalKg = totals.reduce((a, t) => a + t.kgs, 0);
+  const denom = totalKg || 1;
+  const colors = [DT.accent, DT.indigo, DT.orange, DT.rose];
+
+  return (
+    <div style={{ flex: 1, minWidth: 280, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Product Overview</div>
+        <div style={{ background: DT.cardHi, border: `1px solid ${DT.borderHi}`, borderRadius: 8, padding: "5px 10px", fontSize: 11.5, color: DT.t2, fontWeight: 600 }}>This Month ⌄</div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
+        {totals.map((t, i) => {
+          const pct = (t.kgs / denom) * 100;
+          const widthPct = Math.max(pct, 8);
+          return (
+            <div key={t.name} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: `${widthPct}%`, maxWidth: "70%", background: colors[i % colors.length], borderRadius: 8, padding: "10px 0", textAlign: "center", color: "#fff", fontSize: 13, fontWeight: 800, whiteSpace: "nowrap" }}>
+                {Math.round(t.kgs).toLocaleString("en-IN")} KG
+              </div>
+              <div style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: 11.5 }}>
+                <span style={{ color: DT.t2, fontWeight: 600 }}>{t.name}</span>
+                <span style={{ color: DT.t3, fontWeight: 700 }}>{totalKg > 0 ? pct.toFixed(1) : "0.0"}%</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16, paddingTop: 14, borderTop: `1px solid ${DT.border}` }}>
+        <span style={{ fontSize: 12, color: DT.t2, fontWeight: 600 }}>Total This Month</span>
+        <span style={{ fontSize: 16, fontWeight: 800, color: DT.accent }}>{Math.round(totalKg).toLocaleString("en-IN")} KG</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Revenue Summary donut (desktop) ───────────────────────────────────────
+function RevenueSummaryDesktop({ todaysRevenue, weekRevenue, monthRevenue, allTimeRevenue }) {
+  const segs = [
+    { label: "Today", value: todaysRevenue, color: DT.accent },
+    { label: "This Week", value: Math.max(weekRevenue - todaysRevenue, 0), color: DT.sky },
+    { label: "This Month", value: Math.max(monthRevenue - weekRevenue, 0), color: DT.purple },
+    { label: "Earlier", value: Math.max(allTimeRevenue - monthRevenue, 0), color: DT.rose },
+  ];
+  const total = segs.reduce((a, s) => a + s.value, 0) || 1;
+  const R = 52, C = 2 * Math.PI * R;
+  let offset = 0;
+
+  return (
+    <div style={{ flex: 1, minWidth: 280, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Revenue Summary</div>
+      <div style={{ fontSize: 11.5, color: DT.t3, marginTop: 2 }}>This Month Overview</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 20, marginTop: 16, flexWrap: "wrap" }}>
+        <svg width={136} height={136} viewBox="0 0 136 136" style={{ flexShrink: 0 }}>
+          <g transform="translate(68,68) rotate(-90)">
+            <circle r={R} fill="none" stroke={DT.border} strokeWidth={16} />
+            {segs.map((s, i) => {
+              const len = (s.value / total) * C;
+              const el = <circle key={i} r={R} fill="none" stroke={s.color} strokeWidth={16} strokeDasharray={`${len} ${C - len}`} strokeDashoffset={-offset} />;
+              offset += len;
+              return el;
+            })}
+          </g>
+          <text x="68" y="64" textAnchor="middle" fontSize="9.5" fill={DT.t3} fontFamily={FONT}>Total</text>
+          <text x="68" y="80" textAnchor="middle" fontSize="13" fontWeight="800" fill={DT.t1} fontFamily={FONT}>₹{Math.round(total).toLocaleString("en-IN")}</text>
+        </svg>
+        <div style={{ display: "flex", flexDirection: "column", gap: 9, flex: 1, minWidth: 140 }}>
+          {segs.map((s, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11.5, gap: 10 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 6, color: DT.t2, fontWeight: 600, whiteSpace: "nowrap" }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, display: "inline-block", flexShrink: 0 }} />{s.label}
+              </span>
+              <span style={{ color: DT.t1, fontWeight: 700, whiteSpace: "nowrap" }}>₹{Math.round(s.value).toLocaleString("en-IN")}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Today's Orders list (desktop) ─────────────────────────────────────────
+function TodaysOrdersDesktop({ orders, setActiveTab }) {
+  const today = todayISO();
+  const list = (orders || []).filter(o => o.date === today).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 6);
+
+  return (
+    <div style={{ flex: 1, minWidth: 380, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Today's Orders</div>
+          <div style={{ fontSize: 11, color: DT.t3, marginTop: 2 }}>All orders placed today</div>
+        </div>
+        <button onClick={() => setActiveTab("dailyorders")} style={{ background: "none", border: "none", color: DT.accent, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>View All</button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 14 }}>
+        {list.length === 0 && <div style={{ fontSize: 12, color: DT.t3, padding: "20px 0", textAlign: "center" }}>No orders logged today yet.</div>}
+        {list.map((o, i) => {
+          const cancelled = o.status === "Cancelled";
+          const items = orderLineItems(o);
+          const col = o.orderType === "New Order" ? DT.accent : DT.sky;
+          return (
+            <div key={o.id || i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: i < list.length - 1 ? `1px solid ${DT.border}` : "none", opacity: cancelled ? 0.55 : 1 }}>
+              <div style={{ width: 34, height: 34, borderRadius: "50%", background: col + "22", border: `1px solid ${col}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: col, flexShrink: 0 }}>
+                {(o.customer || "?").trim().charAt(0).toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: DT.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.customer}</div>
+                <div style={{ fontSize: 11, color: DT.t3, marginTop: 1 }}>{o.area || "—"}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end", maxWidth: 220 }}>
+                <span style={{ fontSize: 9.5, fontWeight: 800, color: col, background: col + "1c", border: `1px solid ${col}40`, borderRadius: 20, padding: "3px 8px", whiteSpace: "nowrap" }}>{o.orderType === "New Order" ? "NEW ORDER" : "REGULAR ORDER"}</span>
+                <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.sky, background: DT.sky + "1c", border: `1px solid ${DT.sky}40`, borderRadius: 20, padding: "3px 8px", whiteSpace: "nowrap" }}>{items.map(it => `${it.product} - ${it.kgs}KG`).join(", ")}</span>
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: DT.emerald, flexShrink: 0, width: 66, textAlign: "right" }}>₹{(o.amount || 0).toLocaleString("en-IN")}</div>
+              <div style={{ fontSize: 10.5, color: DT.t3, flexShrink: 0, width: 60, textAlign: "right" }}>{o.createdAt ? new Date(o.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"}</div>
+              <DIcon id="chevron" size={14} color={DT.t3} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Daily Summary list (desktop) ──────────────────────────────────────────
+function DailySummaryDesktop({ orders, setActiveTab }) {
+  const active = (orders || []).filter(o => o.status !== "Cancelled");
+  const byDate = {};
+  active.forEach(o => {
+    if (!byDate[o.date]) byDate[o.date] = { newCount: 0, regularCount: 0, kgs: 0, revenue: 0 };
+    const b = byDate[o.date];
+    if (o.orderType === "New Order") b.newCount += 1; else b.regularCount += 1;
+    b.kgs += parseFloat(o.kgs) || 0;
+    b.revenue += parseFloat(o.amount) || 0;
+  });
+  const rows = Object.entries(byDate).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 5);
+
+  return (
+    <div style={{ flex: 1, minWidth: 380, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Daily Summary</div>
+          <div style={{ fontSize: 11, color: DT.t3, marginTop: 2 }}>New vs regular, total KGs and revenue</div>
+        </div>
+        <button onClick={() => setActiveTab("dailyorders")} style={{ background: "none", border: "none", color: DT.accent, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>View Full History</button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 14 }}>
+        {rows.length === 0 && <div style={{ fontSize: 12, color: DT.t3, padding: "20px 0", textAlign: "center" }}>No orders logged yet.</div>}
+        {rows.map(([date, s], i) => (
+          <div key={date} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "11px 0", borderBottom: i < rows.length - 1 ? `1px solid ${DT.border}` : "none" }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: DT.t1, minWidth: 96 }}>{formatDateReadable(date)}</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.accent, background: DT.accent + "1c", border: `1px solid ${DT.accent}40`, borderRadius: 20, padding: "3px 8px" }}>{s.newCount} NEW</span>
+              <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.sky, background: DT.sky + "1c", border: `1px solid ${DT.sky}40`, borderRadius: 20, padding: "3px 8px" }}>{s.regularCount} REGULAR</span>
+              <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.orange, background: DT.orange + "1c", border: `1px solid ${DT.orange}40`, borderRadius: 20, padding: "3px 8px" }}>{Math.round(s.kgs)} KG</span>
+              <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.emerald, background: DT.emerald + "1c", border: `1px solid ${DT.emerald}40`, borderRadius: 20, padding: "3px 8px" }}>₹{Math.round(s.revenue).toLocaleString("en-IN")}</span>
+              <DIcon id="chevron" size={14} color={DT.t3} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Full desktop Daily Orders home (dashboard-style overview) ─────────────
+function DesktopDailyOrdersHome({ setActiveTab }) {
+  const [dailyOrders] = useSheetSynced("dailyOrders", "dailyOrders", []);
+  const [leads] = useSheetSynced("leads", "leads", []);
+
+  const today = todayISO();
+  const yesterday = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); })();
+  const active = (dailyOrders || []).filter(o => o.status !== "Cancelled");
+  const todaysOrders = active.filter(o => o.date === today);
+  const yestOrders = active.filter(o => o.date === yesterday);
+
+  const todaysNew = todaysOrders.filter(o => o.orderType === "New Order").length;
+  const todaysRegular = todaysOrders.filter(o => o.orderType === "Regular Order").length;
+  const todaysKg = todaysOrders.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
+  const todaysRevenue = todaysOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+
+  const yestNew = yestOrders.filter(o => o.orderType === "New Order").length;
+  const yestRegular = yestOrders.filter(o => o.orderType === "Regular Order").length;
+  const yestKg = yestOrders.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
+  const yestRevenue = yestOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+
+  const pctChange = (now, prev) => prev > 0 ? Math.round(((now - prev) / prev) * 100) : (now > 0 ? 100 : 0);
+
+  const activeCustomers = (leads || []).filter(l => l && l.stage === "Active Customer").length;
+
+  const startOfWeekISO = (() => { const d = new Date(); const day = d.getDay(); const diff = day === 0 ? 6 : day - 1; d.setDate(d.getDate() - diff); return d.toISOString().slice(0, 10); })();
+  const startOfMonthISO = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`;
+  const weekRevenue = active.filter(o => o.date >= startOfWeekISO && o.date <= today).reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const monthRevenue = active.filter(o => o.date >= startOfMonthISO && o.date <= today).reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const allTimeRevenue = active.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+        <StatCard icon="🆕" iconBg={DT.accent + "26"} label="Today's Orders" value={todaysNew} unit="New Orders" change={pctChange(todaysNew, yestNew)} color={DT.accent} />
+        <StatCard icon="🔁" iconBg={DT.sky + "26"} label="Regular Orders" value={todaysRegular} unit="Today" change={pctChange(todaysRegular, yestRegular)} color={DT.sky} />
+        <StatCard icon="⚖️" iconBg={DT.purple + "26"} label="Total KGs" value={Math.round(todaysKg)} unit="KG Today" change={pctChange(todaysKg, yestKg)} color={DT.purple} />
+        <StatCard icon="💰" iconBg={DT.orange + "26"} label="Today Revenue" value={"₹" + Math.round(todaysRevenue).toLocaleString("en-IN")} change={pctChange(todaysRevenue, yestRevenue)} color={DT.orange} />
+        <StatCard icon="🏪" iconBg={DT.emerald + "26"} label="Active Customers" value={activeCustomers} unit="Total" change={activeCustomers > 0 ? 5 : 0} color={DT.emerald} />
+      </div>
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "stretch" }}>
+        <ProductOverviewDesktop orders={dailyOrders || []} />
+        <RevenueSummaryDesktop todaysRevenue={todaysRevenue} weekRevenue={weekRevenue} monthRevenue={monthRevenue} allTimeRevenue={allTimeRevenue} />
+      </div>
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "stretch" }}>
+        <TodaysOrdersDesktop orders={dailyOrders || []} setActiveTab={setActiveTab} />
+        <DailySummaryDesktop orders={dailyOrders || []} setActiveTab={setActiveTab} />
+      </div>
+    </div>
+  );
+}
+
 function SettingsPlaceholder() {
   return (
     <div style={{ background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 40, textAlign: "center" }}>
@@ -5263,6 +5532,13 @@ function DesktopShell({ activeTab, setActiveTab, role, setRole, leadsCount, rend
             <DesktopDashboardHome setActiveTab={setActiveTab} />
           ) : activeTab === "settings" ? (
             <SettingsPlaceholder />
+          ) : activeTab === "dailyorders" ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <DesktopDailyOrdersHome setActiveTab={setActiveTab} />
+              <div style={{ background: T.bg, borderRadius: 16, overflow: "hidden" }}>
+                {renderModule()}
+              </div>
+            </div>
           ) : (
             <div style={{ background: T.bg, borderRadius: 16, overflow: "hidden" }}>
               {renderModule()}
