@@ -504,6 +504,7 @@ function ProspectFinder() {
       lastContact: "Not contacted",
       priority: "Medium",
       remarks: form.notes ? ["[Prospect Finder] " + form.notes] : [],
+      createdAt: Date.now(),
     };
     setLeads([newLead, ...leads]);
     setAdded({ ...added, [filling.name]: true });
@@ -1215,6 +1216,7 @@ function HRLeads() {
         lastContact: "Today",
         priority: "Medium",
         remarks: [],
+        createdAt: Date.now(),
       }, ...leads]);
     }
     saveImported({ ...imported, [editingLead]: true });
@@ -3414,9 +3416,17 @@ function DailyOrders({ embedded = false } = {}) {
     // Samples count as a positive outcome alongside actual orders/customers —
     // a delivered/well-received sample means the lead is engaged, not lost.
     const POSITIVE_STAGES = ["Sample Delivered", "Positive Feedback", "Negotiation", "Order Received", "Repeat Order Follow-up", "Active Customer"];
+    // Use the same local-timezone date conversion as todayISO() (not raw UTC)
+    // so a lead created "today" in local time isn't bucketed into yesterday/
+    // tomorrow and silently dropped from the range filter.
+    const localISO = (ts) => {
+      const d = new Date(ts);
+      const tz = d.getTimezoneOffset() * 60000;
+      return new Date(d - tz).toISOString().slice(0, 10);
+    };
     const periodLeads = (leads || []).filter(l => {
       if (!l || !l.stage) return false;
-      const d = l.createdAt ? new Date(l.createdAt).toISOString().slice(0, 10) : null;
+      const d = l.createdAt ? localISO(l.createdAt) : null;
       return d && d >= reportFrom && d <= reportTo;
     });
     const totalLeadsPeriod = periodLeads.length;
