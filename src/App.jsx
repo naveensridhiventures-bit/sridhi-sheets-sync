@@ -3,30 +3,30 @@ import { useSheets, SYNC_ENABLED } from "./useSheets.js";
 
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────
 const T = {
-  bg:       "#F4F7FB",
-  surface:  "#FFFFFF",
-  card:     "#FFFFFF",
-  cardHigh: "#F8FAFC",
-  glass:    "rgba(255,255,255,0.85)",
+  bg:       "#0A0E1A",
+  surface:  "#0F1524",
+  card:     "#131B2E",
+  cardHigh: "#1A2438",
+  glass:    "rgba(19,27,46,0.85)",
 
-  border:   "#E4E9F2",
-  borderHi: "#CBD5E1",
+  border:   "#212D47",
+  borderHi: "#2E3D5C",
 
-  accent:    "#00C9A7",
-  accentSub: "rgba(0,201,167,0.10)",
-  accentGlow:"rgba(0,201,167,0.28)",
+  accent:    "#1FE0B8",
+  accentSub: "rgba(31,224,184,0.12)",
+  accentGlow:"rgba(31,224,184,0.38)",
 
-  emerald:  "#10B981",
-  amber:    "#F59E0B",
-  rose:     "#F43F5E",
-  indigo:   "#6366F1",
-  sky:      "#0EA5E9",
+  emerald:  "#22D98A",
+  amber:    "#FBBF24",
+  rose:     "#FB7185",
+  indigo:   "#818CF8",
+  sky:      "#38BDF8",
   orange:   "#FB923C",
 
-  t1: "#0F172A",
-  t2: "#475569",
-  t3: "#7C8CA6",
-  t4: "#CBD5E1",
+  t1: "#F1F5F9",
+  t2: "#94A3B8",
+  t3: "#64748B",
+  t4: "#3B4A6B",
 };
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
@@ -98,6 +98,33 @@ function useAnimatedCounter(target, duration = 1200) {
 
 // useSheetSynced — thin alias over useSheets (from useSheets.js)
 // Keeps backward-compatible call signature: useSheetSynced(endpoint, _key, initialData)
+
+// ── Follow-up timing helpers ──────────────────────────────────────────────
+function daysSince(ts) {
+  if (!ts) return null;
+  return Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
+}
+function formatLastContact(ts, fallback) {
+  if (!ts) return fallback || "Not contacted";
+  const days = daysSince(ts);
+  if (days === 0) {
+    const mins = Math.floor((Date.now() - ts) / 60000);
+    if (mins < 1) return "Just now";
+    if (mins < 60) return mins + "m ago";
+    const hrs = Math.floor(mins / 60);
+    return hrs + "h ago";
+  }
+  if (days === 1) return "Yesterday";
+  return days + " days ago";
+}
+const FOLLOWUP_OVERDUE_DAYS = 3;
+const TERMINAL_STAGES = ["Lost Customer", "Invalid Number"];
+function isFollowUpOverdue(lead) {
+  if (!lead || TERMINAL_STAGES.includes(lead.stage)) return false;
+  const ts = lead.lastContactAt || lead.createdAt;
+  if (!ts) return true; // never logged a contact at all
+  return daysSince(ts) > FOLLOWUP_OVERDUE_DAYS;
+}
 function useSheetSynced(_endpoint, _key, initialData) {
   // The new useSheets hook uses the tab name (same as _endpoint) and batches all tabs.
   return useSheets(_endpoint, initialData);
@@ -109,7 +136,7 @@ function SyncBadge({ status }) {
     loading: { label: "Loading…",   color: T.t2     },
     syncing: { label: "Syncing…",   color: T.amber  },
     synced:  { label: "Synced",     color: T.emerald},
-    error:   { label: "Sync failed",color: T.rose   },
+    error:   { label: "Retrying save…", color: T.rose   },
     offline: { label: "Offline copy",color: T.t3    },
   };
   const s = map[status] || map.offline;
@@ -123,11 +150,18 @@ function getStageColor(stage) {
 function getPriorityColor(p) {
   return p === "High" ? T.rose : p === "Medium" ? T.amber : T.t2;
 }
+function leadTypeIcon(type) {
+  const map = {
+    Restaurant: "🍽️", Mess: "🍲", Hotel: "🏨", Bakery: "🥐",
+    "Cloud Kitchen": "👨‍🍳", Distributor: "📦", Retailer: "🏪",
+  };
+  return map[type] || "🏢";
+}
 
 // ─── DESIGN PRIMITIVES ────────────────────────────────────────────────────
-function Card({ children, style = {}, accent, noPad }) {
+function Card({ children, style = {}, accent, noPad, id }) {
   return (
-    <div style={{
+    <div id={id} style={{
       background: T.card,
       border: `1px solid ${accent ? accent + "30" : T.border}`,
       borderRadius: 20,
@@ -198,6 +232,28 @@ function KPI({ label, value, unit, change, color, icon }) {
           padding:"2px 6px", borderRadius:5,
         }}>{pos ? "↑" : "↓"} {Math.abs(change)}%</div>
       )}
+    </div>
+  );
+}
+
+// ─── STAT CARD (gradient tinted, icon circle + big number) ───────────────
+function MobileStatCard({ icon, title, value, sub, color }) {
+  return (
+    <div style={{
+      flex:"1 1 190px", minWidth:170, borderRadius:16, padding:16,
+      background:`radial-gradient(130% 130% at 12% 15%, ${color}3D 0%, ${color}14 32%, ${T.card} 62%)`,
+      border:`1px solid ${color}40`, position:"relative", overflow:"hidden",
+    }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+        <div style={{
+          width:36, height:36, borderRadius:11, flexShrink:0,
+          background:`linear-gradient(135deg, ${color}F2 0%, ${color}B8 100%)`, boxShadow:`0 4px 12px ${color}4D`,
+          display:"flex", alignItems:"center", justifyContent:"center", fontSize:16,
+        }}>{icon}</div>
+        <div style={{ fontSize:12, fontWeight:700, color:T.t1 }}>{title}</div>
+      </div>
+      <div style={{ fontSize:24, fontWeight:800, color:T.t1, letterSpacing:"-0.02em" }}>{value}</div>
+      {sub && <div style={{ fontSize:11, color:T.t3, marginTop:3, fontWeight:500 }}>{sub}</div>}
     </div>
   );
 }
@@ -863,6 +919,8 @@ function Dashboard() {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
 
+      <BatterGrinderHero theme={T} kgToday={totalKg} compact />
+
       {/* KPIs */}
       <div style={{ display:"flex", flexWrap:"wrap", gap:10 }}>
         <KPI label="Sales this month" value={totalKg}   unit="KG" change={0} color={T.accent}  icon="📦" />
@@ -1288,9 +1346,94 @@ function HRLeads() {
 }
 
 
+// ─── CALL LOG DIALOG ──────────────────────────────────────────────────────
+// Structured call-outcome capture: did they answer? If yes, confirm/update
+// their details + a note. If no, pick a reason. Both paths stamp a real
+// timestamp so "last followup" and overdue reminders are accurate.
+const CALL_NOT_ANSWERED_REASONS = ["No Answer", "Wrong Number", "Switched Off", "Number Busy", "Call Back Later"];
+
+function CallLogDialog({ lead, onClose, onSubmit }) {
+  const [step, setStep] = useState("ask"); // ask | answered | notAnswered
+  const [name, setName] = useState(lead.name || "");
+  const [business, setBusiness] = useState(lead.business || "");
+  const [note, setNote] = useState("");
+  const [reason, setReason] = useState(null);
+
+  const submitAnswered = () => onSubmit({ outcome: "Answered", name: name.trim() || lead.name, business: business.trim() || lead.business, note: note.trim() });
+  const submitNotAnswered = () => { if (reason) onSubmit({ outcome: reason, name: lead.name, business: lead.business, note: "" }); };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(6,11,22,0.92)", zIndex:210, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+      <div style={{ background:T.card, borderRadius:"20px 20px 0 0", padding:20, width:"100%", maxWidth:480, maxHeight:"85vh", overflowY:"auto", paddingBottom:36 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+          <div style={{ fontSize:15, fontWeight:800, color:T.t1 }}>📞 Log Call — {lead.name}</div>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:T.t3, fontSize:18, cursor:"pointer" }}>✕</button>
+        </div>
+
+        {step === "ask" && (
+          <>
+            <div style={{ fontSize:13, color:T.t2, marginBottom:16 }}>Did the customer answer the call?</div>
+            <div style={{ display:"flex", gap:10 }}>
+              <Btn label="✅ Answered" color={T.emerald} full onClick={() => setStep("answered")} />
+              <Btn label="❌ Not Answered" color={T.rose} full onClick={() => setStep("notAnswered")} />
+            </div>
+          </>
+        )}
+
+        {step === "answered" && (
+          <>
+            <div style={{ marginBottom:10 }}>
+              <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>CUSTOMER NAME</div>
+              <input value={name} onChange={e => setName(e.target.value)}
+                style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
+            </div>
+            <div style={{ marginBottom:10 }}>
+              <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>BUSINESS NAME</div>
+              <input value={business} onChange={e => setBusiness(e.target.value)}
+                style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }} />
+            </div>
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>CALL NOTES</div>
+              <textarea value={note} onChange={e => setNote(e.target.value)}
+                placeholder="What did they say?"
+                style={{ width:"100%", background:T.surface, border:`1px solid ${T.border}`, borderRadius:12, padding:12, color:T.t1, fontSize:13, resize:"none", outline:"none", boxSizing:"border-box", height:72, fontFamily:FONT }} />
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <Btn label="← Back" color={T.t2} ghost full onClick={() => setStep("ask")} />
+              <Btn label="✓ Save" full color={T.accent} onClick={submitAnswered} />
+            </div>
+          </>
+        )}
+
+        {step === "notAnswered" && (
+          <>
+            <div style={{ fontSize:11, color:T.t3, fontWeight:700, marginBottom:10 }}>WHY NOT ANSWERED?</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:14 }}>
+              {CALL_NOT_ANSWERED_REASONS.map(r => (
+                <button key={r} onClick={() => setReason(r)}
+                  style={{
+                    padding:"10px 12px", borderRadius:10, textAlign:"left", cursor:"pointer", fontSize:13, fontWeight:700, fontFamily:FONT,
+                    border:`1px solid ${reason===r ? T.accent : T.border}`,
+                    background: reason===r ? T.accentSub : T.surface,
+                    color: reason===r ? T.accent : T.t1,
+                  }}>{r}</button>
+              ))}
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <Btn label="← Back" color={T.t2} ghost full onClick={() => setStep("ask")} />
+              <Btn label="✓ Save" full color={T.accent} onClick={submitNotAnswered} />
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Leads() {
   const [leads, setLeads, leadsSyncStatus] = useSheetSynced("leads", "leads", INITIAL_LEADS);
   const [expenses, setExpenses] = useSheetSynced("expenses", "expenses", INITIAL_EXPENSES);
+  const [repeatCustomers, setRepeatCustomers] = useSheetSynced("repeatCustomers", "repeatCustomers", []);
   const [search, setSearch] = useState("");
   const [filterStage, setFilterStage] = useState("All");
   const [selected, setSelected] = useState(null);
@@ -1305,16 +1448,26 @@ function Leads() {
   const [groupMsg, setGroupMsg] = useState(null); // { lead, stage, method }
   const [newLead, setNewLead] = useState({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Thulasi" });
   const [newLeadToast, setNewLeadToast] = useState(null);
+  const [callLogFor, setCallLogFor] = useState(null);
   const seenLeadIds = useRef(null);
 
   // ── Pop in a small toast whenever a lead appears that we haven't seen before ──
   useEffect(() => {
     const ids = leads.map(l => l.contact || l.id).filter(Boolean);
+    let isFirstEver = false;
     if (seenLeadIds.current === null) {
-      // First load — remember what's already here, don't toast for it
+      // First mount — load baseline from localStorage (persists across tab switches/remounts).
+      // Only treat as "nothing to compare" if there's truly no stored baseline yet.
       let stored = null;
       try { stored = JSON.parse(localStorage.getItem("bos_seen_lead_ids") || "null"); } catch {}
-      seenLeadIds.current = new Set(stored && Array.isArray(stored) ? stored : ids);
+      if (stored && Array.isArray(stored)) {
+        seenLeadIds.current = new Set(stored);
+      } else {
+        seenLeadIds.current = new Set(ids);
+        isFirstEver = true;
+      }
+    }
+    if (isFirstEver) {
       try { localStorage.setItem("bos_seen_lead_ids", JSON.stringify(ids)); } catch {}
       return;
     }
@@ -1325,12 +1478,17 @@ function Leads() {
       ids.forEach(id => seenLeadIds.current.add(id));
       try { localStorage.setItem("bos_seen_lead_ids", JSON.stringify([...seenLeadIds.current])); } catch {}
       return () => clearTimeout(t);
+    } else {
+      ids.forEach(id => seenLeadIds.current.add(id));
+      try { localStorage.setItem("bos_seen_lead_ids", JSON.stringify([...seenLeadIds.current])); } catch {}
     }
   }, [leads]);
 
+  const overdueCount = leads.filter(isFollowUpOverdue).length;
+
   const filtered = leads.filter(l =>
     l && l.name && l.stage &&
-    (filterStage==="All" || l.stage===filterStage) &&
+    (filterStage==="All" ? true : filterStage==="Needs Follow-up" ? isFollowUpOverdue(l) : l.stage===filterStage) &&
     (l.name.toLowerCase().includes(search.toLowerCase()) ||
      (l.area||"").toLowerCase().includes(search.toLowerCase()) ||
      (l.contact||"").includes(search))
@@ -1341,9 +1499,29 @@ function Leads() {
     const now = new Date();
     const stamp = now.toLocaleDateString("en-IN",{day:"2-digit",month:"short"}) + " " + now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",hour12:true});
     const remarkWithStamp = "[" + stamp + " · " + (role||"Team") + "] " + remark.trim();
-    setLeads(leads.map(l => ((l.contact && l.contact===id) || l.id===id) ? { ...l, remarks:[...(l.remarks||[]),remarkWithStamp], lastContact:"Today" } : l));
+    setLeads(leads.map(l => ((l.contact && l.contact===id) || l.id===id) ? { ...l, remarks:[...(l.remarks||[]),remarkWithStamp], lastContact:"Today", lastContactAt:Date.now() } : l));
     setRemark("");
   };
+
+  // ── Structured call outcome logging ──
+  const logCall = (lead, result) => {
+    const now = new Date();
+    const stamp = now.toLocaleDateString("en-IN",{day:"2-digit",month:"short"}) + " " + now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",hour12:true});
+    const remarkText = "[" + result.outcome + "]" + (result.note ? " " + result.note : "");
+    const remarkWithStamp = "[" + stamp + " · " + (lead.telecaller||"Team") + "] " + remarkText;
+    setLeads(leads.map(l => l.id===lead.id ? {
+      ...l,
+      name: result.name || l.name,
+      business: result.business || l.business,
+      remarks: [...(l.remarks||[]), remarkWithStamp],
+      lastContact: "Today",
+      lastContactAt: Date.now(),
+      callOutcome: result.outcome,
+      stage: result.outcome === "Call Back Later" ? "Callback Requested" : l.stage,
+    } : l));
+    setCallLogFor(null);
+  };
+
   const updateStage = (key, stage) => {
     const lead = leads.find(l => (l.contact && l.contact===key) || l.id===key);
     if ((stage === "Sample Requested" || stage === "Order Received") && lead) {
@@ -1353,7 +1531,7 @@ function Leads() {
     } else {
       setLeads(leads.map(l => {
         const match = (l.contact && l.contact===key) || l.id===key;
-        return match ? { ...l, stage, lastContact:"Today" } : l;
+        return match ? { ...l, stage, lastContact:"Today", lastContactAt:Date.now() } : l;
       }));
     }
   };
@@ -1361,30 +1539,59 @@ function Leads() {
   const confirmDelivery = (method) => {
     if (!deliveryDialog) return;
     const { lead, targetStage } = deliveryDialog;
-    // Update lead stage
-    setLeads(leads.map(l => l.id===lead.id ? { ...l, stage:targetStage, lastContact:"Today" } : l));
+    const isOrder = targetStage === "Order Received";
+    const newOrderCount = (lead.orderCount || 0) + (isOrder ? 1 : 0);
+    // More than 3 orders → auto-promote to a repeat customer instead of staying in the one-off pipeline.
+    const promoteToRepeat = isOrder && newOrderCount > 3;
+    const finalStage = promoteToRepeat ? "Active Customer" : targetStage;
+    // Update lead stage — also actually save the KG entered here (previously only used in the WhatsApp message text)
+    setLeads(leads.map(l => l.id===lead.id ? {
+      ...l,
+      stage: finalStage,
+      lastContact: "Today",
+      lastContactAt: Date.now(),
+      orderCount: newOrderCount,
+      kgQty: kgQty ? Number(kgQty) : l.kgQty,
+    } : l));
     // Log expense if Porter
     if (method === "porter" && porterAmt) {
-      const today = new Date();
-      const dateStr = today.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
       const newExp = {
         id: expenses.length + Date.now(),
         category: "Porter Delivery — " + lead.name,
         amount: parseInt(porterAmt) || 0,
-        date: dateStr,
+        date: todayISO(),
         type: "Delivery",
         subtype: "Porter"
       };
       setExpenses([newExp, ...expenses]);
     }
-    setGroupMsg({ lead, targetStage, method, kgQty });
+    if (promoteToRepeat) {
+      const alreadyRepeat = (repeatCustomers||[]).some(c => c.contact === lead.contact);
+      if (!alreadyRepeat) {
+        const todayStr = new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
+        setRepeatCustomers([{
+          id: Date.now(),
+          name: lead.name,
+          area: lead.area || "",
+          contact: lead.contact,
+          product: "Dosa Batter",
+          qty: parseInt(kgQty) || 0,
+          frequency: "Weekly",
+          status: "Upcoming",
+          lastOrder: todayStr,
+          nextDue: todayStr,
+          revenue: 0,
+        }, ...(repeatCustomers||[])]);
+      }
+    }
+    setGroupMsg({ lead, targetStage: finalStage, method, kgQty });
     setDeliveryDialog(null);
     setPorterAmt("");
     setKgQty("");
   };
   const addLead = () => {
     if (!newLead.name || !newLead.contact) return;
-    setLeads([{ ...newLead, id:leads.length+1, stage:"New Lead", lastContact:"Today", priority:"Medium", remarks:[] }, ...leads]);
+    setLeads([{ ...newLead, id:leads.length+1, stage:"New Lead", lastContact:"Today", lastContactAt:Date.now(), createdAt:Date.now(), orderCount:0, priority:"Medium", remarks:[] }, ...leads]);
     setShowAdd(false);
     setNewLead({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Priya" });
   };
@@ -1571,10 +1778,10 @@ function Leads() {
           </div>
           <Chip label={lead.stage} color={getStageColor(lead.stage)} />
           <div style={{ marginTop:16 }}>
-            {[["Contact",lead.contact],["Address",lead.address||lead.area],["Source",lead.source],["Telecaller",lead.telecaller],["Last contact",lead.lastContact]].map(([k,v]) => (
+            {[["Contact",lead.contact],["Address",lead.address||lead.area],["Source",lead.source],["Telecaller",lead.telecaller],["Last contact",formatLastContact(lead.lastContactAt, lead.lastContact)]].map(([k,v]) => (
               <div key={k} style={{ display:"flex", padding:"9px 0", borderBottom:`1px solid ${T.border}` }}>
                 <span style={{ fontSize:11, color:T.t3, width:100, flexShrink:0, fontWeight:600 }}>{k}</span>
-                <span style={{ fontSize:12, fontWeight:600, color:T.t1 }}>{v}</span>
+                <span style={{ fontSize:12, fontWeight:600, color: k==="Last contact" && isFollowUpOverdue(lead) ? T.rose : T.t1 }}>{k==="Last contact" && isFollowUpOverdue(lead) ? "⏰ " : ""}{v}</span>
               </div>
             ))}
           </div>
@@ -1586,6 +1793,9 @@ function Leads() {
             <Btn label="💬 WhatsApp" color={T.accent} ghost full onClick={() => {
               setShowWAForLead(lead);
             }} />
+          </div>
+          <div style={{ marginTop:8 }}>
+            <Btn label="📝 Log Call Outcome" color={T.indigo} full onClick={() => setCallLogFor(lead)} />
           </div>
         </Card>
         )}
@@ -1642,6 +1852,7 @@ function Leads() {
             }} />
           <div style={{ marginTop:8 }}><Btn label="Save Remark" full onClick={() => addRemark(lead.id, lead.telecaller)} /></div>
         </Card>
+        {callLogFor && <CallLogDialog lead={callLogFor} onClose={() => setCallLogFor(null)} onSubmit={(result) => logCall(callLogFor, result)} />}
         {renderDeliveryOverlay()}
       </div>
     );
@@ -1667,6 +1878,18 @@ function Leads() {
             style={{ background:T.emerald, border:"none", borderRadius:10, color:"#060B16", width:34, height:34, fontSize:15, cursor:"pointer", flexShrink:0 }}>📞</button>
         </div>
       )}
+      {overdueCount > 0 && (
+        <div onClick={() => setFilterStage("Needs Follow-up")}
+          style={{
+            background:T.rose+"14", border:`1px solid ${T.rose}44`, borderRadius:14,
+            padding:"10px 14px", display:"flex", alignItems:"center", gap:10, cursor:"pointer",
+          }}>
+          <div style={{ fontSize:18 }}>⏰</div>
+          <div style={{ fontSize:12, fontWeight:700, color:T.rose }}>
+            {overdueCount} lead{overdueCount!==1?"s":""} need{overdueCount===1?"s":""} follow-up — no contact in over {FOLLOWUP_OVERDUE_DAYS} days
+          </div>
+        </div>
+      )}
       <div style={{ display:"flex", gap:8 }}>
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search by name, area, contact…"
@@ -1679,9 +1902,9 @@ function Leads() {
       </div>
 
       <div style={{ display:"flex", gap:7, overflowX:"auto", paddingBottom:4 }}>
-        {["All","New Lead","Interested","Sample Requested","Positive Feedback","Negotiation","Order Received","Active Customer","Lost Customer"].map(s => {
+        {["All","Needs Follow-up","New Lead","Interested","Sample Requested","Positive Feedback","Negotiation","Order Received","Active Customer","Lost Customer"].map(s => {
           const active = filterStage===s;
-          const col = s==="All" ? T.accent : getStageColor(s);
+          const col = s==="All" ? T.accent : s==="Needs Follow-up" ? T.rose : getStageColor(s);
           return (
             <button key={s} onClick={() => setFilterStage(s)}
               style={{
@@ -1690,7 +1913,7 @@ function Leads() {
                 background: active ? col+"1A" : "transparent",
                 color: active ? col : T.t2,
                 fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:FONT,
-              }}>{s==="All" ? `All (${leads.length})` : s}</button>
+              }}>{s==="All" ? `All (${leads.length})` : s==="Needs Follow-up" ? `⏰ Follow-up (${overdueCount})` : s}</button>
           );
         })}
       </div>
@@ -1700,51 +1923,66 @@ function Leads() {
         <SyncBadge status={leadsSyncStatus} />
       </div>
 
-      {filtered.map(lead => (
+      {filtered.map(lead => {
+        const overdue = isFollowUpOverdue(lead);
+        const stageColor = getStageColor(lead.stage);
+        return (
         <div key={lead.contact || lead.id} onClick={() => setSelected(lead.contact || lead.id)}
           style={{
-            background:T.card, border:`1px solid ${T.border}`,
-            borderRadius:16, padding:14, cursor:"pointer",
-            borderLeft:`3px solid ${getStageColor(lead.stage)}`,
+            background:T.card, border:`1px solid ${overdue ? T.rose+"55" : T.border}`,
+            borderRadius:16, padding:16, cursor:"pointer",
+            borderLeft:`4px solid ${stageColor}`,
             transition:"background 0.15s",
           }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:9 }}>
-            <div>
-              <div style={{ fontSize:14, fontWeight:700, color:T.t1 }}>{lead.name}</div>
-              <div style={{ fontSize:11, color:T.t3, marginTop:2, fontWeight:500 }}>{lead.type} · {lead.area}</div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:11, gap:10 }}>
+            <div style={{ display:"flex", gap:11, alignItems:"flex-start", minWidth:0 }}>
+              <div style={{
+                width:42, height:42, borderRadius:12, flexShrink:0,
+                background:stageColor+"1F", border:`1px solid ${stageColor}40`,
+                display:"flex", alignItems:"center", justifyContent:"center", fontSize:18,
+              }}>{leadTypeIcon(lead.type)}</div>
+              <div style={{ minWidth:0 }}>
+                <div style={{ fontSize:14.5, fontWeight:700, color:T.t1 }}>{lead.name}</div>
+                <div style={{ fontSize:11, color:T.t3, marginTop:2, fontWeight:500 }}>{lead.type} · {lead.area}</div>
+                <div style={{ marginTop:7 }}><Chip label={lead.stage} color={stageColor} /></div>
+              </div>
             </div>
-            <Chip label={lead.priority} color={getPriorityColor(lead.priority)} />
-          </div>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <Chip label={lead.stage} color={getStageColor(lead.stage)} />
-            <div style={{ display:"flex", gap:10 }}>
-              <span style={{ fontSize:10, color:T.t3 }}>{lead.contact}</span>
-              <span style={{ fontSize:10, color:T.t3 }}>{lead.lastContact}</span>
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6, flexShrink:0 }}>
+              <Chip label={lead.priority} color={getPriorityColor(lead.priority)} />
+              <span style={{ fontSize:10.5, color:T.t3, fontWeight:600, whiteSpace:"nowrap" }}>{lead.contact}</span>
+              <span style={{ fontSize:10.5, color: overdue ? T.rose : T.t3, fontWeight: overdue ? 700 : 500, whiteSpace:"nowrap" }}>{overdue ? "⏰ " : ""}{formatLastContact(lead.lastContactAt, lead.lastContact)}</span>
             </div>
           </div>
           {lead.remarks?.length>0 && (
-            <div style={{ marginTop:10, fontSize:11, color:T.t2, background:T.surface, borderRadius:8, padding:"7px 10px", lineHeight:1.5 }}>
+            <div style={{ marginBottom:11, fontSize:11, color:T.t2, background:T.surface, borderRadius:8, padding:"7px 10px", lineHeight:1.5 }}>
               {lead.remarks[lead.remarks.length-1]}
             </div>
           )}
-          <div style={{ display:"flex", gap:8, marginTop:11 }} onClick={e => e.stopPropagation()}>
+          <div style={{ display:"flex", gap:8 }} onClick={e => e.stopPropagation()}>
             <button onClick={() => { const p=(lead.contact||"").replace(/[^0-9]/g,""); if(p) window.location.href="tel:+91"+p; }}
               style={{
                 flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:6,
                 background:T.emerald+"14", border:`1px solid ${T.emerald}33`, borderRadius:10,
-                color:T.emerald, padding:"8px 0", fontSize:11.5, fontWeight:700, cursor:"pointer", fontFamily:FONT,
+                color:T.emerald, padding:"10px 0", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:FONT,
               }}>📞 Call</button>
+            <button onClick={() => setCallLogFor(lead)}
+              style={{
+                flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+                background:T.indigo+"14", border:`1px solid ${T.indigo}33`, borderRadius:10,
+                color:T.indigo, padding:"10px 0", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:FONT,
+              }}>📝 Log Call</button>
             <select value={lead.stage} onChange={e => updateStage(lead.contact || lead.id, e.target.value)}
               style={{
-                flex:1.4, background:T.accent+"14", border:`1px solid ${T.accent}33`, borderRadius:10,
-                color:T.accent, padding:"8px 6px", fontSize:11.5, fontWeight:700, cursor:"pointer",
+                flex:1.4, background:stageColor+"14", border:`1px solid ${stageColor}33`, borderRadius:10,
+                color:stageColor, padding:"10px 6px", fontSize:12, fontWeight:700, cursor:"pointer",
                 fontFamily:FONT, appearance:"none", textAlign:"center",
               }}>
               {PIPELINE_STAGES.map(s => <option key={s.id} value={s.id}>{s.id}</option>)}
             </select>
           </div>
         </div>
-      ))}
+        );
+      })}
 
       <Sheet open={showAdd} onClose={() => setShowAdd(false)} title="New Lead">
         <Field label="Customer Name *" value={newLead.name} onChange={e => setNewLead({...newLead,name:e.target.value})} />
@@ -1762,6 +2000,7 @@ function Leads() {
       </Sheet>
 
       {renderDeliveryOverlay()}
+      {callLogFor && <CallLogDialog lead={callLogFor} onClose={() => setCallLogFor(null)} onSubmit={(result) => logCall(callLogFor, result)} />}
     </div>
   );
 }
@@ -2505,12 +2744,932 @@ function RepeatOrders() {
   );
 }
 
+// ─── DAILY ORDERS (telecaller: new vs regular conversions, kg-wise) ───────
+const RATE_PER_KG = 35;
+const PRODUCTS = [
+  { name: "Idli Dosa Batter", rate: 35 },
+  { name: "Vada Batter", rate: 100 },
+];
+const rateForProduct = (name) => (PRODUCTS.find(p => p.name === name) || PRODUCTS[0]).rate;
+const ORDER_TYPES = ["New Order", "Regular Order", "Sample"];
+const SAMPLE_TYPES = ["Free", "Paid"];
+const AMOUNT_MODES = ["Auto", "Manual"];
+function orderTypeLabel(o) {
+  if (o.orderType !== "Sample") return o.orderType;
+  return `Sample (${o.sampleType || "Free"})`;
+}
+function orderTypeColor(o, theme) {
+  if (o.orderType === "New Order") return theme.accent;
+  if (o.orderType === "Sample") return theme.orange;
+  return theme.indigo;
+}
+const CANCEL_REASONS = ["Delivery Issue", "Quality Issue", "Other"];
+const NEW_CUSTOMER_OPTION = "+ Add New Customer";
+const INITIAL_DAILY_ORDERS = [];
+
+function todayISO() {
+  const d = new Date();
+  const tz = d.getTimezoneOffset() * 60000;
+  return new Date(d - tz).toISOString().slice(0, 10);
+}
+function formatDateReadable(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso + "T00:00:00");
+  if (isNaN(d)) return iso;
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+function emptyOrderForm(date) {
+  return {
+    date: date || todayISO(), customer: "", area: "", orderType: "New Order",
+    items: PRODUCTS.map(p => ({ product: p.name, kgs: "" })),
+    telecaller: "",
+    sampleType: "Free", amountMode: "Auto", manualAmount: "",
+  };
+}
+// For a Sample order, works out the final ₹ amount from the auto (kg×rate)
+// total plus the Free/Paid + Auto/Manual choices made in the form.
+function sampleAmount(form, autoAmount) {
+  if (form.sampleType === "Free") return 0;
+  if (form.amountMode === "Manual") return parseFloat(form.manualAmount) || 0;
+  return autoAmount;
+}
+// Returns the line items for an order, whether it's a new-style multi-product
+// order (o.items) or an old-style single-product order (o.product/o.kgs).
+function orderLineItems(o) {
+  if (Array.isArray(o.items) && o.items.length) return o.items;
+  return [{ product: o.product || PRODUCTS[0].name, kgs: parseFloat(o.kgs) || 0, rate: o.rate ?? rateForProduct(o.product), amount: o.amount || 0 }];
+}
+
+// ── CSV report export helpers ──────────────────────────────────────────────
+function csvEscape(v) {
+  const s = v === null || v === undefined ? "" : String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function csvRow(cells) { return cells.map(csvEscape).join(","); }
+function downloadCSV(filename, content) {
+  const blob = new Blob(["\uFEFF" + content], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function DailyOrders({ embedded = false } = {}) {
+  const [orders, setOrders, ordersSyncStatus] = useSheetSynced("dailyOrders", "dailyOrders", INITIAL_DAILY_ORDERS);
+  const [leads] = useSheetSynced("leads", "leads", []);
+  const [repeatCustomers] = useSheetSynced("repeatCustomers", "repeatCustomers", []);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState(emptyOrderForm());
+  const [customerPick, setCustomerPick] = useState(NEW_CUSTOMER_OPTION);
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelForm, setCancelForm] = useState({ reason: CANCEL_REASONS[0], remarks: "" });
+  const [filterDate, setFilterDate] = useState(todayISO());
+  const [reportFrom, setReportFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 29); return d.toISOString().slice(0, 10); });
+  const [reportTo, setReportTo] = useState(todayISO());
+  const [generatingPDF, setGeneratingPDF] = useState(false);
+  const [reportPreset, setReportPreset] = useState("last30");
+
+  const applyPreset = (preset) => {
+    setReportPreset(preset);
+    const t = todayISO();
+    if (preset === "today") { setReportFrom(t); setReportTo(t); return; }
+    if (preset === "week") {
+      const d = new Date(); const day = d.getDay(); const diff = day === 0 ? 6 : day - 1;
+      d.setDate(d.getDate() - diff);
+      setReportFrom(d.toISOString().slice(0, 10)); setReportTo(t); return;
+    }
+    if (preset === "month") {
+      const d = new Date();
+      setReportFrom(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`); setReportTo(t); return;
+    }
+    if (preset === "last30") {
+      const d = new Date(); d.setDate(d.getDate() - 29);
+      setReportFrom(d.toISOString().slice(0, 10)); setReportTo(t); return;
+    }
+  };
+
+  // Combined, deduped list of known customers pulled from Leads, RepeatCustomers
+  // and every customer name already logged in Daily Orders — so telecallers can
+  // pick an existing customer instead of retyping their name/area every time.
+  const knownCustomers = (() => {
+    const map = new Map();
+    (leads || []).forEach(l => { const n = (l.name || "").trim(); if (n) map.set(n.toLowerCase(), { name: n, area: l.area || "" }); });
+    (repeatCustomers || []).forEach(c => { const n = (c.name || "").trim(); if (n) map.set(n.toLowerCase(), { name: n, area: c.area || "" }); });
+    orders.forEach(o => { const n = (o.customer || "").trim(); if (n) { const existing = map.get(n.toLowerCase()); map.set(n.toLowerCase(), { name: n, area: o.area || existing?.area || "" }); } });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  })();
+  const customerOptions = [NEW_CUSTOMER_OPTION, ...knownCustomers.map(c => c.name)];
+  const pickCustomer = (value) => {
+    setCustomerPick(value);
+    if (value === NEW_CUSTOMER_OPTION) { setForm(f => ({ ...f, customer: "", area: "" })); return; }
+    const match = knownCustomers.find(c => c.name === value);
+    setForm(f => ({ ...f, customer: value, area: match ? match.area : f.area }));
+  };
+
+  const today = todayISO();
+  const active = orders.filter(o => o.status !== "Cancelled");
+  const todays = active.filter(o => o.date === today);
+  const todaysNew = todays.filter(o => o.orderType === "New Order");
+  const todaysRegular = todays.filter(o => o.orderType === "Regular Order");
+  const todaysKgs = todays.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
+  const todaysRevenue = todays.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+
+  // ── Income overview: today / this week / this month / all-time ─────────
+  const startOfWeekISO = (() => {
+    const d = new Date();
+    const day = d.getDay(); // 0=Sun..6=Sat
+    const diff = day === 0 ? 6 : day - 1; // days since Monday
+    d.setDate(d.getDate() - diff);
+    return d.toISOString().slice(0, 10);
+  })();
+  const startOfMonthISO = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  })();
+  const weekOrders = active.filter(o => o.date >= startOfWeekISO && o.date <= today);
+  const monthOrders = active.filter(o => o.date >= startOfMonthISO && o.date <= today);
+  const weekRevenue = weekOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const monthRevenue = monthOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const allTimeRevenue = active.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const allTimeKgs = active.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
+
+  const dateOrders = orders
+    .filter(o => o.date === filterDate)
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const dateActiveOrders = dateOrders.filter(o => o.status !== "Cancelled");
+  const dateTotals = {
+    newCount: dateActiveOrders.filter(o => o.orderType === "New Order").length,
+    regularCount: dateActiveOrders.filter(o => o.orderType === "Regular Order").length,
+    sampleCount: dateActiveOrders.filter(o => o.orderType === "Sample").length,
+    kgs: dateActiveOrders.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
+    revenue: dateActiveOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0),
+  };
+  const dateTotalsByProduct = PRODUCTS.map(p => {
+    let kgs = 0, revenue = 0;
+    dateActiveOrders.forEach(o => orderLineItems(o).forEach(i => { if (i.product === p.name) { kgs += i.kgs; revenue += i.amount; } }));
+    return { name: p.name, kgs, revenue };
+  }).filter(p => p.kgs > 0);
+
+  // Date-wise summary: new vs regular vs sample counts, kgs and revenue per day
+  const byDate = {};
+  active.forEach(o => {
+    if (!byDate[o.date]) byDate[o.date] = { newCount: 0, regularCount: 0, sampleCount: 0, kgs: 0, revenue: 0 };
+    const b = byDate[o.date];
+    if (o.orderType === "New Order") b.newCount += 1;
+    else if (o.orderType === "Regular Order") b.regularCount += 1;
+    else b.sampleCount += 1;
+    b.kgs += parseFloat(o.kgs) || 0;
+    b.revenue += parseFloat(o.amount) || 0;
+  });
+  const summaryRows = Object.entries(byDate).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 21);
+
+  const cancelledOrders = orders.filter(o => o.status === "Cancelled")
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const cancelReasonCounts = CANCEL_REASONS.map(r => ({
+    reason: r, count: cancelledOrders.filter(o => o.cancelReason === r).length,
+  }));
+
+  const openAdd = () => { setEditingId(null); setForm(emptyOrderForm(filterDate)); setCustomerPick(NEW_CUSTOMER_OPTION); setShowForm(true); };
+  const openEdit = (o) => {
+    setEditingId(o.id);
+    const existing = orderLineItems(o);
+    setForm({
+      date: o.date, customer: o.customer, area: o.area || "", orderType: o.orderType,
+      items: PRODUCTS.map(p => {
+        const match = existing.find(i => i.product === p.name);
+        return { product: p.name, kgs: match ? String(match.kgs) : "" };
+      }),
+      telecaller: o.telecaller || "",
+      sampleType: o.sampleType || "Free",
+      amountMode: o.amountMode || "Auto",
+      manualAmount: o.manualAmount != null && o.manualAmount !== "" ? String(o.manualAmount) : "",
+    });
+    setCustomerPick(knownCustomers.some(c => c.name === o.customer) ? o.customer : NEW_CUSTOMER_OPTION);
+    setShowForm(true);
+  };
+
+  const saveOrder = () => {
+    const items = form.items
+      .map(i => ({ product: i.product, kgs: parseFloat(i.kgs) || 0, rate: rateForProduct(i.product) }))
+      .filter(i => i.kgs > 0)
+      .map(i => ({ ...i, amount: Math.round(i.kgs * i.rate) }));
+    if (!form.customer.trim() || !items.length || !form.date) return;
+    const kgs = items.reduce((a, i) => a + i.kgs, 0);
+    const autoAmount = items.reduce((a, i) => a + i.amount, 0);
+    const isSample = form.orderType === "Sample";
+    const amount = isSample ? sampleAmount(form, autoAmount) : autoAmount;
+    const product = items.map(i => i.product).join(" + ");
+    const { items: _formItems, ...formRest } = form;
+    // Only persist sample fields on actual Sample orders, so New/Regular
+    // orders never carry stray sampleType/amountMode leftovers.
+    const sampleFields = isSample
+      ? { sampleType: form.sampleType, amountMode: form.amountMode, manualAmount: form.amountMode === "Manual" ? amount : "" }
+      : { sampleType: "", amountMode: "", manualAmount: "" };
+    if (editingId) {
+      setOrders(orders.map(o => o.id === editingId ? { ...o, ...formRest, ...sampleFields, items, kgs, amount, product } : o));
+    } else {
+      setOrders([{
+        id: Date.now(), ...formRest, ...sampleFields, items, kgs, amount, product,
+        status: "Active", cancelReason: "", cancelRemarks: "",
+        createdAt: Date.now(),
+      }, ...orders]);
+    }
+    setShowForm(false); setEditingId(null); setForm(emptyOrderForm(filterDate));
+  };
+
+  const openCancel = (o) => { setCancelTarget(o); setCancelForm({ reason: CANCEL_REASONS[0], remarks: "" }); };
+  const confirmCancel = () => {
+    if (!cancelTarget) return;
+    setOrders(orders.map(o => o.id === cancelTarget.id
+      ? { ...o, status: "Cancelled", cancelReason: cancelForm.reason, cancelRemarks: cancelForm.remarks }
+      : o));
+    setCancelTarget(null);
+  };
+  const reactivate = (o) => setOrders(orders.map(x => x.id === o.id ? { ...x, status: "Active", cancelReason: "", cancelRemarks: "" } : x));
+  const deleteOrder = (o) => {
+    if (!window.confirm(`Delete this order permanently?\n\n${o.customer} — ${o.kgs} KG — ₹${o.amount}\n\nThis can't be undone. Use this only if the entry was a mistake.`)) return;
+    setOrders(orders.filter(x => x.id !== o.id));
+  };
+
+  const presetLabel = () => ({
+    today: "Daily", week: "Weekly", month: "Monthly", last30: "Last-30-Days", custom: "Custom-Range",
+  }[reportPreset] || "Custom-Range");
+
+  const getReportData = () => {
+    const rangeOrders = orders
+      .filter(o => o.date >= reportFrom && o.date <= reportTo)
+      .sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt || 0) - (b.createdAt || 0));
+    const rangeActive = rangeOrders.filter(o => o.status !== "Cancelled");
+    const rangeCancelled = rangeOrders.filter(o => o.status === "Cancelled");
+
+    const rangeByDate = {};
+    rangeActive.forEach(o => {
+      if (!rangeByDate[o.date]) rangeByDate[o.date] = { newCount: 0, regularCount: 0, sampleCount: 0, kgs: 0, revenue: 0 };
+      const b = rangeByDate[o.date];
+      if (o.orderType === "New Order") b.newCount += 1;
+      else if (o.orderType === "Regular Order") b.regularCount += 1;
+      else b.sampleCount += 1;
+      b.kgs += parseFloat(o.kgs) || 0;
+      b.revenue += parseFloat(o.amount) || 0;
+    });
+
+    const rangeByProduct = PRODUCTS.map(p => {
+      let kgs = 0, revenue = 0, orderCount = 0;
+      rangeActive.forEach(o => orderLineItems(o).forEach(i => {
+        if (i.product === p.name && (parseFloat(i.kgs) || 0) > 0) { kgs += parseFloat(i.kgs) || 0; revenue += parseFloat(i.amount) || 0; orderCount += 1; }
+      }));
+      return { name: p.name, rate: p.rate, kgs, revenue, orderCount };
+    });
+
+    const rangeSamples = rangeActive.filter(o => o.orderType === "Sample");
+    const sampleSummary = {
+      count: rangeSamples.length,
+      freeCount: rangeSamples.filter(o => o.sampleType !== "Paid").length,
+      paidCount: rangeSamples.filter(o => o.sampleType === "Paid").length,
+      kgs: rangeSamples.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
+      revenue: rangeSamples.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0),
+    };
+
+    return {
+      rangeOrders, rangeActive, rangeCancelled, rangeByDate, rangeByProduct, sampleSummary,
+      totalNew: rangeActive.filter(o => o.orderType === "New Order").length,
+      totalRegular: rangeActive.filter(o => o.orderType === "Regular Order").length,
+      totalSample: rangeActive.filter(o => o.orderType === "Sample").length,
+      totalKg: rangeActive.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
+      totalRevenue: rangeActive.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0),
+    };
+  };
+
+  const downloadCSVReport = () => {
+    const { rangeOrders, rangeActive, rangeCancelled, rangeByDate, rangeByProduct, totalNew, totalRegular, totalSample, totalKg, totalRevenue } = getReportData();
+    const lines = [];
+    lines.push(csvRow(["Sridhi Ventures BOS — Daily Orders Report"]));
+    lines.push(csvRow([`Range: ${formatDateReadable(reportFrom)} to ${formatDateReadable(reportTo)}`]));
+    lines.push(csvRow([`Generated: ${new Date().toLocaleString("en-IN")}`]));
+    lines.push("");
+
+    lines.push(csvRow(["ORDER LOG"]));
+    lines.push(csvRow(["Date", "Customer", "Area", "Order Type", "Product Breakdown", "Total KG", "Amount (Rs)", "Telecaller", "Status", "Cancel Reason", "Cancel Remarks"]));
+    rangeOrders.forEach(o => {
+      const breakdown = orderLineItems(o).map(i => `${i.product}: ${i.kgs}KG @ Rs${i.rate}`).join(" | ");
+      lines.push(csvRow([formatDateReadable(o.date), o.customer, o.area || "", orderTypeLabel(o), breakdown, o.kgs, o.amount, o.telecaller || "", o.status, o.cancelReason || "", o.cancelRemarks || ""]));
+    });
+    lines.push("");
+
+    lines.push(csvRow(["PRODUCT SUMMARY (active orders only)"]));
+    lines.push(csvRow(["Product", "Rate (Rs/KG)", "Orders", "Total KG", "Revenue (Rs)"]));
+    rangeByProduct.forEach(p => {
+      lines.push(csvRow([p.name, p.rate, p.orderCount, Math.round(p.kgs), Math.round(p.revenue)]));
+    });
+    lines.push("");
+
+    lines.push(csvRow(["DAILY SUMMARY (active orders only)"]));
+    lines.push(csvRow(["Date", "New Orders", "Regular Orders", "Samples", "Total KG", "Revenue (Rs)"]));
+    Object.entries(rangeByDate).sort((a, b) => a[0].localeCompare(b[0])).forEach(([date, s]) => {
+      lines.push(csvRow([formatDateReadable(date), s.newCount, s.regularCount, s.sampleCount, Math.round(s.kgs), Math.round(s.revenue)]));
+    });
+    lines.push(csvRow(["TOTAL", totalNew, totalRegular, totalSample, Math.round(totalKg), Math.round(totalRevenue)]));
+    lines.push("");
+
+    lines.push(csvRow(["CANCELLED / STOPPED CUSTOMERS"]));
+    lines.push(csvRow(["Date", "Customer", "Area", "KG", "Cancel Reason", "Remarks"]));
+    rangeCancelled.forEach(o => {
+      lines.push(csvRow([formatDateReadable(o.date), o.customer, o.area || "", o.kgs, o.cancelReason || "", o.cancelRemarks || ""]));
+    });
+    lines.push("");
+    lines.push(csvRow(["Cancellation reason breakdown"]));
+    CANCEL_REASONS.forEach(r => {
+      lines.push(csvRow([r, rangeCancelled.filter(o => o.cancelReason === r).length]));
+    });
+
+    downloadCSV(`Sridhi-Daily-Orders-${presetLabel()}-Report_${reportFrom}_to_${reportTo}.csv`, lines.join("\n"));
+  };
+
+  const downloadPDFReport = async () => {
+    if (generatingPDF) return;
+    setGeneratingPDF(true);
+    try {
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+      import("jspdf"),
+      import("jspdf-autotable"),
+    ]);
+    const { rangeOrders, rangeCancelled, rangeByDate, rangeByProduct, sampleSummary, totalNew, totalRegular, totalSample, totalKg, totalRevenue } = getReportData();
+
+    const NAVY = [10, 14, 26];
+    const TEAL = [14, 168, 144];
+    const TEAL_TINT = [232, 250, 246];
+    const INDIGO = [79, 70, 229];
+    const AMBER = [180, 110, 5];
+    const ROSE = [190, 24, 72];
+    const ROSE_TINT = [253, 240, 244];
+    const ORANGE = [217, 119, 6];
+    const INK = [26, 32, 46];
+    const SUBTLE = [110, 118, 138];
+    const GRID = [228, 231, 238];
+
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+
+    const header = () => {
+      doc.setFillColor(...NAVY);
+      doc.rect(0, 0, pageW, 92, "F");
+      doc.setFillColor(...TEAL);
+      doc.rect(0, 90, pageW, 2, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(19);
+      doc.text("Sridhi Ventures", margin, 38);
+      doc.setFontSize(10.5);
+      doc.setTextColor(...TEAL.map(c => Math.min(255, c + 40)));
+      doc.text(`${presetLabel().toUpperCase().replace(/-/g, " ")} ORDERS REPORT — NEW & REGULAR CONVERSIONS`, margin, 56);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(190, 198, 216);
+      doc.text(`Period: ${formatDateReadable(reportFrom)}  –  ${formatDateReadable(reportTo)}`, margin, 74);
+      doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}`, pageW - margin, 74, { align: "right" });
+    };
+
+    const footer = () => {
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setDrawColor(...GRID);
+        doc.setLineWidth(0.6);
+        doc.line(margin, pageH - 34, pageW - margin, pageH - 34);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(...SUBTLE);
+        doc.text("Sridhi Ventures · Business Operating System", margin, pageH - 20);
+        doc.text(`Page ${i} of ${pageCount}`, pageW - margin, pageH - 20, { align: "right" });
+      }
+    };
+
+    header();
+    let y = 118;
+
+    // ── KPI summary cards ────────────────────────────────────────────────
+    const kpis = [
+      { label: "New Conversions", value: String(totalNew), color: TEAL },
+      { label: "Regular Conversions", value: String(totalRegular), color: INDIGO },
+      { label: "Total KG Sold", value: Math.round(totalKg).toLocaleString("en-IN"), color: AMBER },
+      { label: "Total Revenue", value: `Rs ${Math.round(totalRevenue).toLocaleString("en-IN")}`, color: [16, 150, 110] },
+    ];
+    const gap = 12;
+    const cardW = (pageW - margin * 2 - gap * 3) / 4;
+    const cardH = 62;
+    kpis.forEach((k, i) => {
+      const x = margin + i * (cardW + gap);
+      doc.setFillColor(248, 249, 251);
+      doc.setDrawColor(...GRID);
+      doc.setLineWidth(0.7);
+      doc.roundedRect(x, y, cardW, cardH, 7, 7, "FD");
+      doc.setFillColor(...k.color);
+      doc.roundedRect(x, y, 4, cardH, 2, 2, "F");
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...SUBTLE);
+      doc.text(k.label.toUpperCase(), x + 14, y + 22);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(...INK);
+      doc.text(k.value, x + 14, y + 45);
+    });
+    y += cardH + 30;
+
+    // ── Today's Snapshot banner — only shown on the Daily report ──────────
+    if (reportPreset === "today") {
+      const bannerH = 46;
+      doc.setFillColor(...TEAL_TINT);
+      doc.setDrawColor(...TEAL);
+      doc.setLineWidth(1);
+      doc.roundedRect(margin, y, pageW - margin * 2, bannerH, 8, 8, "FD");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9.5);
+      doc.setTextColor(...TEAL);
+      doc.text(`TODAY'S SNAPSHOT — ${formatDateReadable(today)}`, margin + 16, y + 18);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor(...SUBTLE);
+      doc.text("Total quantity moved and revenue booked today", margin + 16, y + 32);
+
+      const snapW = 150;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(15);
+      doc.setTextColor(...INK);
+      doc.text(`${Math.round(todaysKgs).toLocaleString("en-IN")} KG`, pageW - margin - snapW - 100, y + 28, { align: "right" });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...SUBTLE);
+      doc.text("TODAY'S KG", pageW - margin - snapW - 100, y + 39, { align: "right" });
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(15);
+      doc.setTextColor(16, 150, 110);
+      doc.text(`Rs ${Math.round(todaysRevenue).toLocaleString("en-IN")}`, pageW - margin - 16, y + 28, { align: "right" });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...SUBTLE);
+      doc.text("TODAY'S AMOUNT", pageW - margin - 16, y + 39, { align: "right" });
+
+      y += bannerH + 22;
+    }
+
+    const sectionTitle = (text, color = NAVY) => {
+      doc.setFillColor(...color);
+      doc.roundedRect(margin, y - 12, 4, 14, 2, 2, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11.5);
+      doc.setTextColor(...INK);
+      doc.text(text, margin + 12, y);
+      y += 12;
+    };
+
+    // ── Product summary — KG & revenue broken out per product, plus Samples ─
+    if (y > pageH - 160) { doc.addPage(); header(); y = 118; }
+    sectionTitle("Product Summary", TEAL);
+    const productColors = [AMBER, INDIGO, ROSE, [16, 150, 110], [56, 189, 248]];
+    const showSampleCard = sampleSummary.count > 0;
+    const cardCount = rangeByProduct.length + (showSampleCard ? 1 : 0);
+    const pGap = 12;
+    const pCardW = (pageW - margin * 2 - pGap * (cardCount - 1)) / Math.max(cardCount, 1);
+    const pCardH = 68;
+    rangeByProduct.forEach((p, i) => {
+      const x = margin + i * (pCardW + pGap);
+      const color = productColors[i % productColors.length];
+      doc.setFillColor(248, 249, 251);
+      doc.setDrawColor(...GRID);
+      doc.setLineWidth(0.7);
+      doc.roundedRect(x, y, pCardW, pCardH, 7, 7, "FD");
+      doc.setFillColor(...color);
+      doc.roundedRect(x, y, pCardW, 4, 2, 2, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9.5);
+      doc.setTextColor(...INK);
+      doc.text(p.name, x + 14, y + 22);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...SUBTLE);
+      doc.text(`Rs ${p.rate}/KG · ${p.orderCount} order${p.orderCount === 1 ? "" : "s"}`, x + 14, y + 33);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13.5);
+      doc.setTextColor(...color);
+      doc.text(`${Math.round(p.kgs).toLocaleString("en-IN")} KG`, x + 14, y + 51);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10.5);
+      doc.setTextColor(...INK);
+      doc.text(`Rs ${Math.round(p.revenue).toLocaleString("en-IN")}`, x + pCardW - 14, y + 51, { align: "right" });
+    });
+    if (showSampleCard) {
+      const x = margin + rangeByProduct.length * (pCardW + pGap);
+      // Tinted fill (not the plain grey used by the product cards) so the
+      // Samples card reads as its own category at a glance.
+      doc.setFillColor(254, 243, 226);
+      doc.setDrawColor(...ORANGE);
+      doc.setLineWidth(0.7);
+      doc.roundedRect(x, y, pCardW, pCardH, 7, 7, "FD");
+      doc.setFillColor(...ORANGE);
+      doc.roundedRect(x, y, pCardW, 4, 2, 2, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9.5);
+      doc.setTextColor(...INK);
+      doc.text("Samples", x + 14, y + 22);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...SUBTLE);
+      doc.text(`${sampleSummary.freeCount} free · ${sampleSummary.paidCount} paid`, x + 14, y + 33);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13.5);
+      doc.setTextColor(...ORANGE);
+      doc.text(`${Math.round(sampleSummary.kgs).toLocaleString("en-IN")} KG`, x + 14, y + 51);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10.5);
+      doc.setTextColor(...INK);
+      doc.text(`Rs ${Math.round(sampleSummary.revenue).toLocaleString("en-IN")}`, x + pCardW - 14, y + 51, { align: "right" });
+    }
+    y += pCardH + 30;
+
+    // ── Daily summary table ──────────────────────────────────────────────
+    sectionTitle("Daily Summary — New vs Regular vs Sample");
+    const summaryBody = Object.entries(rangeByDate).sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, s]) => [formatDateReadable(date), String(s.newCount), String(s.regularCount), String(s.sampleCount), Math.round(s.kgs).toLocaleString("en-IN"), `Rs ${Math.round(s.revenue).toLocaleString("en-IN")}`]);
+    autoTable(doc, {
+      startY: y,
+      margin: { left: margin, right: margin, bottom: 50 },
+      head: [["Date", "New", "Regular", "Sample", "Total KG", "Revenue"]],
+      body: summaryBody.length ? summaryBody : [["—", "—", "—", "—", "—", "—"]],
+      foot: [["TOTAL", String(totalNew), String(totalRegular), String(totalSample), Math.round(totalKg).toLocaleString("en-IN"), `Rs ${Math.round(totalRevenue).toLocaleString("en-IN")}`]],
+      theme: "grid",
+      styles: { font: "helvetica", fontSize: 9, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+      headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 },
+      footStyles: { fillColor: TEAL_TINT, textColor: INK, fontStyle: "bold", fontSize: 9 },
+      alternateRowStyles: { fillColor: [249, 250, 252] },
+      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } },
+    });
+    y = doc.lastAutoTable.finalY + 30;
+
+    // ── Order log table ──────────────────────────────────────────────────
+    if (y > pageH - 160) { doc.addPage(); header(); y = 118; }
+    sectionTitle("Order Log", TEAL);
+    const orderBody = rangeOrders.map(o => [
+      formatDateReadable(o.date), o.customer, o.area || "—", orderTypeLabel(o).replace(" Order", ""),
+      orderLineItems(o).map(i => `${i.product}: ${i.kgs}KG`).join(", "), String(o.kgs), `Rs ${(o.amount || 0).toLocaleString("en-IN")}`, o.telecaller || "—", o.status,
+    ]);
+    autoTable(doc, {
+      startY: y,
+      margin: { left: margin, right: margin, bottom: 50 },
+      head: [["Date", "Customer", "Area", "Type", "Product", "KG", "Amount", "Telecaller", "Status"]],
+      body: orderBody.length ? orderBody : [["—", "No orders in this range", "—", "—", "—", "—", "—", "—", "—"]],
+      theme: "grid",
+      styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5.5, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+      headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+      alternateRowStyles: { fillColor: [249, 250, 252] },
+      columnStyles: { 5: { halign: "right" }, 6: { halign: "right" } },
+      didParseCell: (data) => {
+        if (data.section === "body" && data.column.index === 3) {
+          data.cell.styles.textColor = data.cell.raw === "New" ? TEAL : (String(data.cell.raw).startsWith("Sample") ? [217, 119, 6] : INDIGO);
+          data.cell.styles.fontStyle = "bold";
+        }
+        if (data.section === "body" && data.column.index === 8) {
+          data.cell.styles.textColor = data.cell.raw === "Cancelled" ? ROSE : [16, 150, 110];
+          data.cell.styles.fontStyle = "bold";
+        }
+      },
+    });
+    y = doc.lastAutoTable.finalY + 30;
+
+    // ── Cancelled customers ──────────────────────────────────────────────
+    if (rangeCancelled.length) {
+      if (y > pageH - 160) { doc.addPage(); header(); y = 118; }
+      sectionTitle("Cancelled / Stopped Customers", ROSE);
+      const cancelBody = rangeCancelled.map(o => [formatDateReadable(o.date), o.customer, o.area || "—", String(o.kgs), o.cancelReason || "Other", o.cancelRemarks || "—"]);
+      autoTable(doc, {
+        startY: y,
+        margin: { left: margin, right: margin, bottom: 50 },
+        head: [["Date", "Customer", "Area", "KG", "Reason", "Remarks"]],
+        body: cancelBody,
+        theme: "grid",
+        styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5.5, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+        headStyles: { fillColor: ROSE, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+        alternateRowStyles: { fillColor: ROSE_TINT },
+      });
+      y = doc.lastAutoTable.finalY + 18;
+
+      if (y > pageH - 90) { doc.addPage(); header(); y = 118; }
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(...INK);
+      doc.text("Reason breakdown:", margin, y);
+      let bx = margin + 88;
+      CANCEL_REASONS.forEach(r => {
+        const count = rangeCancelled.filter(o => o.cancelReason === r).length;
+        const label = `${r}: ${count}`;
+        doc.setFillColor(...ROSE_TINT);
+        const w = doc.getTextWidth(label) + 16;
+        doc.roundedRect(bx, y - 11, w, 16, 8, 8, "F");
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(...ROSE);
+        doc.text(label, bx + 8, y);
+        bx += w + 8;
+      });
+    }
+
+    footer();
+    doc.save(`Sridhi-Daily-Orders-${presetLabel()}-Report_${reportFrom}_to_${reportTo}.pdf`);
+    } finally {
+      setGeneratingPDF(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {!embedded && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          <MobileStatCard icon="🆕" title="Today's Orders" value={todaysNew.length} sub="New Orders" color={T.accent} />
+          <MobileStatCard icon="🔁" title="Regular Orders" value={todaysRegular.length} sub="Today · Regular" color={T.sky} />
+          <MobileStatCard icon="⚖️" title="Total KGs" value={`${Math.round(todaysKgs).toLocaleString("en-IN")} KG`} sub="Today" color={T.indigo} />
+          <MobileStatCard icon="💰" title="Today Revenue" value={`₹${Math.round(todaysRevenue).toLocaleString("en-IN")}`} sub="Today" color={T.amber} />
+        </div>
+      )}
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <SyncBadge status={ordersSyncStatus} />
+      </div>
+
+      {!embedded && (
+        <Card accent={T.emerald}>
+          <Label sub="Auto-calculated from every active order — cancelled orders are excluded">Income Overview</Label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10 }}>
+            <MobileStatCard icon="📆" title="Today" value={`₹${Math.round(todaysRevenue).toLocaleString("en-IN")}`} color={T.emerald} />
+            <MobileStatCard icon="📈" title="This Week" value={`₹${Math.round(weekRevenue).toLocaleString("en-IN")}`} color={T.sky} />
+            <MobileStatCard icon="🗓️" title="This Month" value={`₹${Math.round(monthRevenue).toLocaleString("en-IN")}`} color={T.indigo} />
+            <MobileStatCard icon="🏆" title="All-Time" value={`₹${Math.round(allTimeRevenue).toLocaleString("en-IN")}`} color={T.accent} />
+          </div>
+          <div style={{ marginTop: 10, fontSize: 11.5, color: T.t3 }}>
+            {allTimeKgs.toLocaleString("en-IN", { maximumFractionDigits: 0 })} KG sold overall · avg ₹{allTimeKgs > 0 ? Math.round(allTimeRevenue / allTimeKgs) : RATE_PER_KG}/KG
+          </div>
+        </Card>
+      )}
+
+      <button onClick={openAdd} style={{
+        background: T.accentSub, border: `1px solid ${T.accentGlow}`,
+        borderRadius: 14, color: T.accent, padding: 13,
+        fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FONT,
+      }}>+ Log Order (₹{RATE_PER_KG}/KG)</button>
+
+      <Card>
+        <Label sub="A branded, print-ready report — KPI summary, daily breakdown, order log and cancellations">Download Report</Label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10, marginBottom: 14 }}>
+          {[
+            { id: "today", label: "📆 Daily" },
+            { id: "week",  label: "📈 Weekly" },
+            { id: "month", label: "🗓️ Monthly" },
+            { id: "last30", label: "Last 30 Days" },
+          ].map(p => (
+            <button key={p.id} onClick={() => applyPreset(p.id)} style={{
+              background: reportPreset === p.id ? T.accent : "transparent",
+              color: reportPreset === p.id ? "#060B16" : T.t2,
+              border: `1px solid ${reportPreset === p.id ? T.accent : T.border}`,
+              borderRadius: 20, padding: "7px 14px", fontSize: 12, fontWeight: 700,
+              cursor: "pointer", fontFamily: FONT, transition: "background 0.12s, color 0.12s",
+            }}>{p.label}</button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
+          <div style={{ flex: "1 1 130px" }}>
+            <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>From</div>
+            <input type="date" value={reportFrom} onChange={e => { setReportFrom(e.target.value); setReportPreset("custom"); }} style={inputStyle} />
+          </div>
+          <div style={{ flex: "1 1 130px" }}>
+            <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>To</div>
+            <input type="date" value={reportTo} onChange={e => { setReportTo(e.target.value); setReportPreset("custom"); }} style={inputStyle} />
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <Btn label={generatingPDF ? "Generating…" : "📄 Download PDF Report"} full onClick={downloadPDFReport} />
+          <Btn label="Raw CSV" color={T.t2} ghost onClick={downloadCSVReport} />
+        </div>
+      </Card>
+
+      <Card id="orders-by-date-section">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
+          <Label sub="Pick any date to view, edit or backfill that day's orders">Orders by Date</Label>
+          <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ ...inputStyle, width: "auto" }} />
+        </div>
+
+        {dateOrders.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "12px 14px", marginBottom: 14, borderRadius: 12, background: T.cardHigh, border: `1px solid ${T.border}` }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: T.t3, letterSpacing: 0.3 }}>
+              TOTAL FOR {formatDateReadable(filterDate).toUpperCase()}
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <Chip label={`${dateTotals.newCount} New`} color={T.accent} />
+              <Chip label={`${dateTotals.regularCount} Regular`} color={T.indigo} />
+              {dateTotals.sampleCount > 0 && <Chip label={`${dateTotals.sampleCount} Sample`} color={T.orange} />}
+              <Chip label={`${dateTotals.kgs.toLocaleString("en-IN", { maximumFractionDigits: 1 })} KG`} color={T.amber} />
+              <Chip label={`₹${Math.round(dateTotals.revenue).toLocaleString("en-IN")}`} color={T.emerald} />
+            </div>
+            {dateTotalsByProduct.length > 0 && (
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11, color: T.t3, marginTop: 2 }}>
+                {dateTotalsByProduct.map(p => (
+                  <span key={p.name}>{p.name}: {p.kgs.toLocaleString("en-IN", { maximumFractionDigits: 1 })} KG · ₹{Math.round(p.revenue).toLocaleString("en-IN")}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {dateOrders.length === 0 && (
+          <div style={{ textAlign: "center", padding: "24px 12px", color: T.t3, fontSize: 12 }}>
+            No orders logged for {formatDateReadable(filterDate)} yet.
+          </div>
+        )}
+
+        {dateOrders.map(o => {
+          const cancelled = o.status === "Cancelled";
+          return (
+            <div key={o.id} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "14px 0", borderBottom: `1px solid ${T.border}`, opacity: cancelled ? 0.6 : 1 }}>
+              <div style={{
+                width:38, height:38, borderRadius:11, flexShrink:0, marginTop:1,
+                background: orderTypeColor(o, T)+"22",
+                border:`1px solid ${orderTypeColor(o, T)}44`,
+                display:"flex", alignItems:"center", justifyContent:"center",
+                fontSize:14, fontWeight:800, color: orderTypeColor(o, T),
+              }}>{(o.customer || "?").trim().charAt(0).toUpperCase()}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{o.customer}</div>
+                    <div style={{ fontSize:11, color:T.t3, marginTop:2, fontWeight:500 }}>
+                      {[o.area, o.telecaller].filter(Boolean).join(" · ") || "—"}
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                    <span style={{ fontSize:11, color:T.t3, fontWeight:600, whiteSpace:"nowrap" }}>
+                      {o.createdAt ? new Date(o.createdAt).toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit" }) : ""}
+                    </span>
+                    <span style={{ color:T.t4, fontSize:14 }}>›</span>
+                  </div>
+                </div>
+                <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <Chip label={orderTypeLabel(o)} color={orderTypeColor(o, T)} />
+                  {orderLineItems(o).map((i, idx) => (
+                    <Chip key={idx} label={`${i.product}: ${i.kgs} KG`} color={T.sky} />
+                  ))}
+                  <Chip label={`₹${(o.amount || 0).toLocaleString("en-IN")}`} color={T.emerald} />
+                  {cancelled && <Chip label={`Cancelled · ${o.cancelReason || "—"}`} color={T.rose} />}
+                </div>
+                {cancelled && o.cancelRemarks && (
+                  <div style={{ fontSize: 11, color: T.t3, marginTop: 6 }}>Note: {o.cancelRemarks}</div>
+                )}
+                <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                  <Btn label="Edit" color={T.sky} ghost small onClick={() => openEdit(o)} />
+                  {!cancelled
+                    ? <Btn label="Customer Stopped / Cancel" color={T.rose} ghost small onClick={() => openCancel(o)} />
+                    : <Btn label="Reactivate" color={T.emerald} ghost small onClick={() => reactivate(o)} />}
+                  <Btn label="🗑️ Delete" color={T.rose} ghost small onClick={() => deleteOrder(o)} />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </Card>
+
+      {!embedded && (
+        <Card id="daily-summary-section">
+          <Label sub="New vs regular conversions, total KGs and revenue, day by day">Daily Summary</Label>
+          {summaryRows.length === 0 && (
+            <div style={{ textAlign: "center", padding: "16px", color: T.t3, fontSize: 12 }}>No orders logged yet.</div>
+          )}
+          {summaryRows.map(([date, s]) => (
+            <div key={date} style={{ padding: "12px 0", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: T.t1, minWidth: 100 }}>{formatDateReadable(date)}</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                <Chip label={`${s.newCount} NEW`} color={T.accent} small />
+                <Chip label={`${s.regularCount} REGULAR`} color={T.sky} small />
+                {s.sampleCount > 0 && <Chip label={`${s.sampleCount} SAMPLE`} color={T.orange} small />}
+                <Chip label={`${Math.round(s.kgs)} KG`} color={T.amber} small />
+                <Chip label={`₹${Math.round(s.revenue).toLocaleString("en-IN")}`} color={T.emerald} small />
+                <span style={{ color:T.t4, fontSize:14, marginLeft:4 }}>›</span>
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {cancelledOrders.length > 0 && (
+        <Card>
+          <Label sub="Customers who stopped buying — grouped by reason">Cancelled / Stopped Customers</Label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+            {cancelReasonCounts.map(c => (
+              <Chip key={c.reason} label={`${c.reason}: ${c.count}`} color={c.reason === "Delivery Issue" ? T.orange : c.reason === "Quality Issue" ? T.rose : T.t2} />
+            ))}
+          </div>
+          {cancelledOrders.slice(0, 20).map(o => (
+            <div key={o.id} style={{ padding: "10px 0", borderBottom: `1px solid ${T.border}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.t1 }}>{o.customer}</div>
+                  <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>{formatDateReadable(o.date)} · {o.area || "—"}</div>
+                </div>
+                <Chip label={o.cancelReason || "Other"} color={T.rose} small />
+              </div>
+              {o.cancelRemarks && <div style={{ fontSize: 11, color: T.t3, marginTop: 4 }}>{o.cancelRemarks}</div>}
+            </div>
+          ))}
+        </Card>
+      )}
+
+      <Sheet open={showForm} onClose={() => { setShowForm(false); setEditingId(null); }} title={editingId ? "Edit Order" : "Log Order"}>
+        <Field label="Order Date *" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+        <Dropdown label="Customer *" value={customerPick} onChange={e => pickCustomer(e.target.value)} options={customerOptions} />
+        {customerPick === NEW_CUSTOMER_OPTION ? (
+          <>
+            <Field label="New Customer Name *" value={form.customer} onChange={e => setForm({ ...form, customer: e.target.value })} placeholder="e.g. Ganesh Stores" />
+            <Field label="Area" value={form.area} onChange={e => setForm({ ...form, area: e.target.value })} placeholder="e.g. Ambattur" />
+          </>
+        ) : (
+          <div style={{ fontSize: 11, color: T.t3, marginTop: -8, marginBottom: 14 }}>Area: {form.area || "—"}</div>
+        )}
+        <Dropdown label="Order Type" value={form.orderType} onChange={e => setForm({ ...form, orderType: e.target.value, sampleType: "Free", amountMode: "Auto", manualAmount: "" })} options={ORDER_TYPES} />
+        {form.orderType === "Sample" && (
+          <>
+            <Dropdown label="Sample Type" value={form.sampleType} onChange={e => setForm({ ...form, sampleType: e.target.value, amountMode: "Auto", manualAmount: "" })} options={SAMPLE_TYPES} />
+            {form.sampleType === "Free" ? (
+              <div style={{ fontSize: 11, color: T.orange, marginTop: -8, marginBottom: 14 }}>Free sample — no charge to customer.</div>
+            ) : (
+              <>
+                <Dropdown label="Amount Mode" value={form.amountMode} onChange={e => setForm({ ...form, amountMode: e.target.value })} options={AMOUNT_MODES} />
+                <div style={{ fontSize: 11, color: T.t3, marginTop: -8, marginBottom: 14 }}>
+                  {form.amountMode === "Auto" ? "Auto: calculated at ₹/KG rate below." : "Manual: enter a custom amount — useful when there's an extra delivery cost."}
+                </div>
+                {form.amountMode === "Manual" && (
+                  <Field label="Manual Amount (₹)" type="number" value={form.manualAmount} onChange={e => setForm({ ...form, manualAmount: e.target.value })} placeholder="e.g. 50" />
+                )}
+              </>
+            )}
+          </>
+        )}
+        <div style={{ fontSize: 11, fontWeight: 700, color: T.t3, letterSpacing: 0.3, marginBottom: 8 }}>PRODUCTS · enter KG for each you're logging</div>
+        {form.items.map((item, idx) => (
+          <Field
+            key={item.product}
+            label={`${item.product} (₹${rateForProduct(item.product)}/KG)`}
+            type="number"
+            value={item.kgs}
+            onChange={e => {
+              const items = form.items.map((it, i) => i === idx ? { ...it, kgs: e.target.value } : it);
+              setForm({ ...form, items });
+            }}
+            placeholder="e.g. 10"
+          />
+        ))}
+        <Field label="Telecaller" value={form.telecaller} onChange={e => setForm({ ...form, telecaller: e.target.value })} placeholder="Your name" />
+        <div style={{ fontSize: 12, color: T.t2, marginBottom: 14 }}>
+          {form.items.filter(i => parseFloat(i.kgs) > 0).map(i => (
+            <div key={i.product} style={{ color: T.t3 }}>{i.product}: {i.kgs} KG × ₹{rateForProduct(i.product)} = ₹{Math.round((parseFloat(i.kgs) || 0) * rateForProduct(i.product)).toLocaleString("en-IN")}</div>
+          ))}
+          <div style={{ marginTop: 4 }}>
+            Total Amount: <span style={{ color: T.emerald, fontWeight: 700 }}>
+              ₹{(form.orderType === "Sample"
+                  ? sampleAmount(form, form.items.reduce((a, i) => a + Math.round((parseFloat(i.kgs) || 0) * rateForProduct(i.product)), 0))
+                  : form.items.reduce((a, i) => a + Math.round((parseFloat(i.kgs) || 0) * rateForProduct(i.product)), 0)
+                ).toLocaleString("en-IN")}
+            </span>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <Btn label="Cancel" color={T.t2} ghost full onClick={() => { setShowForm(false); setEditingId(null); }} />
+          <Btn label={editingId ? "Save Changes" : "Log Order"} full onClick={saveOrder} />
+        </div>
+      </Sheet>
+
+      <Sheet open={!!cancelTarget} onClose={() => setCancelTarget(null)} title="Customer Stopped Buying">
+        {cancelTarget && (
+          <div style={{ fontSize: 12, color: T.t2, marginBottom: 14 }}>
+            {cancelTarget.customer} · {formatDateReadable(cancelTarget.date)} · {cancelTarget.kgs} KG
+          </div>
+        )}
+        <Dropdown label="Reason for cancellation" value={cancelForm.reason} onChange={e => setCancelForm({ ...cancelForm, reason: e.target.value })} options={CANCEL_REASONS} />
+        <Field label="Remarks (optional)" value={cancelForm.remarks} onChange={e => setCancelForm({ ...cancelForm, remarks: e.target.value })} placeholder="Any extra detail" />
+        <div style={{ display: "flex", gap: 10 }}>
+          <Btn label="Back" color={T.t2} ghost full onClick={() => setCancelTarget(null)} />
+          <Btn label="Confirm Cancel" color={T.rose} full onClick={confirmCancel} />
+        </div>
+      </Sheet>
+    </div>
+  );
+}
+
 // ─── EXPENSES ─────────────────────────────────────────────────────────────
 function Expenses() {
   const [expenses, setExpenses, expensesSyncStatus] = useSheetSynced("expenses", "expenses", INITIAL_EXPENSES);
   const [showAdd, setShowAdd] = useState(false);
   const [filterType, setFilterType] = useState("All");
-  const [newExp, setNewExp] = useState({ category:"", amount:"", type:"Marketing", subtype:"Facebook" });
+  const [newExp, setNewExp] = useState({ category:"", amount:"", type:"Marketing", subtype:"Facebook", date: todayISO() });
 
   const typeColor = { Marketing:T.indigo, Delivery:T.amber, Sample:T.accent, Employee:T.sky };
   const filtered = expenses.filter(e => filterType==="All" || e.type===filterType);
@@ -2519,9 +3678,9 @@ function Expenses() {
 
   const addExpense = () => {
     if (!newExp.category || !newExp.amount) return;
-    setExpenses([{ ...newExp, id:expenses.length+1, amount:parseInt(newExp.amount), date:"Jun 25" }, ...expenses]);
+    setExpenses([{ ...newExp, id:expenses.length+1, amount:parseInt(newExp.amount), date: newExp.date || todayISO() }, ...expenses]);
     setShowAdd(false);
-    setNewExp({ category:"", amount:"", type:"Marketing", subtype:"Facebook" });
+    setNewExp({ category:"", amount:"", type:"Marketing", subtype:"Facebook", date: todayISO() });
   };
 
   return (
@@ -2583,7 +3742,7 @@ function Expenses() {
           <div key={e.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0", borderBottom:`1px solid ${T.border}` }}>
             <div style={{ flex:1 }}>
               <div style={{ fontSize:13, fontWeight:600, color:T.t1 }}>{e.category}</div>
-              <div style={{ fontSize:11, color:T.t3, marginTop:2, fontWeight:500 }}>{e.date}</div>
+              <div style={{ fontSize:11, color:T.t3, marginTop:2, fontWeight:500 }}>{/^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? formatDateReadable(e.date) : (e.date || "—")}</div>
             </div>
             <div style={{ display:"flex", alignItems:"center", gap:10 }}>
               <Chip label={e.type} color={typeColor[e.type]} />
@@ -2595,6 +3754,7 @@ function Expenses() {
 
       <Sheet open={showAdd} onClose={() => setShowAdd(false)} title="Add Expense">
         <Field label="Description" value={newExp.category} onChange={e => setNewExp({...newExp,category:e.target.value})} placeholder="e.g. Facebook Ads — June Week 3" />
+        <Field label="Date" type="date" value={newExp.date} onChange={e => setNewExp({...newExp,date:e.target.value})} />
         <Field label="Amount (₹)" value={newExp.amount} onChange={e => setNewExp({...newExp,amount:e.target.value})} type="number" placeholder="0" />
         <Dropdown label="Category" value={newExp.type} onChange={e => setNewExp({...newExp,type:e.target.value})} options={["Marketing","Delivery","Sample","Employee"]} />
         <div style={{ display:"flex", gap:10 }}>
@@ -2868,6 +4028,21 @@ function Reports() {
   const [samples] = useSheetSynced("samples","samples",[]);
   const [repeatCustomers] = useSheetSynced("repeatCustomers","repeatCustomers",[]);
   const [exporting, setExporting] = useState(false);
+  const [leadsPreset, setLeadsPreset] = useState("all");
+
+  // ── Leads date-range filter for export (Today / This Week / This Month / All Time) ──
+  const leadsRangeStart = (() => {
+    const now = new Date();
+    if (leadsPreset === "today") { const d = new Date(now); d.setHours(0,0,0,0); return d.getTime(); }
+    if (leadsPreset === "week") {
+      const d = new Date(now); const day = d.getDay(); const diff = day === 0 ? 6 : day - 1;
+      d.setDate(d.getDate() - diff); d.setHours(0,0,0,0); return d.getTime();
+    }
+    if (leadsPreset === "month") { return new Date(now.getFullYear(), now.getMonth(), 1).getTime(); }
+    return null; // "all"
+  })();
+  const filteredLeads = leadsRangeStart == null ? leads : leads.filter(l => (l.createdAt || 0) >= leadsRangeStart);
+  const leadsPresetLabel = { today: "Today's", week: "This Week's", month: "This Month's", all: "All-Time" }[leadsPreset];
 
   // ── Compute real metrics from data ──
   const totalLeads = leads.length;
@@ -2929,7 +4104,7 @@ function Reports() {
 <div class="header">
   <div>
     <div class="logo">⚡ Sridhi Ventures</div>
-    <div class="sub">Business Operating System — Monthly Report</div>
+    <div class="sub">Business Operating System — ${leadsPresetLabel} Leads Report</div>
   </div>
   <div class="date">
     <div style="font-size:20px;font-weight:900;color:#00C9A7">${today}</div>
@@ -2977,11 +4152,11 @@ function Reports() {
 </div>
 
 <div class="section">
-  <div class="section-title">👥 Recent Leads</div>
+  <div class="section-title">👥 ${leadsPresetLabel} Leads (${filteredLeads.length})</div>
   <table>
     <tr><th>Name</th><th>Area</th><th>Stage</th><th>Telecaller</th></tr>
-    ${leads.slice(0,10).map(l => `<tr><td><strong>${l.name||""}</strong></td><td>${l.area||""}</td><td>${l.stage||""}</td><td>${l.telecaller||""}</td></tr>`).join("")}
-    ${leads.length === 0 ? "<tr><td colspan='4' style='text-align:center;color:#999'>No leads recorded</td></tr>" : ""}
+    ${filteredLeads.slice(0,50).map(l => `<tr><td><strong>${l.name||""}</strong></td><td>${l.area||""}</td><td>${l.stage||""}</td><td>${l.telecaller||""}</td></tr>`).join("")}
+    ${filteredLeads.length === 0 ? `<tr><td colspan='4' style='text-align:center;color:#999'>No leads in this period</td></tr>` : ""}
   </table>
 </div>
 
@@ -3008,13 +4183,13 @@ function Reports() {
     setExporting(true);
     const rows = [
       ["Name","Contact","Business","Area","Stage","Source","Telecaller","Last Contact","Priority"],
-      ...leads.map(l => [l.name,l.contact,l.business,l.area,l.stage,l.source,l.telecaller,l.lastContact,l.priority])
+      ...filteredLeads.map(l => [l.name,l.contact,l.business,l.area,l.stage,l.source,l.telecaller,l.lastContact,l.priority])
     ];
     const csv = rows.map(r => r.map(c => `"${c||""}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type:"text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "sridhi-leads-" + new Date().toISOString().slice(0,10) + ".csv";
+    a.download = `sridhi-leads-${leadsPreset}-` + new Date().toISOString().slice(0,10) + ".csv";
     a.click();
     setTimeout(() => setExporting(false), 1000);
   };
@@ -3065,7 +4240,23 @@ function Reports() {
       </Card>
 
       <Card>
-        <Label sub="Downloads real data">Export Report</Label>
+        <Label sub={`${filteredLeads.length} lead${filteredLeads.length === 1 ? "" : "s"} in this period`}>Download Leads Report</Label>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:10, marginBottom:14 }}>
+          {[
+            { id: "today", label: "📆 Today" },
+            { id: "week",  label: "📈 This Week" },
+            { id: "month", label: "🗓️ This Month" },
+            { id: "all",   label: "🏆 All Time" },
+          ].map(p => (
+            <button key={p.id} onClick={() => setLeadsPreset(p.id)} style={{
+              background: leadsPreset === p.id ? T.accent : "transparent",
+              color: leadsPreset === p.id ? "#060B16" : T.t2,
+              border: `1px solid ${leadsPreset === p.id ? T.accent : T.border}`,
+              borderRadius: 20, padding: "7px 14px", fontSize: 12, fontWeight: 700,
+              cursor: "pointer", fontFamily: FONT, transition: "background 0.12s, color 0.12s",
+            }}>{p.label}</button>
+          ))}
+        </div>
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
           <button onClick={downloadPDF} disabled={exporting}
             style={{ background:"linear-gradient(135deg,#00C9A7,#10B981)", border:"none", borderRadius:14,
@@ -3479,6 +4670,7 @@ const NAV = [
   { id:"more",      label:"More",     icon:"more"      },
 ];
 const MORE_MENU = [
+  { id:"dailyorders", label:"Daily Orders", icon:"📦" },
   { id:"samples",   label:"Samples",       icon:"🧪" },
   { id:"repeat",    label:"Repeat Orders", icon:"🔁" },
   { id:"expenses",  label:"Expenses",      icon:"💸" },
@@ -3571,6 +4763,9 @@ function DIcon({ id, size = 18, color = "currentColor", strokeWidth = 1.8 }) {
     case "cart": return <svg {...p}><circle cx="9" cy="20" r="1.3"/><circle cx="18" cy="20" r="1.3"/><path d="M2 3h2l2.4 12.4a2 2 0 0 0 2 1.6h8.3a2 2 0 0 0 2-1.6L21 7H6"/></svg>;
     case "wallet2": return <svg {...p}><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M17 12h.01"/></svg>;
     case "calendar": return <svg {...p}><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M3 10h18"/></svg>;
+    case "marketing": return <svg {...p}><path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M16 8a5 5 0 0 1 0 8"/><path d="M19 5a9 9 0 0 1 0 14"/></svg>;
+    case "compass": return <svg {...p}><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>;
+    case "clipboard": return <svg {...p}><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3"/><path d="M9 12h6"/><path d="M9 16h6"/><path d="M9 8h1"/></svg>;
     default: return null;
   }
 }
@@ -3581,10 +4776,14 @@ const DESKTOP_NAV = [
   { id: "leads",     label: "CRM",          icon: "crm" },
   { id: "pipeline",  label: "Pipeline",     icon: "pipeline" },
   { id: "repeat",    label: "Orders",       icon: "orders" },
+  { id: "dailyorders", label: "Daily Orders", icon: "cart" },
   { id: "fieldsync", label: "Dispatch",     icon: "dispatch" },
   { id: "samples",   label: "Samples",      icon: "samples" },
   { id: "today",     label: "Telecalling",  icon: "phone" },
+  { id: "prospects", label: "Find Prospects", icon: "compass", tag: "New" },
+  { id: "hrleads",   label: "HR Leads",     icon: "clipboard" },
   { id: "whatsapp",  label: "Follow-ups",   icon: "followups" },
+  { id: "marketing", label: "Marketing",    icon: "marketing" },
   { id: "expenses",  label: "Expenses",     icon: "expenses" },
   { id: "reports",   label: "Reports",      icon: "reports" },
   { id: "ai",        label: "AI Assistant", icon: "ai", tag: "New" },
@@ -3630,20 +4829,38 @@ function DesktopSidebar({ activeTab, setActiveTab, collapsed, setCollapsed, lead
         })}
       </div>
 
-      {!collapsed && (
-        <div style={{ margin: 14, padding: 16, borderRadius: 16, background: `linear-gradient(160deg, ${DT.cardHi}, ${DT.surface})`, border: `1px solid ${DT.borderHi}` }}>
-          <div style={{ width: 30, height: 30, borderRadius: 9, background: DT.accentSoft, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, marginBottom: 10 }}>👑</div>
-          <div style={{ fontSize: 13, fontWeight: 800, color: DT.t1 }}>Upgrade to Pro</div>
-          <div style={{ fontSize: 11, color: DT.t3, marginTop: 4, lineHeight: 1.4 }}>Unlock advanced analytics and AI features.</div>
-          <button style={{ marginTop: 12, width: "100%", background: DT.accent, border: "none", borderRadius: 9, color: "#04140F", padding: "8px 0", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: FONT }}>Upgrade Now</button>
-        </div>
-      )}
     </div>
   );
 }
 
-function DesktopTopbar({ role, setRole, search, setSearch, collapsed, setCollapsed, notifCount }) {
+function DesktopTopbar({ role, setRole, search, setSearch, collapsed, setCollapsed, notifCount, setActiveTab }) {
   const todayStr = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const [leads] = useSheetSynced("leads", "leads", []);
+  const [repeatCustomers] = useSheetSynced("repeatCustomers", "repeatCustomers", []);
+  const [orders] = useSheetSynced("dailyOrders", "dailyOrders", []);
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef(null);
+
+  useEffect(() => {
+    function onClick(e) { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); }
+    function onKey(e) { if (e.key === "Escape") setOpen(false); }
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onClick); document.removeEventListener("keydown", onKey); };
+  }, []);
+
+  const q = search.trim().toLowerCase();
+  const matches = (val) => (val || "").toString().toLowerCase().includes(q);
+
+  const leadResults = q ? (leads || []).filter(l => matches(l.name) || matches(l.area) || matches(l.contact)).slice(0, 5) : [];
+  const repeatResults = q ? (repeatCustomers || []).filter(c => matches(c.name) || matches(c.area) || matches(c.contact)).slice(0, 5) : [];
+  const orderResults = q ? (orders || []).filter(o => matches(o.customer) || matches(o.area)).slice(0, 5) : [];
+  const totalResults = leadResults.length + repeatResults.length + orderResults.length;
+
+  function goTo(tab) {
+    setActiveTab(tab);
+    setOpen(false);
+  }
 
   return (
     <div style={{
@@ -3655,10 +4872,75 @@ function DesktopTopbar({ role, setRole, search, setSearch, collapsed, setCollaps
         <DIcon id="chevron" size={14} color={DT.t2} strokeWidth={2.4} style={{ transform: collapsed ? "rotate(180deg)" : "none" }} />
       </button>
 
-      <div style={{ position: "relative", width: 320 }}>
+      <div ref={boxRef} style={{ position: "relative", width: 320 }}>
         <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}><DIcon id="search" size={15} color={DT.t3} /></span>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search leads, customers, tasks..."
+        <input value={search}
+          onChange={e => { setSearch(e.target.value); setOpen(true); }}
+          onFocus={() => { if (search.trim()) setOpen(true); }}
+          placeholder="Search leads, customers, tasks..."
           style={{ width: "100%", background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 10, padding: "9px 12px 9px 34px", fontSize: 12.5, color: DT.t1, fontFamily: FONT, outline: "none" }} />
+
+        {open && q && (
+          <div style={{
+            position: "absolute", top: "calc(100% + 6px)", left: 0, width: 380, maxHeight: 420, overflowY: "auto",
+            background: DT.card, border: `1px solid ${DT.borderHi}`, borderRadius: 12, boxShadow: "0 16px 40px rgba(0,0,0,0.35)", zIndex: 60,
+          }}>
+            {totalResults === 0 ? (
+              <div style={{ padding: "18px 16px", fontSize: 12.5, color: DT.t3, textAlign: "center" }}>No matches for "{search}"</div>
+            ) : (
+              <>
+                {leadResults.length > 0 && (
+                  <div>
+                    <div style={{ padding: "10px 14px 4px", fontSize: 10, fontWeight: 800, color: DT.t3, letterSpacing: "0.05em", textTransform: "uppercase" }}>Leads</div>
+                    {leadResults.map((l, i) => (
+                      <div key={"l" + i} onClick={() => goTo("leads")}
+                        style={{ padding: "8px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}
+                        onMouseEnter={e => e.currentTarget.style.background = DT.cardHi} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: DT.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.name}</div>
+                          <div style={{ fontSize: 11, color: DT.t3 }}>{l.area || "—"}{l.stage ? " · " + l.stage : ""}</div>
+                        </div>
+                        <DIcon id="chevron" size={12} color={DT.t3} style={{ transform: "rotate(-90deg)", flexShrink: 0 }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {repeatResults.length > 0 && (
+                  <div>
+                    <div style={{ padding: "10px 14px 4px", fontSize: 10, fontWeight: 800, color: DT.t3, letterSpacing: "0.05em", textTransform: "uppercase" }}>Repeat Customers</div>
+                    {repeatResults.map((c, i) => (
+                      <div key={"c" + i} onClick={() => goTo("repeat")}
+                        style={{ padding: "8px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}
+                        onMouseEnter={e => e.currentTarget.style.background = DT.cardHi} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: DT.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
+                          <div style={{ fontSize: 11, color: DT.t3 }}>{c.area || "—"}</div>
+                        </div>
+                        <DIcon id="chevron" size={12} color={DT.t3} style={{ transform: "rotate(-90deg)", flexShrink: 0 }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {orderResults.length > 0 && (
+                  <div>
+                    <div style={{ padding: "10px 14px 4px", fontSize: 10, fontWeight: 800, color: DT.t3, letterSpacing: "0.05em", textTransform: "uppercase" }}>Daily Orders</div>
+                    {orderResults.map((o, i) => (
+                      <div key={"o" + i} onClick={() => goTo("dailyorders")}
+                        style={{ padding: "8px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}
+                        onMouseEnter={e => e.currentTarget.style.background = DT.cardHi} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: DT.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.customer}</div>
+                          <div style={{ fontSize: 11, color: DT.t3 }}>{o.area || "—"}{o.date ? " · " + o.date : ""}</div>
+                        </div>
+                        <DIcon id="chevron" size={12} color={DT.t3} style={{ transform: "rotate(-90deg)", flexShrink: 0 }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       <div style={{ flex: 1 }} />
@@ -3722,9 +5004,19 @@ function StatCard({ icon, iconBg, label, value, unit, change, color }) {
   const up = change >= 0;
   const spark = seededWave(label.length + value.toString().length, 8, 10, 8);
   return (
-    <div style={{ flex: 1, minWidth: 175, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
+    <div style={{
+      flex: 1,
+      minWidth: 175,
+      background: `radial-gradient(130% 130% at 12% 15%, ${color}3D 0%, ${color}14 32%, ${DT.card} 62%)`,
+      border: `1px solid ${color}40`,
+      borderRadius: 16,
+      padding: "16px 18px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 12,
+    }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 36, height: 36, borderRadius: 10, background: iconBg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{icon}</div>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: `linear-gradient(135deg, ${color}F2 0%, ${color}B8 100%)`, boxShadow: `0 4px 12px ${color}4D`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{icon}</div>
         <span style={{ fontSize: 12.5, color: DT.t3, fontWeight: 600 }}>{label}</span>
       </div>
       <div style={{ fontSize: 22, fontWeight: 800, color: DT.t1, letterSpacing: "-0.02em" }}>
@@ -3741,32 +5033,176 @@ function StatCard({ icon, iconBg, label, value, unit, change, color }) {
   );
 }
 
-// ── Sales trend area chart ───────────────────────────────────────────────
-function SalesTrendChart({ totalKg }) {
-  const days = ["1 Jun", "6 Jun", "11 Jun", "16 Jun", "21 Jun", "26 Jun", "30 Jun"];
-  const base = Math.max(180, Math.round(totalKg / 24) || 220);
-  const points = seededWave(totalKg || 42, 30, base, base * 0.55);
-  const maxV = Math.max(...points, 1);
-  const W = 640, H = 190, PAD = 8;
-  const step = (W - PAD * 2) / (points.length - 1);
-  const coords = points.map((v, i) => [PAD + i * step, H - PAD - (v / maxV) * (H - PAD * 2)]);
-  const linePath = coords.map((c, i) => (i === 0 ? "M" : "L") + c[0] + "," + c[1]).join(" ");
-  const areaPath = linePath + ` L${coords[coords.length - 1][0]},${H} L${coords[0][0]},${H} Z`;
-  const hi = coords[Math.round(coords.length * 0.53)];
-  const hiVal = points[Math.round(coords.length * 0.53)];
+// ── Batter Grinder Hero — animated illustration of the traditional wet ───
+// grinder churning out fresh idli/dosa/vada batter. Purely decorative +
+// a live "KG ground today" readout, used to open both the mobile and
+// desktop dashboards with something warmer than another stat card.
+function BatterGrinderHero({ theme = DT, kgToday = 0, compact = false }) {
+  const stone   = "#5B6B8C";
+  const stoneHi = "#7688AD";
+  const batter  = "#F7EFE0";
+  const wood    = "#8A5A3A";
+  const skin    = theme.accent || "#14C9A6";
 
-  const bestDay = Math.max(...points);
-  const avgDay = Math.round(points.reduce((a, b) => a + b, 0) / points.length);
+  return (
+    <div
+      style={{
+        position: "relative",
+        overflow: "hidden",
+        borderRadius: 18,
+        border: `1px solid ${theme.border}`,
+        background: `linear-gradient(120deg, ${theme.surface || theme.card} 0%, ${theme.card} 55%, ${theme.cardHi || theme.cardHigh || theme.card} 100%)`,
+        padding: compact ? "16px 18px" : "20px 26px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 18,
+        flexWrap: "wrap",
+      }}
+    >
+      <style>{`
+        @keyframes grinderSpin      { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes grinderCrank     { 0%,100% { transform: rotate(-10deg); } 50% { transform: rotate(14deg); } }
+        @keyframes grinderShoulder  { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1.5px); } }
+        @keyframes grinderDrip1     { 0% { opacity:0; transform: translateY(0) scale(0.5); } 25% { opacity:1; } 85% { opacity:1; } 100% { opacity:0; transform: translateY(20px) scale(1); } }
+        @keyframes grinderDrip2     { 0% { opacity:0; transform: translateY(0) scale(0.4); } 35% { opacity:1; } 90% { opacity:1; } 100% { opacity:0; transform: translateY(18px) scale(0.9); } }
+        @keyframes grinderRipple    { 0%,100% { transform: scaleX(1); opacity:0.9; } 50% { transform: scaleX(1.08); opacity:0.5; } }
+        @keyframes grinderSteam     { 0% { opacity:0; transform: translateY(0) scale(0.85); } 30% { opacity:0.8; } 100% { opacity:0; transform: translateY(-18px) scale(1.25); } }
+        @keyframes grinderDust      { 0%,100% { transform: translateY(0); opacity:0.35; } 50% { transform: translateY(-5px); opacity:0.9; } }
+        @keyframes grinderPulseDot  { 0%,100% { opacity:0.35; transform: scale(0.8); } 50% { opacity:1; transform: scale(1.15); } }
+      `}</style>
+
+      {/* Text side */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 180 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ position: "relative", width: 8, height: 8, borderRadius: "50%", background: theme.emerald, display: "inline-block" }}>
+            <span style={{ position: "absolute", inset: -4, borderRadius: "50%", background: theme.emerald, animation: "grinderPulseDot 1.6s ease-in-out infinite" }} />
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: theme.emerald, textTransform: "uppercase" }}>Live in the kitchen</span>
+        </div>
+        <div style={{ fontSize: compact ? 15 : 18, fontWeight: 800, color: theme.t1, letterSpacing: "-0.01em" }}>
+          Fresh batter, ground daily
+        </div>
+        <div style={{ fontSize: compact ? 20 : 26, fontWeight: 800, color: theme.t1 }}>
+          {Math.round(kgToday).toLocaleString("en-IN")}
+          <span style={{ fontSize: 13, color: theme.t3, fontWeight: 600 }}> KG ground today</span>
+        </div>
+        <div style={{ fontSize: 11.5, color: theme.t3, fontWeight: 500 }}>Idli · Dosa · Vada — straight off the stone</div>
+      </div>
+
+      {/* Animated illustration */}
+      <svg viewBox="0 0 300 150" width={compact ? 190 : 250} height={compact ? 95 : 125} style={{ flexShrink: 0 }}>
+        {/* dust / flour sparkles */}
+        <circle cx="30" cy="34" r="2" fill={batter} opacity="0.6" style={{ animation: "grinderDust 2.4s ease-in-out infinite" }} />
+        <circle cx="255" cy="26" r="1.6" fill={batter} opacity="0.5" style={{ animation: "grinderDust 2.8s ease-in-out infinite 0.5s" }} />
+        <circle cx="205" cy="18" r="1.8" fill={batter} opacity="0.5" style={{ animation: "grinderDust 2s ease-in-out infinite 0.9s" }} />
+
+        {/* steam curls above the drum */}
+        <g stroke={batter} strokeWidth="2.2" fill="none" strokeLinecap="round">
+          <path d="M120 44 Q126 34 120 26 Q114 18 120 10" style={{ animation: "grinderSteam 3s ease-out infinite" }} />
+          <path d="M138 44 Q144 35 138 27 Q132 19 138 11" style={{ animation: "grinderSteam 3s ease-out infinite 1s" }} />
+          <path d="M156 44 Q162 34 156 26 Q150 18 156 10" style={{ animation: "grinderSteam 3s ease-out infinite 2s" }} />
+        </g>
+
+        {/* stand legs */}
+        <path d="M108 128 L100 148 M180 128 L188 148 M120 128 L116 148 M168 128 L172 148" stroke={wood} strokeWidth="4" strokeLinecap="round" />
+
+        {/* drum body */}
+        <rect x="102" y="70" width="86" height="58" rx="14" fill={stone} />
+        <rect x="102" y="70" width="86" height="20" rx="10" fill={stoneHi} />
+        <ellipse cx="145" cy="70" rx="43" ry="10" fill={stoneHi} />
+
+        {/* rotating grinding window */}
+        <g transform="translate(145,70)">
+          <ellipse cx="0" cy="0" rx="30" ry="7" fill={batter} />
+          <g style={{ transformOrigin: "0px 0px", animation: "grinderSpin 2.2s linear infinite" }}>
+            <ellipse cx="0" cy="0" rx="30" ry="7" fill="none" stroke={stone} strokeWidth="2" strokeDasharray="10 10" />
+          </g>
+        </g>
+
+        {/* spout + pouring batter */}
+        <path d="M102 108 Q80 110 76 118" stroke={stone} strokeWidth="8" fill="none" strokeLinecap="round" />
+        <path d="M78 120 Q76 132 78 144" stroke={batter} strokeWidth="5" fill="none" strokeLinecap="round" opacity="0.95" />
+        <circle cx="78" cy="128" r="3" fill={batter} style={{ animation: "grinderDrip1 1.4s ease-in infinite" }} />
+        <circle cx="79" cy="118" r="2.4" fill={batter} style={{ animation: "grinderDrip2 1.4s ease-in infinite 0.6s" }} />
+
+        {/* bowl catching the batter */}
+        <ellipse cx="80" cy="146" rx="24" ry="7" fill={wood} opacity="0.9" />
+        <ellipse cx="80" cy="143" rx="19" ry="4.5" fill={batter} style={{ animation: "grinderRipple 2.4s ease-in-out infinite", transformOrigin: "80px 143px" }} />
+
+        {/* person cranking the grinder */}
+        <g style={{ animation: "grinderShoulder 1.6s ease-in-out infinite" }}>
+          {/* head */}
+          <circle cx="222" cy="66" r="11" fill={skin} />
+          {/* torso */}
+          <path d="M208 128 Q206 92 222 88 Q238 92 238 128 Z" fill={skin} opacity="0.92" />
+          {/* upper arm (fixed) */}
+          <path d="M212 98 Q198 100 192 104" stroke={skin} strokeWidth="8" strokeLinecap="round" fill="none" />
+          {/* forearm + hand cranking the wheel */}
+          <g transform="translate(192,104)" style={{ animation: "grinderCrank 1.1s ease-in-out infinite" }}>
+            <path d="M0 0 Q-8 10 -4 20" stroke={skin} strokeWidth="7" strokeLinecap="round" fill="none" />
+            <circle cx="-4" cy="21" r="4.5" fill={wood} />
+          </g>
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+// ── Sales trend area chart ───────────────────────────────────────────────
+// Built from real Daily Orders records (date + kgs + amount) for the last
+// 14 days. No fabricated data: if there isn't enough real history yet, an
+// empty state is shown instead of a randomly-generated wave.
+function SalesTrendChart({ orders = [] }) {
+  const active = (orders || []).filter(o => o.status !== "Cancelled" && o.date);
+
+  // Real rolling 14-day window ending today, so the axis always makes sense
+  // even before any orders exist.
+  const days = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (13 - i));
+    return d.toISOString().slice(0, 10);
+  });
+
+  const byDate = {};
+  active.forEach(o => {
+    if (!byDate[o.date]) byDate[o.date] = { kg: 0, revenue: 0, orders: 0 };
+    byDate[o.date].kg += parseFloat(o.kgs) || 0;
+    byDate[o.date].revenue += parseFloat(o.amount) || 0;
+    byDate[o.date].orders += 1;
+  });
+
+  const hasData = days.some(d => byDate[d]);
+  const points = days.map(d => byDate[d]?.kg || 0);
+  const revenuePoints = days.map(d => byDate[d]?.revenue || 0);
+  const labelDates = days.map(d => formatDateReadable(d).replace(/, \d{4}$/, ""));
+
   const totalSales = points.reduce((a, b) => a + b, 0);
+  const totalRevenue = revenuePoints.reduce((a, b) => a + b, 0);
+  const bestDay = Math.max(...points, 0);
+  const avgDay = days.length ? Math.round(totalSales / days.length) : 0;
+  const ordersCount = days.reduce((a, d) => a + (byDate[d]?.orders || 0), 0);
+
+  const W = 640, H = 190, PAD = 8;
+  const maxV = Math.max(...points, 1);
+  const step = points.length > 1 ? (W - PAD * 2) / (points.length - 1) : 0;
+  const coords = points.map((v, i) => [PAD + i * step, H - PAD - (v / maxV) * (H - PAD * 2)]);
+  const linePath = coords.length ? coords.map((c, i) => (i === 0 ? "M" : "L") + c[0] + "," + c[1]).join(" ") : "";
+  const areaPath = coords.length ? linePath + ` L${coords[coords.length - 1][0]},${H} L${coords[0][0]},${H} Z` : "";
+  const hiIdx = hasData ? points.indexOf(bestDay) : -1;
+  const hi = hiIdx >= 0 && bestDay > 0 ? coords[hiIdx] : null;
+
+  // Thin x-axis labels so 14 dates don't overlap — show every other one.
+  const shownLabels = labelDates.map((d, i) => (i % 2 === 0 || i === labelDates.length - 1) ? d : "");
 
   return (
     <div style={{ flex: 1.4, minWidth: 380, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Sales Trend</div>
-          <div style={{ fontSize: 11.5, color: DT.t3, marginTop: 2 }}>Sales performance overview</div>
+          <div style={{ fontSize: 11.5, color: DT.t3, marginTop: 2 }}>From Daily Orders — last 14 days</div>
         </div>
-        <div style={{ background: DT.cardHi, border: `1px solid ${DT.borderHi}`, borderRadius: 8, padding: "5px 10px", fontSize: 11.5, color: DT.t2, fontWeight: 600 }}>This Month ⌄</div>
+        <div style={{ background: DT.cardHi, border: `1px solid ${DT.borderHi}`, borderRadius: 8, padding: "5px 10px", fontSize: 11.5, color: DT.t2, fontWeight: 600 }}>Last 14 Days</div>
       </div>
 
       <div style={{ position: "relative", marginTop: 14 }}>
@@ -3778,27 +5214,37 @@ function SalesTrendChart({ totalKg }) {
             </linearGradient>
           </defs>
           {[0.25, 0.5, 0.75].map(f => <line key={f} x1={0} x2={W} y1={H * f} y2={H * f} stroke={DT.border} strokeDasharray="4 5" />)}
-          <path d={areaPath} fill="url(#salesArea)" />
-          <path d={linePath} fill="none" stroke={DT.accent} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
-          <circle cx={hi[0]} cy={hi[1]} r="4.5" fill={DT.bg} stroke={DT.accent} strokeWidth="2.5" />
-          <line x1={hi[0]} x2={hi[0]} y1={hi[1]} y2={H} stroke={DT.borderHi} strokeDasharray="3 4" />
+          {hasData && areaPath && <path d={areaPath} fill="url(#salesArea)" />}
+          {hasData && linePath && <path d={linePath} fill="none" stroke={DT.accent} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />}
+          {!hasData && <line x1={PAD} x2={W - PAD} y1={H - PAD} y2={H - PAD} stroke={DT.borderHi} strokeWidth="2" />}
+          {hi && <circle cx={hi[0]} cy={hi[1]} r="4.5" fill={DT.bg} stroke={DT.accent} strokeWidth="2.5" />}
+          {hi && <line x1={hi[0]} x2={hi[0]} y1={hi[1]} y2={H} stroke={DT.borderHi} strokeDasharray="3 4" />}
         </svg>
-        <div style={{ position: "absolute", left: `calc(${(hi[0] / W) * 100}% - 46px)`, top: hi[1] - 46, background: DT.cardHi, border: `1px solid ${DT.borderHi}`, borderRadius: 8, padding: "6px 10px", fontSize: 10.5, color: DT.t1, whiteSpace: "nowrap", boxShadow: "0 8px 20px rgba(0,0,0,0.35)" }}>
-          <div style={{ fontWeight: 700 }}>16 Jun 2026</div>
-          <div style={{ color: DT.accent, fontWeight: 700 }}>{hiVal} KG</div>
-        </div>
+        {hi && (
+          <div style={{ position: "absolute", left: `calc(${(hi[0] / W) * 100}% - 46px)`, top: Math.max(hi[1] - 46, 0), background: DT.cardHi, border: `1px solid ${DT.borderHi}`, borderRadius: 8, padding: "6px 10px", fontSize: 10.5, color: DT.t1, whiteSpace: "nowrap", boxShadow: "0 8px 20px rgba(0,0,0,0.35)" }}>
+            <div style={{ fontWeight: 700 }}>{labelDates[hiIdx]}</div>
+            <div style={{ color: DT.accent, fontWeight: 700 }}>{bestDay.toLocaleString("en-IN", { maximumFractionDigits: 1 })} KG</div>
+          </div>
+        )}
+        {!hasData && (
+          <div style={{ position: "absolute", left: "50%", top: "38%", transform: "translate(-50%, -50%)", color: DT.t3, fontSize: 12.5, textAlign: "center", width: "80%" }}>
+            <div style={{ fontSize: 22, marginBottom: 4 }}>📈</div>
+            <div>No orders in the last 14 days yet</div>
+            <div style={{ fontSize: 11, marginTop: 2 }}>The trend will appear once orders are logged in Daily Orders</div>
+          </div>
+        )}
         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
-          {days.map(d => <span key={d} style={{ fontSize: 10.5, color: DT.t3 }}>{d}</span>)}
+          {shownLabels.map((d, i) => <span key={i} style={{ fontSize: 10.5, color: DT.t3 }}>{d}</span>)}
         </div>
       </div>
 
       <div style={{ display: "flex", gap: 22, marginTop: 16, borderTop: `1px solid ${DT.border}`, paddingTop: 14, flexWrap: "wrap" }}>
         {[
-          ["Total Sales", totalSales.toLocaleString("en-IN") + " KG"],
-          ["Average / Day", avgDay + " KG"],
-          ["Best Day", bestDay + " KG"],
-          ["Orders", Math.max(4, Math.round(totalSales / 260))],
-          ["Revenue", "₹" + (totalSales * 40).toLocaleString("en-IN")],
+          ["Total Sales", totalSales.toLocaleString("en-IN", { maximumFractionDigits: 1 }) + " KG"],
+          ["Average / Day", avgDay.toLocaleString("en-IN") + " KG"],
+          ["Best Day", bestDay.toLocaleString("en-IN", { maximumFractionDigits: 1 }) + " KG"],
+          ["Orders", ordersCount],
+          ["Revenue", "₹" + Math.round(totalRevenue).toLocaleString("en-IN")],
         ].map(([l, v]) => (
           <div key={l}>
             <div style={{ fontSize: 14, fontWeight: 800, color: DT.t1 }}>{v}</div>
@@ -4001,25 +5447,34 @@ function DesktopDashboardHome({ setActiveTab }) {
   const [leads] = useSheetSynced("leads", "leads", []);
   const [samples] = useSheetSynced("samples", "samples", []);
   const [repeatCustomers] = useSheetSynced("repeatCustomers", "repeatCustomers", []);
+  const [dailyOrders] = useSheetSynced("dailyOrders", "dailyOrders", []);
+  const [expenses] = useSheetSynced("expenses", "expenses", []);
 
   const activeLeads = (leads || []).filter(l => l && l.name && l.stage);
   const activeCustomers = activeLeads.filter(l => l.stage === "Active Customer").length;
   const ordersReceived = activeLeads.filter(l => ["Order Received", "Active Customer", "Repeat Order Follow-up"].includes(l.stage));
   const convRate = activeLeads.length > 0 ? Math.round((ordersReceived.length / activeLeads.length) * 100) : 0;
 
-  const orderKg = activeLeads
-    .filter(l => ["Order Received", "Active Customer", "Repeat Order Follow-up"].includes(l.stage))
-    .reduce((a, l) => {
-      const fromField = Number(l.kgQty) || 0;
-      if (fromField > 0) return a + fromField;
-      const lastRemark = (l.remarks || []).slice(-1)[0] || "";
-      const match = lastRemark.match(/(\d+)\s*(?:kg|KG|Kg)/);
-      return a + (match ? Number(match[1]) : 0);
-    }, 0);
-  const samplesDeliveredKg = (samples || []).filter(s => s.status === "Delivered").reduce((a, b) => a + (Number(b.qty) || 0), 0);
-  const totalKg = samplesDeliveredKg + orderKg;
-  const totalRevenue = totalKg * 120;
   const samplesSentKg = (samples || []).reduce((a, b) => a + (Number(b.qty) || 0), 0);
+
+  // ── Revenue & Sales — sourced directly from Daily Orders (matches the Daily Orders page exactly) ──
+  const today = todayISO();
+  const yesterday = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); })();
+  const activeOrders = (dailyOrders || []).filter(o => o.status !== "Cancelled");
+  const todaysOrders = activeOrders.filter(o => o.date === today);
+  const yesterdaysOrders = activeOrders.filter(o => o.date === yesterday);
+  const totalRevenue = todaysOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const totalKg = todaysOrders.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
+  const yestRevenue = yesterdaysOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const yestKg = yesterdaysOrders.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
+  const revenueChange = yestRevenue > 0 ? Math.round(((totalRevenue - yestRevenue) / yestRevenue) * 100) : (totalRevenue > 0 ? 100 : 0);
+  const kgChange = yestKg > 0 ? Math.round(((totalKg - yestKg) / yestKg) * 100) : (totalKg > 0 ? 100 : 0);
+
+  // ── Expenses — pulled from the Expenses log for today ──────────────────
+  const todaysExpenses = (expenses || []).filter(e => e.date === today).reduce((a, e) => a + (Number(e.amount) || 0), 0);
+  const yesterdaysExpenses = (expenses || []).filter(e => e.date === yesterday).reduce((a, e) => a + (Number(e.amount) || 0), 0);
+  const netToday = totalRevenue - todaysExpenses;
+  const expenseChange = yesterdaysExpenses > 0 ? Math.round(((todaysExpenses - yesterdaysExpenses) / yesterdaysExpenses) * 100) : (todaysExpenses > 0 ? 100 : 0);
 
   const stageCounts = {};
   activeLeads.forEach(l => { stageCounts[l.stage] = (stageCounts[l.stage] || 0) + 1; });
@@ -4027,16 +5482,20 @@ function DesktopDashboardHome({ setActiveTab }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <BatterGrinderHero theme={DT} kgToday={totalKg} />
+
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
-        <StatCard icon="💰" iconBg={DT.purple + "26"} label="Today's Revenue" value={"₹" + totalRevenue.toLocaleString("en-IN")} change={totalRevenue > 0 ? 18 : 0} color={DT.purple} />
-        <StatCard icon="🛍️" iconBg={DT.emerald + "26"} label="Today's Sales" value={totalKg} unit="KG" change={totalKg > 0 ? 12 : 0} color={DT.emerald} />
+        <StatCard icon="💰" iconBg={DT.purple + "26"} label="Today's Revenue" value={"₹" + totalRevenue.toLocaleString("en-IN")} change={revenueChange} color={DT.purple} />
+        <StatCard icon="🛍️" iconBg={DT.emerald + "26"} label="Today's Sales" value={totalKg} unit="KG" change={kgChange} color={DT.emerald} />
+        <StatCard icon="💸" iconBg={DT.rose + "26"} label="Today's Expenses" value={"₹" + todaysExpenses.toLocaleString("en-IN")} change={expenseChange} color={DT.rose} />
+        <StatCard icon="📈" iconBg={(netToday >= 0 ? DT.emerald : DT.rose) + "26"} label="Net Profit (Today)" value={"₹" + netToday.toLocaleString("en-IN")} change={netToday >= 0 ? 1 : -1} color={netToday >= 0 ? DT.emerald : DT.rose} />
         <StatCard icon="🎯" iconBg={DT.sky + "26"} label="Conversion Rate" value={convRate + "%"} change={convRate > 0 ? 8 : 0} color={DT.sky} />
         <StatCard icon="🏪" iconBg={DT.orange + "26"} label="Active Customers" value={activeCustomers} change={activeCustomers > 0 ? 5 : 0} color={DT.orange} />
         <StatCard icon="🧪" iconBg={DT.purple + "26"} label="Samples Sent" value={samplesSentKg} unit="KG" change={samplesSentKg > 0 ? -4 : 0} color={DT.purple} />
       </div>
 
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "stretch" }}>
-        <SalesTrendChart totalKg={totalKg} />
+        <SalesTrendChart orders={dailyOrders || []} />
         <PipelineFunnelDesktop liveStages={liveStages} totalLeads={activeLeads.length} />
         <TodayTasksDesktop leads={activeLeads} samples={samples || []} repeatCustomers={repeatCustomers || []} setActiveTab={setActiveTab} />
       </div>
@@ -4044,6 +5503,237 @@ function DesktopDashboardHome({ setActiveTab }) {
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "stretch" }}>
         <RecentLeadsDesktop leads={activeLeads} setActiveTab={setActiveTab} />
         <RecentActivitiesDesktop leads={activeLeads} samples={samples || []} repeatCustomers={repeatCustomers || []} setActiveTab={setActiveTab} />
+      </div>
+    </div>
+  );
+}
+
+// ── Product Overview (desktop) — proportional bar per product, KG-wise ───
+function ProductOverviewDesktop({ orders }) {
+  const today = todayISO();
+  const monthStart = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`;
+  const monthOrders = (orders || []).filter(o => o.status !== "Cancelled" && o.date >= monthStart && o.date <= today);
+  const totals = PRODUCTS.map(p => {
+    let kgs = 0;
+    monthOrders.forEach(o => orderLineItems(o).forEach(i => { if (i.product === p.name) kgs += parseFloat(i.kgs) || 0; }));
+    return { name: p.name, kgs };
+  });
+  const totalKg = totals.reduce((a, t) => a + t.kgs, 0);
+  const denom = totalKg || 1;
+  const colors = [DT.accent, DT.indigo, DT.orange, DT.rose];
+
+  return (
+    <div style={{ flex: 1, minWidth: 280, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Product Overview</div>
+        <div style={{ background: DT.cardHi, border: `1px solid ${DT.borderHi}`, borderRadius: 8, padding: "5px 10px", fontSize: 11.5, color: DT.t2, fontWeight: 600 }}>This Month ⌄</div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
+        {totals.map((t, i) => {
+          const pct = (t.kgs / denom) * 100;
+          const widthPct = Math.max(pct, 8);
+          return (
+            <div key={t.name} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: `${widthPct}%`, maxWidth: "70%", background: colors[i % colors.length], borderRadius: 8, padding: "10px 0", textAlign: "center", color: "#fff", fontSize: 13, fontWeight: 800, whiteSpace: "nowrap" }}>
+                {Math.round(t.kgs).toLocaleString("en-IN")} KG
+              </div>
+              <div style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: 11.5 }}>
+                <span style={{ color: DT.t2, fontWeight: 600 }}>{t.name}</span>
+                <span style={{ color: DT.t3, fontWeight: 700 }}>{totalKg > 0 ? pct.toFixed(1) : "0.0"}%</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16, paddingTop: 14, borderTop: `1px solid ${DT.border}` }}>
+        <span style={{ fontSize: 12, color: DT.t2, fontWeight: 600 }}>Total This Month</span>
+        <span style={{ fontSize: 16, fontWeight: 800, color: DT.accent }}>{Math.round(totalKg).toLocaleString("en-IN")} KG</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Revenue Summary donut (desktop) ───────────────────────────────────────
+function RevenueSummaryDesktop({ todaysRevenue, weekRevenue, monthRevenue, allTimeRevenue }) {
+  const segs = [
+    { label: "Today", value: todaysRevenue, color: DT.accent },
+    { label: "This Week", value: Math.max(weekRevenue - todaysRevenue, 0), color: DT.sky },
+    { label: "This Month", value: Math.max(monthRevenue - weekRevenue, 0), color: DT.purple },
+    { label: "Earlier", value: Math.max(allTimeRevenue - monthRevenue, 0), color: DT.rose },
+  ];
+  const total = segs.reduce((a, s) => a + s.value, 0) || 1;
+  const R = 52, C = 2 * Math.PI * R;
+  let offset = 0;
+
+  return (
+    <div style={{ flex: 1, minWidth: 280, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Revenue Summary</div>
+      <div style={{ fontSize: 11.5, color: DT.t3, marginTop: 2 }}>This Month Overview</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 20, marginTop: 16, flexWrap: "wrap" }}>
+        <svg width={136} height={136} viewBox="0 0 136 136" style={{ flexShrink: 0 }}>
+          <g transform="translate(68,68) rotate(-90)">
+            <circle r={R} fill="none" stroke={DT.border} strokeWidth={16} />
+            {segs.map((s, i) => {
+              const len = (s.value / total) * C;
+              const el = <circle key={i} r={R} fill="none" stroke={s.color} strokeWidth={16} strokeDasharray={`${len} ${C - len}`} strokeDashoffset={-offset} />;
+              offset += len;
+              return el;
+            })}
+          </g>
+          <text x="68" y="64" textAnchor="middle" fontSize="9.5" fill={DT.t3} fontFamily={FONT}>Total</text>
+          <text x="68" y="80" textAnchor="middle" fontSize="13" fontWeight="800" fill={DT.t1} fontFamily={FONT}>₹{Math.round(total).toLocaleString("en-IN")}</text>
+        </svg>
+        <div style={{ display: "flex", flexDirection: "column", gap: 9, flex: 1, minWidth: 140 }}>
+          {segs.map((s, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11.5, gap: 10 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 6, color: DT.t2, fontWeight: 600, whiteSpace: "nowrap" }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, display: "inline-block", flexShrink: 0 }} />{s.label}
+              </span>
+              <span style={{ color: DT.t1, fontWeight: 700, whiteSpace: "nowrap" }}>₹{Math.round(s.value).toLocaleString("en-IN")}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Today's Orders list (desktop) ─────────────────────────────────────────
+function TodaysOrdersDesktop({ orders, setActiveTab }) {
+  const today = todayISO();
+  const list = (orders || []).filter(o => o.date === today).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 6);
+
+  return (
+    <div style={{ flex: 1, minWidth: 380, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Today's Orders</div>
+          <div style={{ fontSize: 11, color: DT.t3, marginTop: 2 }}>All orders placed today</div>
+        </div>
+        <button onClick={() => document.getElementById("orders-by-date-section")?.scrollIntoView({ behavior: "smooth", block: "start" })} style={{ background: "none", border: "none", color: DT.accent, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>View All</button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 14 }}>
+        {list.length === 0 && <div style={{ fontSize: 12, color: DT.t3, padding: "20px 0", textAlign: "center" }}>No orders logged today yet.</div>}
+        {list.map((o, i) => {
+          const cancelled = o.status === "Cancelled";
+          const items = orderLineItems(o);
+          const col = o.orderType === "New Order" ? DT.accent : o.orderType === "Sample" ? DT.purple : DT.sky;
+          return (
+            <div key={o.id || i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: i < list.length - 1 ? `1px solid ${DT.border}` : "none", opacity: cancelled ? 0.55 : 1 }}>
+              <div style={{ width: 34, height: 34, borderRadius: "50%", background: col + "22", border: `1px solid ${col}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: col, flexShrink: 0 }}>
+                {(o.customer || "?").trim().charAt(0).toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: DT.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.customer}</div>
+                <div style={{ fontSize: 11, color: DT.t3, marginTop: 1 }}>{o.area || "—"}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end", maxWidth: 220 }}>
+                <span style={{ fontSize: 9.5, fontWeight: 800, color: col, background: col + "1c", border: `1px solid ${col}40`, borderRadius: 20, padding: "3px 8px", whiteSpace: "nowrap" }}>{o.orderType === "New Order" ? "NEW ORDER" : o.orderType === "Sample" ? `SAMPLE (${(o.sampleType || "FREE").toUpperCase()})` : "REGULAR ORDER"}</span>
+                <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.sky, background: DT.sky + "1c", border: `1px solid ${DT.sky}40`, borderRadius: 20, padding: "3px 8px", whiteSpace: "nowrap" }}>{items.map(it => `${it.product} - ${it.kgs}KG`).join(", ")}</span>
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: DT.emerald, flexShrink: 0, width: 66, textAlign: "right" }}>₹{(o.amount || 0).toLocaleString("en-IN")}</div>
+              <div style={{ fontSize: 10.5, color: DT.t3, flexShrink: 0, width: 60, textAlign: "right" }}>{o.createdAt ? new Date(o.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"}</div>
+              <DIcon id="chevron" size={14} color={DT.t3} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Daily Summary list (desktop) ──────────────────────────────────────────
+function DailySummaryDesktop({ orders, setActiveTab }) {
+  const active = (orders || []).filter(o => o.status !== "Cancelled");
+  const byDate = {};
+  active.forEach(o => {
+    if (!byDate[o.date]) byDate[o.date] = { newCount: 0, regularCount: 0, sampleCount: 0, kgs: 0, revenue: 0 };
+    const b = byDate[o.date];
+    if (o.orderType === "New Order") b.newCount += 1;
+    else if (o.orderType === "Regular Order") b.regularCount += 1;
+    else b.sampleCount += 1;
+    b.kgs += parseFloat(o.kgs) || 0;
+    b.revenue += parseFloat(o.amount) || 0;
+  });
+  const rows = Object.entries(byDate).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 5);
+
+  return (
+    <div style={{ flex: 1, minWidth: 380, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Daily Summary</div>
+          <div style={{ fontSize: 11, color: DT.t3, marginTop: 2 }}>New vs regular, total KGs and revenue</div>
+        </div>
+        <button onClick={() => document.getElementById("orders-by-date-section")?.scrollIntoView({ behavior: "smooth", block: "start" })} style={{ background: "none", border: "none", color: DT.accent, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>View Full History</button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 14 }}>
+        {rows.length === 0 && <div style={{ fontSize: 12, color: DT.t3, padding: "20px 0", textAlign: "center" }}>No orders logged yet.</div>}
+        {rows.map(([date, s], i) => (
+          <div key={date} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "11px 0", borderBottom: i < rows.length - 1 ? `1px solid ${DT.border}` : "none" }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: DT.t1, minWidth: 96 }}>{formatDateReadable(date)}</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.accent, background: DT.accent + "1c", border: `1px solid ${DT.accent}40`, borderRadius: 20, padding: "3px 8px" }}>{s.newCount} NEW</span>
+              <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.sky, background: DT.sky + "1c", border: `1px solid ${DT.sky}40`, borderRadius: 20, padding: "3px 8px" }}>{s.regularCount} REGULAR</span>
+              <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.orange, background: DT.orange + "1c", border: `1px solid ${DT.orange}40`, borderRadius: 20, padding: "3px 8px" }}>{Math.round(s.kgs)} KG</span>
+              <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.emerald, background: DT.emerald + "1c", border: `1px solid ${DT.emerald}40`, borderRadius: 20, padding: "3px 8px" }}>₹{Math.round(s.revenue).toLocaleString("en-IN")}</span>
+              <DIcon id="chevron" size={14} color={DT.t3} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Full desktop Daily Orders home (dashboard-style overview) ─────────────
+function DesktopDailyOrdersHome({ setActiveTab }) {
+  const [dailyOrders] = useSheetSynced("dailyOrders", "dailyOrders", []);
+  const [leads] = useSheetSynced("leads", "leads", []);
+
+  const today = todayISO();
+  const yesterday = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); })();
+  const active = (dailyOrders || []).filter(o => o.status !== "Cancelled");
+  const todaysOrders = active.filter(o => o.date === today);
+  const yestOrders = active.filter(o => o.date === yesterday);
+
+  const todaysNew = todaysOrders.filter(o => o.orderType === "New Order").length;
+  const todaysRegular = todaysOrders.filter(o => o.orderType === "Regular Order").length;
+  const todaysKg = todaysOrders.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
+  const todaysRevenue = todaysOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+
+  const yestNew = yestOrders.filter(o => o.orderType === "New Order").length;
+  const yestRegular = yestOrders.filter(o => o.orderType === "Regular Order").length;
+  const yestKg = yestOrders.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
+  const yestRevenue = yestOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+
+  const pctChange = (now, prev) => prev > 0 ? Math.round(((now - prev) / prev) * 100) : (now > 0 ? 100 : 0);
+
+  const activeCustomers = (leads || []).filter(l => l && l.stage === "Active Customer").length;
+
+  const startOfWeekISO = (() => { const d = new Date(); const day = d.getDay(); const diff = day === 0 ? 6 : day - 1; d.setDate(d.getDate() - diff); return d.toISOString().slice(0, 10); })();
+  const startOfMonthISO = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`;
+  const weekRevenue = active.filter(o => o.date >= startOfWeekISO && o.date <= today).reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const monthRevenue = active.filter(o => o.date >= startOfMonthISO && o.date <= today).reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const allTimeRevenue = active.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+        <StatCard icon="🆕" iconBg={DT.accent + "26"} label="Today's Orders" value={todaysNew} unit="New Orders" change={pctChange(todaysNew, yestNew)} color={DT.accent} />
+        <StatCard icon="🔁" iconBg={DT.sky + "26"} label="Regular Orders" value={todaysRegular} unit="Today" change={pctChange(todaysRegular, yestRegular)} color={DT.sky} />
+        <StatCard icon="⚖️" iconBg={DT.purple + "26"} label="Total KGs" value={Math.round(todaysKg)} unit="KG Today" change={pctChange(todaysKg, yestKg)} color={DT.purple} />
+        <StatCard icon="💰" iconBg={DT.orange + "26"} label="Today Revenue" value={"₹" + Math.round(todaysRevenue).toLocaleString("en-IN")} change={pctChange(todaysRevenue, yestRevenue)} color={DT.orange} />
+        <StatCard icon="🏪" iconBg={DT.emerald + "26"} label="Active Customers" value={activeCustomers} unit="Total" change={activeCustomers > 0 ? 5 : 0} color={DT.emerald} />
+      </div>
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "stretch" }}>
+        <ProductOverviewDesktop orders={dailyOrders || []} />
+        <RevenueSummaryDesktop todaysRevenue={todaysRevenue} weekRevenue={weekRevenue} monthRevenue={monthRevenue} allTimeRevenue={allTimeRevenue} />
+      </div>
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "stretch" }}>
+        <TodaysOrdersDesktop orders={dailyOrders || []} setActiveTab={setActiveTab} />
+        <DailySummaryDesktop orders={dailyOrders || []} setActiveTab={setActiveTab} />
       </div>
     </div>
   );
@@ -4076,12 +5766,19 @@ function DesktopShell({ activeTab, setActiveTab, role, setRole, leadsCount, rend
       `}</style>
       <DesktopSidebar activeTab={activeTab} setActiveTab={setActiveTab} collapsed={collapsed} setCollapsed={setCollapsed} leadsCount={leadsCount} />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <DesktopTopbar role={role} setRole={setRole} search={search} setSearch={setSearch} collapsed={collapsed} setCollapsed={setCollapsed} notifCount={3} />
+        <DesktopTopbar role={role} setRole={setRole} search={search} setSearch={setSearch} collapsed={collapsed} setCollapsed={setCollapsed} notifCount={3} setActiveTab={setActiveTab} />
         <div style={{ flex: 1, padding: "24px 28px 60px" }}>
           {activeTab === "dashboard" ? (
             <DesktopDashboardHome setActiveTab={setActiveTab} />
           ) : activeTab === "settings" ? (
             <SettingsPlaceholder />
+          ) : activeTab === "dailyorders" ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <DesktopDailyOrdersHome setActiveTab={setActiveTab} />
+              <div style={{ background: T.bg, borderRadius: 16, overflow: "hidden" }}>
+                {renderModule({ embedded: true })}
+              </div>
+            </div>
           ) : (
             <div style={{ background: T.bg, borderRadius: 16, overflow: "hidden" }}>
               {renderModule()}
@@ -4154,7 +5851,7 @@ export default function App() {
 
   useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; }, [activeTab]);
 
-  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads", today:"Today Tasks", prospects:"Find Prospects" };
+  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", dailyorders:"Daily Orders", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads", today:"Today Tasks", prospects:"Find Prospects" };
 
   // ── INSTALL BANNER ──
   const InstallBanner = () => showInstall ? (
@@ -4240,7 +5937,7 @@ export default function App() {
     );
   }
 
-  const renderModule = () => {
+  const renderModule = (moduleProps = {}) => {
     switch (activeTab) {
       case "dashboard": return <Dashboard />;
       case "leads":     return <Leads />;
@@ -4248,6 +5945,7 @@ export default function App() {
       case "fieldsync": return <FieldSync />;
       case "samples":   return <Samples />;
       case "repeat":    return <RepeatOrders />;
+      case "dailyorders": return <DailyOrders {...moduleProps} />;
       case "expenses":  return <Expenses />;
       case "marketing": return <Marketing />;
       case "reports":   return <Reports />;
@@ -4279,16 +5977,25 @@ export default function App() {
       <style>{`
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
-        ::-webkit-scrollbar { width: 0; height: 0; }
-        select option { background: #FFFFFF; color: #0F172A; }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-thumb { background: ${T.border}; border-radius: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        select option { background: ${T.card}; color: ${T.t1}; }
         @keyframes pulse { 0%,100% { opacity:0.25; transform:scale(0.8); } 50% { opacity:1; transform:scale(1.1); } }
-        input::placeholder { color: #94A3B8; }
-        textarea::placeholder { color: #94A3B8; }
-        input:-webkit-autofill { -webkit-box-shadow: 0 0 0 100px #FFFFFF inset; -webkit-text-fill-color: #0F172A; }
+        @keyframes fadeSlideIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+        input::placeholder { color: ${T.t3}; }
+        textarea::placeholder { color: ${T.t3}; }
+        input:-webkit-autofill { -webkit-box-shadow: 0 0 0 100px ${T.card} inset; -webkit-text-fill-color: ${T.t1}; }
+
+        button { transition: transform 0.12s ease, opacity 0.12s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }
+        button:active { transform: scale(0.96); opacity: 0.9; }
+        a, .tappable, [role="button"] { transition: transform 0.12s ease, opacity 0.12s ease; }
+
+        .bos-content-fade { animation: fadeSlideIn 0.28s ease both; }
       `}</style>
 
       {/* Header */}
-      <div style={{ background:T.surface, borderBottom:`1px solid ${T.border}`, padding:"12px 18px", display:"flex", justifyContent:"space-between", alignItems:"center", position:"sticky", top:0, zIndex:80, backdropFilter:"blur(12px)" }}>
+      <div style={{ background:T.glass, borderBottom:`1px solid ${T.border}`, padding:"12px 18px", display:"flex", justifyContent:"space-between", alignItems:"center", position:"sticky", top:0, zIndex:80, backdropFilter:"blur(14px)", boxShadow:"0 4px 20px rgba(0,0,0,0.25)" }}>
         <div>
           <div style={{ fontSize:15, fontWeight:900, color:T.t1, letterSpacing:"-0.03em" }}>Sridhi BOS</div>
           <div style={{ fontSize:10, color:T.t3, marginTop:1, fontWeight:500, letterSpacing:"0.02em", textTransform:"uppercase" }}>{tabLabel[activeTab]}</div>
@@ -4307,15 +6014,15 @@ export default function App() {
       </div>
 
       {/* Accent bar */}
-      <div style={{ height:2, flexShrink:0, background:`linear-gradient(90deg, ${T.sky}, ${T.indigo}, ${T.accent}, ${T.emerald})` }} />
+      <div style={{ height:2, flexShrink:0, background:`linear-gradient(90deg, ${T.sky}, ${T.indigo}, ${T.accent}, ${T.emerald})`, boxShadow:`0 0 12px ${T.accentGlow}` }} />
 
       {/* Content */}
-      <div ref={contentRef} style={{ flex:1, overflowY:"auto", padding: activeTab==="ai" ? "16px 16px 0" : "16px 16px 90px" }}>
+      <div ref={contentRef} key={activeTab} className="bos-content-fade" style={{ flex:1, overflowY:"auto", padding: activeTab==="ai" ? "16px 16px 0" : "16px 16px 90px" }}>
         {renderModule()}
       </div>
 
       {/* Bottom nav */}
-      <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:T.surface, borderTop:`1px solid ${T.border}`, display:"flex", padding:"10px 0 20px", zIndex:80 }}>
+      <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:T.glass, backdropFilter:"blur(14px)", borderTop:`1px solid ${T.border}`, display:"flex", padding:"10px 0 20px", zIndex:80, boxShadow:"0 -4px 20px rgba(0,0,0,0.3)" }}>
         {NAV.map(n => {
           const isActive = n.id==="more" ? MORE_MENU.some(m => m.id===activeTab) : activeTab===n.id;
           return (
@@ -4344,6 +6051,7 @@ export default function App() {
                 border:`1px solid ${activeTab===m.id ? T.accentGlow : T.border}`,
                 borderRadius:16, padding:"16px 14px", cursor:"pointer",
                 display:"flex", alignItems:"center", gap:10, fontFamily:FONT,
+                boxShadow: activeTab===m.id ? `0 0 16px ${T.accentGlow}` : "none",
               }}>
               <span style={{ fontSize:20 }}>{m.icon}</span>
               <span style={{ fontSize:13, fontWeight:700, color: activeTab===m.id ? T.accent : T.t1, letterSpacing:"-0.01em" }}>{m.label}</span>
