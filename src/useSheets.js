@@ -69,6 +69,27 @@ function clearPending(tab) {
   try { localStorage.removeItem(pendingKey(tab)); } catch {}
 }
 
+// ── Durable pending-delete persistence ─────────────────────────────────────
+// The backend upsert-merges by id so it never silently loses a row another
+// device is mid-write on — but that also means a plain array push can't
+// delete anything: the deleted row is still on the sheet, so it just gets
+// merged right back in. Deletions are tracked explicitly instead, and sent
+// alongside every push until the server confirms it removed them.
+function deletedKey(tab) { return `bos_deleted_${tab}`; }
+function loadDeleted(tab) {
+  try {
+    const raw = localStorage.getItem(deletedKey(tab));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+function saveDeleted(tab, ids) {
+  try { localStorage.setItem(deletedKey(tab), JSON.stringify(ids)); } catch {}
+}
+function clearDeleted(tab) {
+  try { localStorage.removeItem(deletedKey(tab)); } catch {}
+}
+
 function getHeaders() {
   return {
     "Content-Type": "application/json",
@@ -108,12 +129,12 @@ async function fetchAll({ force = false } = {}) {
   return _allFetchPromise;
 }
 
-async function pushTab(tab, data) {
+async function pushTab(tab, data, deletedIds) {
   const url = API_BASE + "/api/sync?tab=" + tab;
   const r = await fetch(url, {
     method: "POST",
     headers: getHeaders(),
-    body: JSON.stringify({ [tab]: data }),
+    body: JSON.stringify({ [tab]: data, deletedIds: deletedIds || [] }),
   });
   if (!r.ok) throw new Error("HTTP " + r.status);
 }
@@ -131,13 +152,17 @@ function schedulePush(tab, data, setStatus) {
 
   const attemptPush = () => {
     const toSend = loadPending(tab)?.data ?? data;
-    pushTab(tab, toSend)
+    const deletedIds = loadDeleted(tab);
+    pushTab(tab, toSend, deletedIds)
       .then(() => {
         // Only clear if nothing newer has been queued while this was in flight.
         const stillPending = loadPending(tab);
         if (stillPending && JSON.stringify(stillPending.data) === JSON.stringify(toSend)) {
           clearPending(tab);
         }
+        // The server has now actually removed these ids from the sheet, so
+        // they no longer need to ride along on future pushes.
+        clearDeleted(tab);
         setStatus("synced");
       })
       .catch(() => {
@@ -240,6 +265,20 @@ export function useSheets(tab, initialData) {
     setDataRaw((prev) => {
       const next = typeof action === "function" ? action(prev) : action;
       lastLocalWriteTs.current = Date.now();
+
+      // Any id present in prev but missing from next was deleted — queue it
+      // for explicit removal on the server (see loadDeleted/saveDeleted above).
+      if (Array.isArray(prev) && Array.isArray(next)) {
+        const nextIds = new Set(next.map((r) => r && r.id).filter((id) => id !== undefined && id !== null));
+        const removedIds = prev
+          .map((r) => r && r.id)
+          .filter((id) => id !== undefined && id !== null && !nextIds.has(id));
+        if (removedIds.length) {
+          const merged = Array.from(new Set([...loadDeleted(tab), ...removedIds.map(String)]));
+          saveDeleted(tab, merged);
+        }
+      }
+
       memSet(tab, next);
       savePending(tab, next); // persist immediately, before the push debounce even fires
       return next;

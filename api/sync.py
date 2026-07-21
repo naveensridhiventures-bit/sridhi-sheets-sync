@@ -131,6 +131,17 @@ def merge_records(existing_rows, incoming_records, tab_key):
         merged[k] = row
     return [merged[k] for k in order]
 
+def _apply_deletes(records, deleted_ids, tab_key):
+    """Explicit deletions win over the upsert-merge above. Without this, a
+    telecaller deleting a wrongly-entered order would see it vanish locally
+    but then get silently resurrected on the next sync, because the merge
+    logic (by design) preserves any row still present on the sheet."""
+    if not deleted_ids:
+        return records
+    id_field = ID_FIELD.get(tab_key, "id")
+    deleted_set = {str(d) for d in deleted_ids}
+    return [r for r in records if str(r.get(id_field, "")) not in deleted_set]
+
 def _normalize_phone(phone):
     """Normalize phone numbers to 10 digits: strip +91, 091, spaces, dashes."""
     import re
@@ -255,6 +266,7 @@ class handler(BaseHTTPRequestHandler):
                 try:
                     body = json.loads(base64.b64decode(b64_body.encode()).decode())
                     records = body.get(tab, [])
+                    deleted_ids = body.get("deletedIds", [])
                     if isinstance(records, list) and tab in TAB_CONFIG:
                         cfg = TAB_CONFIG[tab]
                         if tab == "leads":
@@ -265,6 +277,7 @@ class handler(BaseHTTPRequestHandler):
                         matched = next((t for t in actual_tabs if t.strip().lower() == cfg["tab"].lower()), cfg["tab"])
                         existing = read_tab(matched, token)
                         merged = merge_records(existing, records, tab)
+                        merged = _apply_deletes(merged, deleted_ids, tab)
                         write_tab(matched, cfg["headers"], merged, token)
                         _cache.clear()
                         self._send(200, {"ok": True, "count": len(merged)})
@@ -297,6 +310,7 @@ class handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length) or b"{}")
         records = body.get(tab)
+        deleted_ids = body.get("deletedIds") or []
         if not isinstance(records, list):
             self._send(400, {"error": "Expected list"}); return
         cfg = TAB_CONFIG[tab]
@@ -311,6 +325,7 @@ class handler(BaseHTTPRequestHandler):
             # merge itself means even a same-instant collision can't drop rows.
             existing = read_tab(matched, token)
             merged = merge_records(existing, records, tab)
+            merged = _apply_deletes(merged, deleted_ids, tab)
             write_tab(matched, cfg["headers"], merged, token)
             _cache.clear()
             self._send(200, {"ok": True, "count": len(merged)})
