@@ -3399,6 +3399,135 @@ function DailyOrders({ embedded = false } = {}) {
       });
     }
 
+    // ── Leads & Conversion Summary — final page ────────────────────────────
+    const EMERALD = [16, 150, 110];
+    const SKY = [56, 189, 248];
+    const GRAY = [148, 163, 184];
+    const STAGE_COLOR = {
+      "New Lead": GRAY, "Contacted": SKY, "Interested": INDIGO, "Callback Requested": AMBER,
+      "Sample Requested": ORANGE, "Assigned to Field Sales": ROSE, "Sample Delivered": EMERALD,
+      "Feedback Pending": SKY, "Positive Feedback": EMERALD, "Negotiation": AMBER,
+      "Order Received": TEAL, "Repeat Order Follow-up": INDIGO, "Active Customer": EMERALD,
+      "Lost Customer": ROSE, "Invalid Number": GRAY,
+    };
+    const STAGE_ORDER = Object.keys(STAGE_COLOR);
+    // Samples count as a positive outcome alongside actual orders/customers —
+    // a delivered/well-received sample means the lead is engaged, not lost.
+    const POSITIVE_STAGES = ["Sample Delivered", "Positive Feedback", "Negotiation", "Order Received", "Repeat Order Follow-up", "Active Customer"];
+    const periodLeads = (leads || []).filter(l => {
+      if (!l || !l.stage) return false;
+      const d = l.createdAt ? new Date(l.createdAt).toISOString().slice(0, 10) : null;
+      return d && d >= reportFrom && d <= reportTo;
+    });
+    const totalLeadsPeriod = periodLeads.length;
+    const positiveLeadsPeriod = periodLeads.filter(l => POSITIVE_STAGES.includes(l.stage)).length;
+    const leadConvRate = totalLeadsPeriod > 0 ? Math.round((positiveLeadsPeriod / totalLeadsPeriod) * 100) : 0;
+    const stageBreakdown = STAGE_ORDER
+      .map(s => ({ stage: s, count: periodLeads.filter(l => l.stage === s).length, color: STAGE_COLOR[s] }))
+      .filter(s => s.count > 0);
+
+    doc.addPage(); header(); y = 118;
+    sectionTitle(`${presetLabel()} Leads & Conversions`, INDIGO);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(...SUBTLE);
+    doc.text(`New leads created between ${formatDateReadable(reportFrom)} and ${formatDateReadable(reportTo)}`, margin, y);
+    y += 16;
+
+    // KPI cards — simple, attractive snapshot up top
+    const leadKpis = [
+      { label: "Total Leads", value: String(totalLeadsPeriod), color: INDIGO },
+      { label: "Converted / Positive", value: String(positiveLeadsPeriod), color: EMERALD },
+      { label: "Conversion Rate", value: `${leadConvRate}%`, color: leadConvRate >= 40 ? EMERALD : leadConvRate >= 15 ? AMBER : ROSE },
+    ];
+    const lGap = 12;
+    const lCardW = (pageW - margin * 2 - lGap * 2) / 3;
+    const lCardH = 62;
+    leadKpis.forEach((k, i) => {
+      const x = margin + i * (lCardW + lGap);
+      doc.setFillColor(248, 249, 251);
+      doc.setDrawColor(...GRID);
+      doc.setLineWidth(0.7);
+      doc.roundedRect(x, y, lCardW, lCardH, 7, 7, "FD");
+      doc.setFillColor(...k.color);
+      doc.roundedRect(x, y, lCardW, 4, 2, 2, "F");
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...SUBTLE);
+      doc.text(k.label.toUpperCase(), x + 14, y + 24);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(19);
+      doc.setTextColor(...k.color);
+      doc.text(k.value, x + 14, y + 48);
+    });
+    y += lCardH + 24;
+
+    // Note on how samples are treated, for transparency in the report
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(7.5);
+    doc.setTextColor(...SUBTLE);
+    doc.text("Delivered / well-received samples are counted as a positive outcome, alongside orders and active customers.", margin, y);
+    y += 18;
+
+    // ── Diagram — horizontal bar chart of pipeline stage counts ───────────
+    if (y > pageH - 160) { doc.addPage(); header(); y = 118; }
+    sectionTitle("Pipeline Breakdown", INDIGO);
+    if (stageBreakdown.length === 0) {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(...SUBTLE);
+      doc.text("No leads created in this period.", margin, y + 4);
+      y += 20;
+    } else {
+      const maxCount = Math.max(...stageBreakdown.map(s => s.count));
+      const barLabelW = 150;
+      const barValW = 34;
+      const barMaxW = pageW - margin * 2 - barLabelW - barValW - 10;
+      const barH = 14;
+      const barGap = 8;
+      stageBreakdown.forEach(s => {
+        if (y > pageH - 60) { doc.addPage(); header(); y = 118; }
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(...INK);
+        doc.text(s.stage, margin, y + barH - 4);
+        doc.setFillColor(...GRID);
+        doc.roundedRect(margin + barLabelW, y, barMaxW, barH, 3, 3, "F");
+        const w = Math.max(6, Math.round((s.count / maxCount) * barMaxW));
+        doc.setFillColor(...s.color);
+        doc.roundedRect(margin + barLabelW, y, w, barH, 3, 3, "F");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.setTextColor(...INK);
+        doc.text(String(s.count), margin + barLabelW + barMaxW + 10, y + barH - 4, { align: "right" });
+        y += barH + barGap;
+      });
+      y += 10;
+    }
+
+    // ── Today's leads status — simple attractive chip row (Daily report only) ─
+    if (reportPreset === "today" && totalLeadsPeriod > 0) {
+      if (y > pageH - 100) { doc.addPage(); header(); y = 118; }
+      sectionTitle("Today's Leads — Status", TEAL);
+      let cx = margin;
+      const chipH = 22;
+      stageBreakdown.forEach(s => {
+        const label = `${s.stage}: ${s.count}`;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        const w = doc.getTextWidth(label) + 20;
+        if (cx + w > pageW - margin) { cx = margin; y += chipH + 8; }
+        doc.setFillColor(...s.color.map(c => Math.min(255, c + (255 - c) * 0.85)));
+        doc.setDrawColor(...s.color);
+        doc.setLineWidth(0.7);
+        doc.roundedRect(cx, y, w, chipH, 11, 11, "FD");
+        doc.setTextColor(...s.color);
+        doc.text(label, cx + 10, y + 14.5);
+        cx += w + 8;
+      });
+      y += chipH + 20;
+    }
+
     footer();
     doc.save(`Sridhi-Daily-Orders-${presetLabel()}-Report_${reportFrom}_to_${reportTo}.pdf`);
     } finally {
