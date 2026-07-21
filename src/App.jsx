@@ -3037,6 +3037,7 @@ function DailyOrders({ embedded = false } = {}) {
       totalNew: rangeActive.filter(o => o.orderType === "New Order").length,
       totalRegular: rangeActive.filter(o => o.orderType === "Regular Order").length,
       totalSample: rangeActive.filter(o => o.orderType === "Sample").length,
+      totalNewKg: rangeActive.filter(o => o.orderType === "New Order").reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
       totalKg: rangeActive.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
       totalRevenue: rangeActive.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0),
     };
@@ -3095,7 +3096,7 @@ function DailyOrders({ embedded = false } = {}) {
       import("jspdf"),
       import("jspdf-autotable"),
     ]);
-    const { rangeOrders, rangeCancelled, rangeByDate, rangeByProduct, sampleSummary, totalNew, totalRegular, totalSample, totalKg, totalRevenue } = getReportData();
+    const { rangeOrders, rangeCancelled, rangeByDate, rangeByProduct, sampleSummary, totalNew, totalRegular, totalSample, totalNewKg, totalKg, totalRevenue } = getReportData();
 
     const NAVY = [10, 14, 26];
     const TEAL = [14, 168, 144];
@@ -3152,6 +3153,26 @@ function DailyOrders({ embedded = false } = {}) {
     let y = 118;
 
     // ── KPI summary cards ────────────────────────────────────────────────
+    // ── New Orders KG — headline banner, shown first above the KPI row ────
+    const newKgBannerH = 44;
+    doc.setFillColor(...ROSE_TINT);
+    doc.setDrawColor(...ROSE);
+    doc.setLineWidth(1);
+    doc.roundedRect(margin, y, pageW - margin * 2, newKgBannerH, 8, 8, "FD");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor(...ROSE);
+    doc.text("NEW ORDERS — KG", margin + 16, y + 18);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(...SUBTLE);
+    doc.text(`Quantity booked from New Orders (${totalNew} order${totalNew === 1 ? "" : "s"}) in this period`, margin + 16, y + 32);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.setTextColor(...INK);
+    doc.text(`${Math.round(totalNewKg).toLocaleString("en-IN")} KG`, pageW - margin - 16, y + 29, { align: "right" });
+    y += newKgBannerH + 16;
+
     const kpis = [
       { label: "New Conversions", value: String(totalNew), color: TEAL },
       { label: "Regular Conversions", value: String(totalRegular), color: INDIGO },
