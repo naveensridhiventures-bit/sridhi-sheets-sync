@@ -2751,7 +2751,18 @@ const PRODUCTS = [
   { name: "Vada Batter", rate: 100 },
 ];
 const rateForProduct = (name) => (PRODUCTS.find(p => p.name === name) || PRODUCTS[0]).rate;
-const ORDER_TYPES = ["New Order", "Regular Order"];
+const ORDER_TYPES = ["New Order", "Regular Order", "Sample"];
+const SAMPLE_TYPES = ["Free", "Paid"];
+const AMOUNT_MODES = ["Auto", "Manual"];
+function orderTypeLabel(o) {
+  if (o.orderType !== "Sample") return o.orderType;
+  return `Sample (${o.sampleType || "Free"})`;
+}
+function orderTypeColor(o, theme) {
+  if (o.orderType === "New Order") return theme.accent;
+  if (o.orderType === "Sample") return theme.orange;
+  return theme.indigo;
+}
 const CANCEL_REASONS = ["Delivery Issue", "Quality Issue", "Other"];
 const NEW_CUSTOMER_OPTION = "+ Add New Customer";
 const INITIAL_DAILY_ORDERS = [];
@@ -2772,7 +2783,15 @@ function emptyOrderForm(date) {
     date: date || todayISO(), customer: "", area: "", orderType: "New Order",
     items: PRODUCTS.map(p => ({ product: p.name, kgs: "" })),
     telecaller: "",
+    sampleType: "Free", amountMode: "Auto", manualAmount: "",
   };
+}
+// For a Sample order, works out the final ₹ amount from the auto (kg×rate)
+// total plus the Free/Paid + Auto/Manual choices made in the form.
+function sampleAmount(form, autoAmount) {
+  if (form.sampleType === "Free") return 0;
+  if (form.amountMode === "Manual") return parseFloat(form.manualAmount) || 0;
+  return autoAmount;
 }
 // Returns the line items for an order, whether it's a new-style multi-product
 // order (o.items) or an old-style single-product order (o.product/o.kgs).
@@ -2883,6 +2902,7 @@ function DailyOrders({ embedded = false } = {}) {
   const dateTotals = {
     newCount: dateActiveOrders.filter(o => o.orderType === "New Order").length,
     regularCount: dateActiveOrders.filter(o => o.orderType === "Regular Order").length,
+    sampleCount: dateActiveOrders.filter(o => o.orderType === "Sample").length,
     kgs: dateActiveOrders.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
     revenue: dateActiveOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0),
   };
@@ -2892,12 +2912,14 @@ function DailyOrders({ embedded = false } = {}) {
     return { name: p.name, kgs, revenue };
   }).filter(p => p.kgs > 0);
 
-  // Date-wise summary: new vs regular conversions, kgs and revenue per day
+  // Date-wise summary: new vs regular vs sample counts, kgs and revenue per day
   const byDate = {};
   active.forEach(o => {
-    if (!byDate[o.date]) byDate[o.date] = { newCount: 0, regularCount: 0, kgs: 0, revenue: 0 };
+    if (!byDate[o.date]) byDate[o.date] = { newCount: 0, regularCount: 0, sampleCount: 0, kgs: 0, revenue: 0 };
     const b = byDate[o.date];
-    if (o.orderType === "New Order") b.newCount += 1; else b.regularCount += 1;
+    if (o.orderType === "New Order") b.newCount += 1;
+    else if (o.orderType === "Regular Order") b.regularCount += 1;
+    else b.sampleCount += 1;
     b.kgs += parseFloat(o.kgs) || 0;
     b.revenue += parseFloat(o.amount) || 0;
   });
@@ -2920,6 +2942,9 @@ function DailyOrders({ embedded = false } = {}) {
         return { product: p.name, kgs: match ? String(match.kgs) : "" };
       }),
       telecaller: o.telecaller || "",
+      sampleType: o.sampleType || "Free",
+      amountMode: o.amountMode || "Auto",
+      manualAmount: o.manualAmount != null && o.manualAmount !== "" ? String(o.manualAmount) : "",
     });
     setCustomerPick(knownCustomers.some(c => c.name === o.customer) ? o.customer : NEW_CUSTOMER_OPTION);
     setShowForm(true);
@@ -2932,14 +2957,21 @@ function DailyOrders({ embedded = false } = {}) {
       .map(i => ({ ...i, amount: Math.round(i.kgs * i.rate) }));
     if (!form.customer.trim() || !items.length || !form.date) return;
     const kgs = items.reduce((a, i) => a + i.kgs, 0);
-    const amount = items.reduce((a, i) => a + i.amount, 0);
+    const autoAmount = items.reduce((a, i) => a + i.amount, 0);
+    const isSample = form.orderType === "Sample";
+    const amount = isSample ? sampleAmount(form, autoAmount) : autoAmount;
     const product = items.map(i => i.product).join(" + ");
     const { items: _formItems, ...formRest } = form;
+    // Only persist sample fields on actual Sample orders, so New/Regular
+    // orders never carry stray sampleType/amountMode leftovers.
+    const sampleFields = isSample
+      ? { sampleType: form.sampleType, amountMode: form.amountMode, manualAmount: form.amountMode === "Manual" ? amount : "" }
+      : { sampleType: "", amountMode: "", manualAmount: "" };
     if (editingId) {
-      setOrders(orders.map(o => o.id === editingId ? { ...o, ...formRest, items, kgs, amount, product } : o));
+      setOrders(orders.map(o => o.id === editingId ? { ...o, ...formRest, ...sampleFields, items, kgs, amount, product } : o));
     } else {
       setOrders([{
-        id: Date.now(), ...formRest, items, kgs, amount, product,
+        id: Date.now(), ...formRest, ...sampleFields, items, kgs, amount, product,
         status: "Active", cancelReason: "", cancelRemarks: "",
         createdAt: Date.now(),
       }, ...orders]);
@@ -2974,9 +3006,11 @@ function DailyOrders({ embedded = false } = {}) {
 
     const rangeByDate = {};
     rangeActive.forEach(o => {
-      if (!rangeByDate[o.date]) rangeByDate[o.date] = { newCount: 0, regularCount: 0, kgs: 0, revenue: 0 };
+      if (!rangeByDate[o.date]) rangeByDate[o.date] = { newCount: 0, regularCount: 0, sampleCount: 0, kgs: 0, revenue: 0 };
       const b = rangeByDate[o.date];
-      if (o.orderType === "New Order") b.newCount += 1; else b.regularCount += 1;
+      if (o.orderType === "New Order") b.newCount += 1;
+      else if (o.orderType === "Regular Order") b.regularCount += 1;
+      else b.sampleCount += 1;
       b.kgs += parseFloat(o.kgs) || 0;
       b.revenue += parseFloat(o.amount) || 0;
     });
@@ -2993,13 +3027,14 @@ function DailyOrders({ embedded = false } = {}) {
       rangeOrders, rangeActive, rangeCancelled, rangeByDate, rangeByProduct,
       totalNew: rangeActive.filter(o => o.orderType === "New Order").length,
       totalRegular: rangeActive.filter(o => o.orderType === "Regular Order").length,
+      totalSample: rangeActive.filter(o => o.orderType === "Sample").length,
       totalKg: rangeActive.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
       totalRevenue: rangeActive.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0),
     };
   };
 
   const downloadCSVReport = () => {
-    const { rangeOrders, rangeActive, rangeCancelled, rangeByDate, rangeByProduct, totalNew, totalRegular, totalKg, totalRevenue } = getReportData();
+    const { rangeOrders, rangeActive, rangeCancelled, rangeByDate, rangeByProduct, totalNew, totalRegular, totalSample, totalKg, totalRevenue } = getReportData();
     const lines = [];
     lines.push(csvRow(["Sridhi Ventures BOS — Daily Orders Report"]));
     lines.push(csvRow([`Range: ${formatDateReadable(reportFrom)} to ${formatDateReadable(reportTo)}`]));
@@ -3010,7 +3045,7 @@ function DailyOrders({ embedded = false } = {}) {
     lines.push(csvRow(["Date", "Customer", "Area", "Order Type", "Product Breakdown", "Total KG", "Amount (Rs)", "Telecaller", "Status", "Cancel Reason", "Cancel Remarks"]));
     rangeOrders.forEach(o => {
       const breakdown = orderLineItems(o).map(i => `${i.product}: ${i.kgs}KG @ Rs${i.rate}`).join(" | ");
-      lines.push(csvRow([formatDateReadable(o.date), o.customer, o.area || "", o.orderType, breakdown, o.kgs, o.amount, o.telecaller || "", o.status, o.cancelReason || "", o.cancelRemarks || ""]));
+      lines.push(csvRow([formatDateReadable(o.date), o.customer, o.area || "", orderTypeLabel(o), breakdown, o.kgs, o.amount, o.telecaller || "", o.status, o.cancelReason || "", o.cancelRemarks || ""]));
     });
     lines.push("");
 
@@ -3022,11 +3057,11 @@ function DailyOrders({ embedded = false } = {}) {
     lines.push("");
 
     lines.push(csvRow(["DAILY SUMMARY (active orders only)"]));
-    lines.push(csvRow(["Date", "New Orders", "Regular Orders", "Total KG", "Revenue (Rs)"]));
+    lines.push(csvRow(["Date", "New Orders", "Regular Orders", "Samples", "Total KG", "Revenue (Rs)"]));
     Object.entries(rangeByDate).sort((a, b) => a[0].localeCompare(b[0])).forEach(([date, s]) => {
-      lines.push(csvRow([formatDateReadable(date), s.newCount, s.regularCount, Math.round(s.kgs), Math.round(s.revenue)]));
+      lines.push(csvRow([formatDateReadable(date), s.newCount, s.regularCount, s.sampleCount, Math.round(s.kgs), Math.round(s.revenue)]));
     });
-    lines.push(csvRow(["TOTAL", totalNew, totalRegular, Math.round(totalKg), Math.round(totalRevenue)]));
+    lines.push(csvRow(["TOTAL", totalNew, totalRegular, totalSample, Math.round(totalKg), Math.round(totalRevenue)]));
     lines.push("");
 
     lines.push(csvRow(["CANCELLED / STOPPED CUSTOMERS"]));
@@ -3051,7 +3086,7 @@ function DailyOrders({ embedded = false } = {}) {
       import("jspdf"),
       import("jspdf-autotable"),
     ]);
-    const { rangeOrders, rangeCancelled, rangeByDate, rangeByProduct, totalNew, totalRegular, totalKg, totalRevenue } = getReportData();
+    const { rangeOrders, rangeCancelled, rangeByDate, rangeByProduct, totalNew, totalRegular, totalSample, totalKg, totalRevenue } = getReportData();
 
     const NAVY = [10, 14, 26];
     const TEAL = [14, 168, 144];
@@ -3219,21 +3254,21 @@ function DailyOrders({ embedded = false } = {}) {
     y += pCardH + 30;
 
     // ── Daily summary table ──────────────────────────────────────────────
-    sectionTitle("Daily Summary — New vs Regular");
+    sectionTitle("Daily Summary — New vs Regular vs Sample");
     const summaryBody = Object.entries(rangeByDate).sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([date, s]) => [formatDateReadable(date), String(s.newCount), String(s.regularCount), Math.round(s.kgs).toLocaleString("en-IN"), `Rs ${Math.round(s.revenue).toLocaleString("en-IN")}`]);
+      .map(([date, s]) => [formatDateReadable(date), String(s.newCount), String(s.regularCount), String(s.sampleCount), Math.round(s.kgs).toLocaleString("en-IN"), `Rs ${Math.round(s.revenue).toLocaleString("en-IN")}`]);
     autoTable(doc, {
       startY: y,
       margin: { left: margin, right: margin, bottom: 50 },
-      head: [["Date", "New", "Regular", "Total KG", "Revenue"]],
-      body: summaryBody.length ? summaryBody : [["—", "—", "—", "—", "—"]],
-      foot: [["TOTAL", String(totalNew), String(totalRegular), Math.round(totalKg).toLocaleString("en-IN"), `Rs ${Math.round(totalRevenue).toLocaleString("en-IN")}`]],
+      head: [["Date", "New", "Regular", "Sample", "Total KG", "Revenue"]],
+      body: summaryBody.length ? summaryBody : [["—", "—", "—", "—", "—", "—"]],
+      foot: [["TOTAL", String(totalNew), String(totalRegular), String(totalSample), Math.round(totalKg).toLocaleString("en-IN"), `Rs ${Math.round(totalRevenue).toLocaleString("en-IN")}`]],
       theme: "grid",
       styles: { font: "helvetica", fontSize: 9, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK },
       headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 },
       footStyles: { fillColor: TEAL_TINT, textColor: INK, fontStyle: "bold", fontSize: 9 },
       alternateRowStyles: { fillColor: [249, 250, 252] },
-      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
+      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } },
     });
     y = doc.lastAutoTable.finalY + 30;
 
@@ -3241,7 +3276,7 @@ function DailyOrders({ embedded = false } = {}) {
     if (y > pageH - 160) { doc.addPage(); header(); y = 118; }
     sectionTitle("Order Log", TEAL);
     const orderBody = rangeOrders.map(o => [
-      formatDateReadable(o.date), o.customer, o.area || "—", o.orderType.replace(" Order", ""),
+      formatDateReadable(o.date), o.customer, o.area || "—", orderTypeLabel(o).replace(" Order", ""),
       orderLineItems(o).map(i => `${i.product}: ${i.kgs}KG`).join(", "), String(o.kgs), `Rs ${(o.amount || 0).toLocaleString("en-IN")}`, o.telecaller || "—", o.status,
     ]);
     autoTable(doc, {
@@ -3256,7 +3291,7 @@ function DailyOrders({ embedded = false } = {}) {
       columnStyles: { 5: { halign: "right" }, 6: { halign: "right" } },
       didParseCell: (data) => {
         if (data.section === "body" && data.column.index === 3) {
-          data.cell.styles.textColor = data.cell.raw === "New" ? TEAL : INDIGO;
+          data.cell.styles.textColor = data.cell.raw === "New" ? TEAL : (String(data.cell.raw).startsWith("Sample") ? [217, 119, 6] : INDIGO);
           data.cell.styles.fontStyle = "bold";
         }
         if (data.section === "body" && data.column.index === 8) {
@@ -3394,6 +3429,7 @@ function DailyOrders({ embedded = false } = {}) {
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               <Chip label={`${dateTotals.newCount} New`} color={T.accent} />
               <Chip label={`${dateTotals.regularCount} Regular`} color={T.indigo} />
+              {dateTotals.sampleCount > 0 && <Chip label={`${dateTotals.sampleCount} Sample`} color={T.orange} />}
               <Chip label={`${dateTotals.kgs.toLocaleString("en-IN", { maximumFractionDigits: 1 })} KG`} color={T.amber} />
               <Chip label={`₹${Math.round(dateTotals.revenue).toLocaleString("en-IN")}`} color={T.emerald} />
             </div>
@@ -3419,10 +3455,10 @@ function DailyOrders({ embedded = false } = {}) {
             <div key={o.id} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "14px 0", borderBottom: `1px solid ${T.border}`, opacity: cancelled ? 0.6 : 1 }}>
               <div style={{
                 width:38, height:38, borderRadius:11, flexShrink:0, marginTop:1,
-                background: (o.orderType === "New Order" ? T.accent : T.indigo)+"22",
-                border:`1px solid ${(o.orderType === "New Order" ? T.accent : T.indigo)}44`,
+                background: orderTypeColor(o, T)+"22",
+                border:`1px solid ${orderTypeColor(o, T)}44`,
                 display:"flex", alignItems:"center", justifyContent:"center",
-                fontSize:14, fontWeight:800, color: o.orderType === "New Order" ? T.accent : T.indigo,
+                fontSize:14, fontWeight:800, color: orderTypeColor(o, T),
               }}>{(o.customer || "?").trim().charAt(0).toUpperCase()}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
@@ -3440,7 +3476,7 @@ function DailyOrders({ embedded = false } = {}) {
                   </div>
                 </div>
                 <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <Chip label={o.orderType} color={o.orderType === "New Order" ? T.accent : T.indigo} />
+                  <Chip label={orderTypeLabel(o)} color={orderTypeColor(o, T)} />
                   {orderLineItems(o).map((i, idx) => (
                     <Chip key={idx} label={`${i.product}: ${i.kgs} KG`} color={T.sky} />
                   ))}
@@ -3475,6 +3511,7 @@ function DailyOrders({ embedded = false } = {}) {
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                 <Chip label={`${s.newCount} NEW`} color={T.accent} small />
                 <Chip label={`${s.regularCount} REGULAR`} color={T.sky} small />
+                {s.sampleCount > 0 && <Chip label={`${s.sampleCount} SAMPLE`} color={T.orange} small />}
                 <Chip label={`${Math.round(s.kgs)} KG`} color={T.amber} small />
                 <Chip label={`₹${Math.round(s.revenue).toLocaleString("en-IN")}`} color={T.emerald} small />
                 <span style={{ color:T.t4, fontSize:14, marginLeft:4 }}>›</span>
@@ -3518,7 +3555,25 @@ function DailyOrders({ embedded = false } = {}) {
         ) : (
           <div style={{ fontSize: 11, color: T.t3, marginTop: -8, marginBottom: 14 }}>Area: {form.area || "—"}</div>
         )}
-        <Dropdown label="Order Type" value={form.orderType} onChange={e => setForm({ ...form, orderType: e.target.value })} options={ORDER_TYPES} />
+        <Dropdown label="Order Type" value={form.orderType} onChange={e => setForm({ ...form, orderType: e.target.value, sampleType: "Free", amountMode: "Auto", manualAmount: "" })} options={ORDER_TYPES} />
+        {form.orderType === "Sample" && (
+          <>
+            <Dropdown label="Sample Type" value={form.sampleType} onChange={e => setForm({ ...form, sampleType: e.target.value, amountMode: "Auto", manualAmount: "" })} options={SAMPLE_TYPES} />
+            {form.sampleType === "Free" ? (
+              <div style={{ fontSize: 11, color: T.orange, marginTop: -8, marginBottom: 14 }}>Free sample — no charge to customer.</div>
+            ) : (
+              <>
+                <Dropdown label="Amount Mode" value={form.amountMode} onChange={e => setForm({ ...form, amountMode: e.target.value })} options={AMOUNT_MODES} />
+                <div style={{ fontSize: 11, color: T.t3, marginTop: -8, marginBottom: 14 }}>
+                  {form.amountMode === "Auto" ? "Auto: calculated at ₹/KG rate below." : "Manual: enter a custom amount — useful when there's an extra delivery cost."}
+                </div>
+                {form.amountMode === "Manual" && (
+                  <Field label="Manual Amount (₹)" type="number" value={form.manualAmount} onChange={e => setForm({ ...form, manualAmount: e.target.value })} placeholder="e.g. 50" />
+                )}
+              </>
+            )}
+          </>
+        )}
         <div style={{ fontSize: 11, fontWeight: 700, color: T.t3, letterSpacing: 0.3, marginBottom: 8 }}>PRODUCTS · enter KG for each you're logging</div>
         {form.items.map((item, idx) => (
           <Field
@@ -3540,7 +3595,10 @@ function DailyOrders({ embedded = false } = {}) {
           ))}
           <div style={{ marginTop: 4 }}>
             Total Amount: <span style={{ color: T.emerald, fontWeight: 700 }}>
-              ₹{form.items.reduce((a, i) => a + Math.round((parseFloat(i.kgs) || 0) * rateForProduct(i.product)), 0).toLocaleString("en-IN")}
+              ₹{(form.orderType === "Sample"
+                  ? sampleAmount(form, form.items.reduce((a, i) => a + Math.round((parseFloat(i.kgs) || 0) * rateForProduct(i.product)), 0))
+                  : form.items.reduce((a, i) => a + Math.round((parseFloat(i.kgs) || 0) * rateForProduct(i.product)), 0)
+                ).toLocaleString("en-IN")}
             </span>
           </div>
         </div>
@@ -5520,7 +5578,7 @@ function TodaysOrdersDesktop({ orders, setActiveTab }) {
         {list.map((o, i) => {
           const cancelled = o.status === "Cancelled";
           const items = orderLineItems(o);
-          const col = o.orderType === "New Order" ? DT.accent : DT.sky;
+          const col = o.orderType === "New Order" ? DT.accent : o.orderType === "Sample" ? DT.purple : DT.sky;
           return (
             <div key={o.id || i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: i < list.length - 1 ? `1px solid ${DT.border}` : "none", opacity: cancelled ? 0.55 : 1 }}>
               <div style={{ width: 34, height: 34, borderRadius: "50%", background: col + "22", border: `1px solid ${col}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: col, flexShrink: 0 }}>
@@ -5531,7 +5589,7 @@ function TodaysOrdersDesktop({ orders, setActiveTab }) {
                 <div style={{ fontSize: 11, color: DT.t3, marginTop: 1 }}>{o.area || "—"}</div>
               </div>
               <div style={{ display: "flex", gap: 6, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end", maxWidth: 220 }}>
-                <span style={{ fontSize: 9.5, fontWeight: 800, color: col, background: col + "1c", border: `1px solid ${col}40`, borderRadius: 20, padding: "3px 8px", whiteSpace: "nowrap" }}>{o.orderType === "New Order" ? "NEW ORDER" : "REGULAR ORDER"}</span>
+                <span style={{ fontSize: 9.5, fontWeight: 800, color: col, background: col + "1c", border: `1px solid ${col}40`, borderRadius: 20, padding: "3px 8px", whiteSpace: "nowrap" }}>{o.orderType === "New Order" ? "NEW ORDER" : o.orderType === "Sample" ? `SAMPLE (${(o.sampleType || "FREE").toUpperCase()})` : "REGULAR ORDER"}</span>
                 <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.sky, background: DT.sky + "1c", border: `1px solid ${DT.sky}40`, borderRadius: 20, padding: "3px 8px", whiteSpace: "nowrap" }}>{items.map(it => `${it.product} - ${it.kgs}KG`).join(", ")}</span>
               </div>
               <div style={{ fontSize: 12, fontWeight: 800, color: DT.emerald, flexShrink: 0, width: 66, textAlign: "right" }}>₹{(o.amount || 0).toLocaleString("en-IN")}</div>
@@ -5550,9 +5608,11 @@ function DailySummaryDesktop({ orders, setActiveTab }) {
   const active = (orders || []).filter(o => o.status !== "Cancelled");
   const byDate = {};
   active.forEach(o => {
-    if (!byDate[o.date]) byDate[o.date] = { newCount: 0, regularCount: 0, kgs: 0, revenue: 0 };
+    if (!byDate[o.date]) byDate[o.date] = { newCount: 0, regularCount: 0, sampleCount: 0, kgs: 0, revenue: 0 };
     const b = byDate[o.date];
-    if (o.orderType === "New Order") b.newCount += 1; else b.regularCount += 1;
+    if (o.orderType === "New Order") b.newCount += 1;
+    else if (o.orderType === "Regular Order") b.regularCount += 1;
+    else b.sampleCount += 1;
     b.kgs += parseFloat(o.kgs) || 0;
     b.revenue += parseFloat(o.amount) || 0;
   });
