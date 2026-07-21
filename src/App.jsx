@@ -159,9 +159,9 @@ function leadTypeIcon(type) {
 }
 
 // ─── DESIGN PRIMITIVES ────────────────────────────────────────────────────
-function Card({ children, style = {}, accent, noPad }) {
+function Card({ children, style = {}, accent, noPad, id }) {
   return (
-    <div style={{
+    <div id={id} style={{
       background: T.card,
       border: `1px solid ${accent ? accent + "30" : T.border}`,
       borderRadius: 20,
@@ -232,6 +232,28 @@ function KPI({ label, value, unit, change, color, icon }) {
           padding:"2px 6px", borderRadius:5,
         }}>{pos ? "↑" : "↓"} {Math.abs(change)}%</div>
       )}
+    </div>
+  );
+}
+
+// ─── STAT CARD (gradient tinted, icon circle + big number) ───────────────
+function MobileStatCard({ icon, title, value, sub, color }) {
+  return (
+    <div style={{
+      flex:"1 1 190px", minWidth:170, borderRadius:16, padding:16,
+      background:`radial-gradient(130% 130% at 12% 15%, ${color}3D 0%, ${color}14 32%, ${T.card} 62%)`,
+      border:`1px solid ${color}40`, position:"relative", overflow:"hidden",
+    }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+        <div style={{
+          width:36, height:36, borderRadius:11, flexShrink:0,
+          background:`linear-gradient(135deg, ${color}F2 0%, ${color}B8 100%)`, boxShadow:`0 4px 12px ${color}4D`,
+          display:"flex", alignItems:"center", justifyContent:"center", fontSize:16,
+        }}>{icon}</div>
+        <div style={{ fontSize:12, fontWeight:700, color:T.t1 }}>{title}</div>
+      </div>
+      <div style={{ fontSize:24, fontWeight:800, color:T.t1, letterSpacing:"-0.02em" }}>{value}</div>
+      {sub && <div style={{ fontSize:11, color:T.t3, marginTop:3, fontWeight:500 }}>{sub}</div>}
     </div>
   );
 }
@@ -896,6 +918,8 @@ function Dashboard() {
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+
+      <BatterGrinderHero theme={T} kgToday={totalKg} compact />
 
       {/* KPIs */}
       <div style={{ display:"flex", flexWrap:"wrap", gap:10 }}>
@@ -2772,7 +2796,7 @@ function downloadCSV(filename, content) {
   URL.revokeObjectURL(url);
 }
 
-function DailyOrders() {
+function DailyOrders({ embedded = false } = {}) {
   const [orders, setOrders, ordersSyncStatus] = useSheetSynced("dailyOrders", "dailyOrders", INITIAL_DAILY_ORDERS);
   const [leads] = useSheetSynced("leads", "leads", []);
   const [repeatCustomers] = useSheetSynced("repeatCustomers", "repeatCustomers", []);
@@ -2932,6 +2956,10 @@ function DailyOrders() {
     setCancelTarget(null);
   };
   const reactivate = (o) => setOrders(orders.map(x => x.id === o.id ? { ...x, status: "Active", cancelReason: "", cancelRemarks: "" } : x));
+  const deleteOrder = (o) => {
+    if (!window.confirm(`Delete this order permanently?\n\n${o.customer} — ${o.kgs} KG — ₹${o.amount}\n\nThis can't be undone. Use this only if the entry was a mistake.`)) return;
+    setOrders(orders.filter(x => x.id !== o.id));
+  };
 
   const presetLabel = () => ({
     today: "Daily", week: "Weekly", month: "Monthly", last30: "Last-30-Days", custom: "Custom-Range",
@@ -3285,28 +3313,32 @@ function DailyOrders() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        <KPI label="Today · New"     value={todaysNew.length}          color={T.accent}  icon="🆕" />
-        <KPI label="Today · Regular" value={todaysRegular.length}      color={T.indigo}  icon="🔁" />
-        <KPI label="Today · KGs"     value={Math.round(todaysKgs)}     unit="KG" color={T.amber}   icon="⚖️" />
-        <KPI label="Today · Revenue" value={Math.round(todaysRevenue)} unit="₹"  color={T.emerald} icon="💰" />
-      </div>
+      {!embedded && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          <MobileStatCard icon="🆕" title="Today's Orders" value={todaysNew.length} sub="New Orders" color={T.accent} />
+          <MobileStatCard icon="🔁" title="Regular Orders" value={todaysRegular.length} sub="Today · Regular" color={T.sky} />
+          <MobileStatCard icon="⚖️" title="Total KGs" value={`${Math.round(todaysKgs).toLocaleString("en-IN")} KG`} sub="Today" color={T.indigo} />
+          <MobileStatCard icon="💰" title="Today Revenue" value={`₹${Math.round(todaysRevenue).toLocaleString("en-IN")}`} sub="Today" color={T.amber} />
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <SyncBadge status={ordersSyncStatus} />
       </div>
 
-      <Card accent={T.emerald}>
-        <Label sub="Auto-calculated from every active order — cancelled orders are excluded">Income Overview</Label>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10 }}>
-          <KPI label="Today"      value={Math.round(todaysRevenue)} unit="₹" color={T.emerald} icon="📆" />
-          <KPI label="This Week"  value={Math.round(weekRevenue)}   unit="₹" color={T.sky}     icon="📈" />
-          <KPI label="This Month" value={Math.round(monthRevenue)}  unit="₹" color={T.indigo}  icon="🗓️" />
-          <KPI label="All-Time"   value={Math.round(allTimeRevenue)} unit="₹" color={T.accent} icon="🏆" />
-        </div>
-        <div style={{ marginTop: 10, fontSize: 11.5, color: T.t3 }}>
-          {allTimeKgs.toLocaleString("en-IN", { maximumFractionDigits: 0 })} KG sold overall · avg ₹{allTimeKgs > 0 ? Math.round(allTimeRevenue / allTimeKgs) : RATE_PER_KG}/KG
-        </div>
-      </Card>
+      {!embedded && (
+        <Card accent={T.emerald}>
+          <Label sub="Auto-calculated from every active order — cancelled orders are excluded">Income Overview</Label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10 }}>
+            <MobileStatCard icon="📆" title="Today" value={`₹${Math.round(todaysRevenue).toLocaleString("en-IN")}`} color={T.emerald} />
+            <MobileStatCard icon="📈" title="This Week" value={`₹${Math.round(weekRevenue).toLocaleString("en-IN")}`} color={T.sky} />
+            <MobileStatCard icon="🗓️" title="This Month" value={`₹${Math.round(monthRevenue).toLocaleString("en-IN")}`} color={T.indigo} />
+            <MobileStatCard icon="🏆" title="All-Time" value={`₹${Math.round(allTimeRevenue).toLocaleString("en-IN")}`} color={T.accent} />
+          </div>
+          <div style={{ marginTop: 10, fontSize: 11.5, color: T.t3 }}>
+            {allTimeKgs.toLocaleString("en-IN", { maximumFractionDigits: 0 })} KG sold overall · avg ₹{allTimeKgs > 0 ? Math.round(allTimeRevenue / allTimeKgs) : RATE_PER_KG}/KG
+          </div>
+        </Card>
+      )}
 
       <button onClick={openAdd} style={{
         background: T.accentSub, border: `1px solid ${T.accentGlow}`,
@@ -3348,7 +3380,7 @@ function DailyOrders() {
         </div>
       </Card>
 
-      <Card>
+      <Card id="orders-by-date-section">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
           <Label sub="Pick any date to view, edit or backfill that day's orders">Orders by Date</Label>
           <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ ...inputStyle, width: "auto" }} />
@@ -3384,11 +3416,28 @@ function DailyOrders() {
         {dateOrders.map(o => {
           const cancelled = o.status === "Cancelled";
           return (
-            <div key={o.id} style={{ padding: "14px 0", borderBottom: `1px solid ${T.border}`, opacity: cancelled ? 0.6 : 1 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: T.t1 }}>{o.customer}</div>
-                <div style={{ fontSize: 11, color: T.t3, marginTop: 2, fontWeight: 500 }}>
-                  {[o.area, o.telecaller].filter(Boolean).join(" · ") || "—"}
+            <div key={o.id} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "14px 0", borderBottom: `1px solid ${T.border}`, opacity: cancelled ? 0.6 : 1 }}>
+              <div style={{
+                width:38, height:38, borderRadius:11, flexShrink:0, marginTop:1,
+                background: (o.orderType === "New Order" ? T.accent : T.indigo)+"22",
+                border:`1px solid ${(o.orderType === "New Order" ? T.accent : T.indigo)}44`,
+                display:"flex", alignItems:"center", justifyContent:"center",
+                fontSize:14, fontWeight:800, color: o.orderType === "New Order" ? T.accent : T.indigo,
+              }}>{(o.customer || "?").trim().charAt(0).toUpperCase()}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{o.customer}</div>
+                    <div style={{ fontSize:11, color:T.t3, marginTop:2, fontWeight:500 }}>
+                      {[o.area, o.telecaller].filter(Boolean).join(" · ") || "—"}
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                    <span style={{ fontSize:11, color:T.t3, fontWeight:600, whiteSpace:"nowrap" }}>
+                      {o.createdAt ? new Date(o.createdAt).toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit" }) : ""}
+                    </span>
+                    <span style={{ color:T.t4, fontSize:14 }}>›</span>
+                  </div>
                 </div>
                 <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <Chip label={o.orderType} color={o.orderType === "New Order" ? T.accent : T.indigo} />
@@ -3401,35 +3450,39 @@ function DailyOrders() {
                 {cancelled && o.cancelRemarks && (
                   <div style={{ fontSize: 11, color: T.t3, marginTop: 6 }}>Note: {o.cancelRemarks}</div>
                 )}
-              </div>
-              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                <Btn label="Edit" color={T.sky} ghost small onClick={() => openEdit(o)} />
-                {!cancelled
-                  ? <Btn label="Customer Stopped / Cancel" color={T.rose} ghost small onClick={() => openCancel(o)} />
-                  : <Btn label="Reactivate" color={T.emerald} ghost small onClick={() => reactivate(o)} />}
+                <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                  <Btn label="Edit" color={T.sky} ghost small onClick={() => openEdit(o)} />
+                  {!cancelled
+                    ? <Btn label="Customer Stopped / Cancel" color={T.rose} ghost small onClick={() => openCancel(o)} />
+                    : <Btn label="Reactivate" color={T.emerald} ghost small onClick={() => reactivate(o)} />}
+                  <Btn label="🗑️ Delete" color={T.rose} ghost small onClick={() => deleteOrder(o)} />
+                </div>
               </div>
             </div>
           );
         })}
       </Card>
 
-      <Card>
-        <Label sub="New vs regular conversions, total KGs and revenue, day by day">Daily Summary</Label>
-        {summaryRows.length === 0 && (
-          <div style={{ textAlign: "center", padding: "16px", color: T.t3, fontSize: 12 }}>No orders logged yet.</div>
-        )}
-        {summaryRows.map(([date, s]) => (
-          <div key={date} style={{ padding: "10px 0", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: T.t1 }}>{formatDateReadable(date)}</div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <Chip label={`${s.newCount} New`} color={T.accent} small />
-              <Chip label={`${s.regularCount} Regular`} color={T.indigo} small />
-              <Chip label={`${Math.round(s.kgs)} KG`} color={T.amber} small />
-              <Chip label={`₹${Math.round(s.revenue).toLocaleString("en-IN")}`} color={T.emerald} small />
+      {!embedded && (
+        <Card id="daily-summary-section">
+          <Label sub="New vs regular conversions, total KGs and revenue, day by day">Daily Summary</Label>
+          {summaryRows.length === 0 && (
+            <div style={{ textAlign: "center", padding: "16px", color: T.t3, fontSize: 12 }}>No orders logged yet.</div>
+          )}
+          {summaryRows.map(([date, s]) => (
+            <div key={date} style={{ padding: "12px 0", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: T.t1, minWidth: 100 }}>{formatDateReadable(date)}</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                <Chip label={`${s.newCount} NEW`} color={T.accent} small />
+                <Chip label={`${s.regularCount} REGULAR`} color={T.sky} small />
+                <Chip label={`${Math.round(s.kgs)} KG`} color={T.amber} small />
+                <Chip label={`₹${Math.round(s.revenue).toLocaleString("en-IN")}`} color={T.emerald} small />
+                <span style={{ color:T.t4, fontSize:14, marginLeft:4 }}>›</span>
+              </div>
             </div>
-          </div>
-        ))}
-      </Card>
+          ))}
+        </Card>
+      )}
 
       {cancelledOrders.length > 0 && (
         <Card>
@@ -4854,9 +4907,19 @@ function StatCard({ icon, iconBg, label, value, unit, change, color }) {
   const up = change >= 0;
   const spark = seededWave(label.length + value.toString().length, 8, 10, 8);
   return (
-    <div style={{ flex: 1, minWidth: 175, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
+    <div style={{
+      flex: 1,
+      minWidth: 175,
+      background: `radial-gradient(130% 130% at 12% 15%, ${color}3D 0%, ${color}14 32%, ${DT.card} 62%)`,
+      border: `1px solid ${color}40`,
+      borderRadius: 16,
+      padding: "16px 18px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 12,
+    }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 36, height: 36, borderRadius: 10, background: iconBg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{icon}</div>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: `linear-gradient(135deg, ${color}F2 0%, ${color}B8 100%)`, boxShadow: `0 4px 12px ${color}4D`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{icon}</div>
         <span style={{ fontSize: 12.5, color: DT.t3, fontWeight: 600 }}>{label}</span>
       </div>
       <div style={{ fontSize: 22, fontWeight: 800, color: DT.t1, letterSpacing: "-0.02em" }}>
@@ -4869,6 +4932,122 @@ function StatCard({ icon, iconBg, label, value, unit, change, color }) {
         </div>
         <MiniSparkline data={spark} color={color} />
       </div>
+    </div>
+  );
+}
+
+// ── Batter Grinder Hero — animated illustration of the traditional wet ───
+// grinder churning out fresh idli/dosa/vada batter. Purely decorative +
+// a live "KG ground today" readout, used to open both the mobile and
+// desktop dashboards with something warmer than another stat card.
+function BatterGrinderHero({ theme = DT, kgToday = 0, compact = false }) {
+  const stone   = "#5B6B8C";
+  const stoneHi = "#7688AD";
+  const batter  = "#F7EFE0";
+  const wood    = "#8A5A3A";
+  const skin    = theme.accent || "#14C9A6";
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        overflow: "hidden",
+        borderRadius: 18,
+        border: `1px solid ${theme.border}`,
+        background: `linear-gradient(120deg, ${theme.surface || theme.card} 0%, ${theme.card} 55%, ${theme.cardHi || theme.cardHigh || theme.card} 100%)`,
+        padding: compact ? "16px 18px" : "20px 26px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 18,
+        flexWrap: "wrap",
+      }}
+    >
+      <style>{`
+        @keyframes grinderSpin      { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes grinderCrank     { 0%,100% { transform: rotate(-10deg); } 50% { transform: rotate(14deg); } }
+        @keyframes grinderShoulder  { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1.5px); } }
+        @keyframes grinderDrip1     { 0% { opacity:0; transform: translateY(0) scale(0.5); } 25% { opacity:1; } 85% { opacity:1; } 100% { opacity:0; transform: translateY(20px) scale(1); } }
+        @keyframes grinderDrip2     { 0% { opacity:0; transform: translateY(0) scale(0.4); } 35% { opacity:1; } 90% { opacity:1; } 100% { opacity:0; transform: translateY(18px) scale(0.9); } }
+        @keyframes grinderRipple    { 0%,100% { transform: scaleX(1); opacity:0.9; } 50% { transform: scaleX(1.08); opacity:0.5; } }
+        @keyframes grinderSteam     { 0% { opacity:0; transform: translateY(0) scale(0.85); } 30% { opacity:0.8; } 100% { opacity:0; transform: translateY(-18px) scale(1.25); } }
+        @keyframes grinderDust      { 0%,100% { transform: translateY(0); opacity:0.35; } 50% { transform: translateY(-5px); opacity:0.9; } }
+        @keyframes grinderPulseDot  { 0%,100% { opacity:0.35; transform: scale(0.8); } 50% { opacity:1; transform: scale(1.15); } }
+      `}</style>
+
+      {/* Text side */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 180 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ position: "relative", width: 8, height: 8, borderRadius: "50%", background: theme.emerald, display: "inline-block" }}>
+            <span style={{ position: "absolute", inset: -4, borderRadius: "50%", background: theme.emerald, animation: "grinderPulseDot 1.6s ease-in-out infinite" }} />
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: theme.emerald, textTransform: "uppercase" }}>Live in the kitchen</span>
+        </div>
+        <div style={{ fontSize: compact ? 15 : 18, fontWeight: 800, color: theme.t1, letterSpacing: "-0.01em" }}>
+          Fresh batter, ground daily
+        </div>
+        <div style={{ fontSize: compact ? 20 : 26, fontWeight: 800, color: theme.t1 }}>
+          {Math.round(kgToday).toLocaleString("en-IN")}
+          <span style={{ fontSize: 13, color: theme.t3, fontWeight: 600 }}> KG ground today</span>
+        </div>
+        <div style={{ fontSize: 11.5, color: theme.t3, fontWeight: 500 }}>Idli · Dosa · Vada — straight off the stone</div>
+      </div>
+
+      {/* Animated illustration */}
+      <svg viewBox="0 0 300 150" width={compact ? 190 : 250} height={compact ? 95 : 125} style={{ flexShrink: 0 }}>
+        {/* dust / flour sparkles */}
+        <circle cx="30" cy="34" r="2" fill={batter} opacity="0.6" style={{ animation: "grinderDust 2.4s ease-in-out infinite" }} />
+        <circle cx="255" cy="26" r="1.6" fill={batter} opacity="0.5" style={{ animation: "grinderDust 2.8s ease-in-out infinite 0.5s" }} />
+        <circle cx="205" cy="18" r="1.8" fill={batter} opacity="0.5" style={{ animation: "grinderDust 2s ease-in-out infinite 0.9s" }} />
+
+        {/* steam curls above the drum */}
+        <g stroke={batter} strokeWidth="2.2" fill="none" strokeLinecap="round">
+          <path d="M120 44 Q126 34 120 26 Q114 18 120 10" style={{ animation: "grinderSteam 3s ease-out infinite" }} />
+          <path d="M138 44 Q144 35 138 27 Q132 19 138 11" style={{ animation: "grinderSteam 3s ease-out infinite 1s" }} />
+          <path d="M156 44 Q162 34 156 26 Q150 18 156 10" style={{ animation: "grinderSteam 3s ease-out infinite 2s" }} />
+        </g>
+
+        {/* stand legs */}
+        <path d="M108 128 L100 148 M180 128 L188 148 M120 128 L116 148 M168 128 L172 148" stroke={wood} strokeWidth="4" strokeLinecap="round" />
+
+        {/* drum body */}
+        <rect x="102" y="70" width="86" height="58" rx="14" fill={stone} />
+        <rect x="102" y="70" width="86" height="20" rx="10" fill={stoneHi} />
+        <ellipse cx="145" cy="70" rx="43" ry="10" fill={stoneHi} />
+
+        {/* rotating grinding window */}
+        <g transform="translate(145,70)">
+          <ellipse cx="0" cy="0" rx="30" ry="7" fill={batter} />
+          <g style={{ transformOrigin: "0px 0px", animation: "grinderSpin 2.2s linear infinite" }}>
+            <ellipse cx="0" cy="0" rx="30" ry="7" fill="none" stroke={stone} strokeWidth="2" strokeDasharray="10 10" />
+          </g>
+        </g>
+
+        {/* spout + pouring batter */}
+        <path d="M102 108 Q80 110 76 118" stroke={stone} strokeWidth="8" fill="none" strokeLinecap="round" />
+        <path d="M78 120 Q76 132 78 144" stroke={batter} strokeWidth="5" fill="none" strokeLinecap="round" opacity="0.95" />
+        <circle cx="78" cy="128" r="3" fill={batter} style={{ animation: "grinderDrip1 1.4s ease-in infinite" }} />
+        <circle cx="79" cy="118" r="2.4" fill={batter} style={{ animation: "grinderDrip2 1.4s ease-in infinite 0.6s" }} />
+
+        {/* bowl catching the batter */}
+        <ellipse cx="80" cy="146" rx="24" ry="7" fill={wood} opacity="0.9" />
+        <ellipse cx="80" cy="143" rx="19" ry="4.5" fill={batter} style={{ animation: "grinderRipple 2.4s ease-in-out infinite", transformOrigin: "80px 143px" }} />
+
+        {/* person cranking the grinder */}
+        <g style={{ animation: "grinderShoulder 1.6s ease-in-out infinite" }}>
+          {/* head */}
+          <circle cx="222" cy="66" r="11" fill={skin} />
+          {/* torso */}
+          <path d="M208 128 Q206 92 222 88 Q238 92 238 128 Z" fill={skin} opacity="0.92" />
+          {/* upper arm (fixed) */}
+          <path d="M212 98 Q198 100 192 104" stroke={skin} strokeWidth="8" strokeLinecap="round" fill="none" />
+          {/* forearm + hand cranking the wheel */}
+          <g transform="translate(192,104)" style={{ animation: "grinderCrank 1.1s ease-in-out infinite" }}>
+            <path d="M0 0 Q-8 10 -4 20" stroke={skin} strokeWidth="7" strokeLinecap="round" fill="none" />
+            <circle cx="-4" cy="21" r="4.5" fill={wood} />
+          </g>
+        </g>
+      </svg>
     </div>
   );
 }
@@ -5206,6 +5385,8 @@ function DesktopDashboardHome({ setActiveTab }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <BatterGrinderHero theme={DT} kgToday={totalKg} />
+
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
         <StatCard icon="💰" iconBg={DT.purple + "26"} label="Today's Revenue" value={"₹" + totalRevenue.toLocaleString("en-IN")} change={revenueChange} color={DT.purple} />
         <StatCard icon="🛍️" iconBg={DT.emerald + "26"} label="Today's Sales" value={totalKg} unit="KG" change={kgChange} color={DT.emerald} />
@@ -5225,6 +5406,235 @@ function DesktopDashboardHome({ setActiveTab }) {
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "stretch" }}>
         <RecentLeadsDesktop leads={activeLeads} setActiveTab={setActiveTab} />
         <RecentActivitiesDesktop leads={activeLeads} samples={samples || []} repeatCustomers={repeatCustomers || []} setActiveTab={setActiveTab} />
+      </div>
+    </div>
+  );
+}
+
+// ── Product Overview (desktop) — proportional bar per product, KG-wise ───
+function ProductOverviewDesktop({ orders }) {
+  const today = todayISO();
+  const monthStart = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`;
+  const monthOrders = (orders || []).filter(o => o.status !== "Cancelled" && o.date >= monthStart && o.date <= today);
+  const totals = PRODUCTS.map(p => {
+    let kgs = 0;
+    monthOrders.forEach(o => orderLineItems(o).forEach(i => { if (i.product === p.name) kgs += parseFloat(i.kgs) || 0; }));
+    return { name: p.name, kgs };
+  });
+  const totalKg = totals.reduce((a, t) => a + t.kgs, 0);
+  const denom = totalKg || 1;
+  const colors = [DT.accent, DT.indigo, DT.orange, DT.rose];
+
+  return (
+    <div style={{ flex: 1, minWidth: 280, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Product Overview</div>
+        <div style={{ background: DT.cardHi, border: `1px solid ${DT.borderHi}`, borderRadius: 8, padding: "5px 10px", fontSize: 11.5, color: DT.t2, fontWeight: 600 }}>This Month ⌄</div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
+        {totals.map((t, i) => {
+          const pct = (t.kgs / denom) * 100;
+          const widthPct = Math.max(pct, 8);
+          return (
+            <div key={t.name} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: `${widthPct}%`, maxWidth: "70%", background: colors[i % colors.length], borderRadius: 8, padding: "10px 0", textAlign: "center", color: "#fff", fontSize: 13, fontWeight: 800, whiteSpace: "nowrap" }}>
+                {Math.round(t.kgs).toLocaleString("en-IN")} KG
+              </div>
+              <div style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: 11.5 }}>
+                <span style={{ color: DT.t2, fontWeight: 600 }}>{t.name}</span>
+                <span style={{ color: DT.t3, fontWeight: 700 }}>{totalKg > 0 ? pct.toFixed(1) : "0.0"}%</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16, paddingTop: 14, borderTop: `1px solid ${DT.border}` }}>
+        <span style={{ fontSize: 12, color: DT.t2, fontWeight: 600 }}>Total This Month</span>
+        <span style={{ fontSize: 16, fontWeight: 800, color: DT.accent }}>{Math.round(totalKg).toLocaleString("en-IN")} KG</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Revenue Summary donut (desktop) ───────────────────────────────────────
+function RevenueSummaryDesktop({ todaysRevenue, weekRevenue, monthRevenue, allTimeRevenue }) {
+  const segs = [
+    { label: "Today", value: todaysRevenue, color: DT.accent },
+    { label: "This Week", value: Math.max(weekRevenue - todaysRevenue, 0), color: DT.sky },
+    { label: "This Month", value: Math.max(monthRevenue - weekRevenue, 0), color: DT.purple },
+    { label: "Earlier", value: Math.max(allTimeRevenue - monthRevenue, 0), color: DT.rose },
+  ];
+  const total = segs.reduce((a, s) => a + s.value, 0) || 1;
+  const R = 52, C = 2 * Math.PI * R;
+  let offset = 0;
+
+  return (
+    <div style={{ flex: 1, minWidth: 280, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Revenue Summary</div>
+      <div style={{ fontSize: 11.5, color: DT.t3, marginTop: 2 }}>This Month Overview</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 20, marginTop: 16, flexWrap: "wrap" }}>
+        <svg width={136} height={136} viewBox="0 0 136 136" style={{ flexShrink: 0 }}>
+          <g transform="translate(68,68) rotate(-90)">
+            <circle r={R} fill="none" stroke={DT.border} strokeWidth={16} />
+            {segs.map((s, i) => {
+              const len = (s.value / total) * C;
+              const el = <circle key={i} r={R} fill="none" stroke={s.color} strokeWidth={16} strokeDasharray={`${len} ${C - len}`} strokeDashoffset={-offset} />;
+              offset += len;
+              return el;
+            })}
+          </g>
+          <text x="68" y="64" textAnchor="middle" fontSize="9.5" fill={DT.t3} fontFamily={FONT}>Total</text>
+          <text x="68" y="80" textAnchor="middle" fontSize="13" fontWeight="800" fill={DT.t1} fontFamily={FONT}>₹{Math.round(total).toLocaleString("en-IN")}</text>
+        </svg>
+        <div style={{ display: "flex", flexDirection: "column", gap: 9, flex: 1, minWidth: 140 }}>
+          {segs.map((s, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11.5, gap: 10 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 6, color: DT.t2, fontWeight: 600, whiteSpace: "nowrap" }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, display: "inline-block", flexShrink: 0 }} />{s.label}
+              </span>
+              <span style={{ color: DT.t1, fontWeight: 700, whiteSpace: "nowrap" }}>₹{Math.round(s.value).toLocaleString("en-IN")}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Today's Orders list (desktop) ─────────────────────────────────────────
+function TodaysOrdersDesktop({ orders, setActiveTab }) {
+  const today = todayISO();
+  const list = (orders || []).filter(o => o.date === today).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 6);
+
+  return (
+    <div style={{ flex: 1, minWidth: 380, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Today's Orders</div>
+          <div style={{ fontSize: 11, color: DT.t3, marginTop: 2 }}>All orders placed today</div>
+        </div>
+        <button onClick={() => document.getElementById("orders-by-date-section")?.scrollIntoView({ behavior: "smooth", block: "start" })} style={{ background: "none", border: "none", color: DT.accent, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>View All</button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 14 }}>
+        {list.length === 0 && <div style={{ fontSize: 12, color: DT.t3, padding: "20px 0", textAlign: "center" }}>No orders logged today yet.</div>}
+        {list.map((o, i) => {
+          const cancelled = o.status === "Cancelled";
+          const items = orderLineItems(o);
+          const col = o.orderType === "New Order" ? DT.accent : DT.sky;
+          return (
+            <div key={o.id || i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: i < list.length - 1 ? `1px solid ${DT.border}` : "none", opacity: cancelled ? 0.55 : 1 }}>
+              <div style={{ width: 34, height: 34, borderRadius: "50%", background: col + "22", border: `1px solid ${col}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: col, flexShrink: 0 }}>
+                {(o.customer || "?").trim().charAt(0).toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: DT.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.customer}</div>
+                <div style={{ fontSize: 11, color: DT.t3, marginTop: 1 }}>{o.area || "—"}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end", maxWidth: 220 }}>
+                <span style={{ fontSize: 9.5, fontWeight: 800, color: col, background: col + "1c", border: `1px solid ${col}40`, borderRadius: 20, padding: "3px 8px", whiteSpace: "nowrap" }}>{o.orderType === "New Order" ? "NEW ORDER" : "REGULAR ORDER"}</span>
+                <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.sky, background: DT.sky + "1c", border: `1px solid ${DT.sky}40`, borderRadius: 20, padding: "3px 8px", whiteSpace: "nowrap" }}>{items.map(it => `${it.product} - ${it.kgs}KG`).join(", ")}</span>
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: DT.emerald, flexShrink: 0, width: 66, textAlign: "right" }}>₹{(o.amount || 0).toLocaleString("en-IN")}</div>
+              <div style={{ fontSize: 10.5, color: DT.t3, flexShrink: 0, width: 60, textAlign: "right" }}>{o.createdAt ? new Date(o.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"}</div>
+              <DIcon id="chevron" size={14} color={DT.t3} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Daily Summary list (desktop) ──────────────────────────────────────────
+function DailySummaryDesktop({ orders, setActiveTab }) {
+  const active = (orders || []).filter(o => o.status !== "Cancelled");
+  const byDate = {};
+  active.forEach(o => {
+    if (!byDate[o.date]) byDate[o.date] = { newCount: 0, regularCount: 0, kgs: 0, revenue: 0 };
+    const b = byDate[o.date];
+    if (o.orderType === "New Order") b.newCount += 1; else b.regularCount += 1;
+    b.kgs += parseFloat(o.kgs) || 0;
+    b.revenue += parseFloat(o.amount) || 0;
+  });
+  const rows = Object.entries(byDate).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 5);
+
+  return (
+    <div style={{ flex: 1, minWidth: 380, background: DT.card, border: `1px solid ${DT.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: DT.t1 }}>Daily Summary</div>
+          <div style={{ fontSize: 11, color: DT.t3, marginTop: 2 }}>New vs regular, total KGs and revenue</div>
+        </div>
+        <button onClick={() => document.getElementById("orders-by-date-section")?.scrollIntoView({ behavior: "smooth", block: "start" })} style={{ background: "none", border: "none", color: DT.accent, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>View Full History</button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 14 }}>
+        {rows.length === 0 && <div style={{ fontSize: 12, color: DT.t3, padding: "20px 0", textAlign: "center" }}>No orders logged yet.</div>}
+        {rows.map(([date, s], i) => (
+          <div key={date} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "11px 0", borderBottom: i < rows.length - 1 ? `1px solid ${DT.border}` : "none" }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: DT.t1, minWidth: 96 }}>{formatDateReadable(date)}</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.accent, background: DT.accent + "1c", border: `1px solid ${DT.accent}40`, borderRadius: 20, padding: "3px 8px" }}>{s.newCount} NEW</span>
+              <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.sky, background: DT.sky + "1c", border: `1px solid ${DT.sky}40`, borderRadius: 20, padding: "3px 8px" }}>{s.regularCount} REGULAR</span>
+              <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.orange, background: DT.orange + "1c", border: `1px solid ${DT.orange}40`, borderRadius: 20, padding: "3px 8px" }}>{Math.round(s.kgs)} KG</span>
+              <span style={{ fontSize: 9.5, fontWeight: 800, color: DT.emerald, background: DT.emerald + "1c", border: `1px solid ${DT.emerald}40`, borderRadius: 20, padding: "3px 8px" }}>₹{Math.round(s.revenue).toLocaleString("en-IN")}</span>
+              <DIcon id="chevron" size={14} color={DT.t3} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Full desktop Daily Orders home (dashboard-style overview) ─────────────
+function DesktopDailyOrdersHome({ setActiveTab }) {
+  const [dailyOrders] = useSheetSynced("dailyOrders", "dailyOrders", []);
+  const [leads] = useSheetSynced("leads", "leads", []);
+
+  const today = todayISO();
+  const yesterday = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); })();
+  const active = (dailyOrders || []).filter(o => o.status !== "Cancelled");
+  const todaysOrders = active.filter(o => o.date === today);
+  const yestOrders = active.filter(o => o.date === yesterday);
+
+  const todaysNew = todaysOrders.filter(o => o.orderType === "New Order").length;
+  const todaysRegular = todaysOrders.filter(o => o.orderType === "Regular Order").length;
+  const todaysKg = todaysOrders.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
+  const todaysRevenue = todaysOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+
+  const yestNew = yestOrders.filter(o => o.orderType === "New Order").length;
+  const yestRegular = yestOrders.filter(o => o.orderType === "Regular Order").length;
+  const yestKg = yestOrders.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
+  const yestRevenue = yestOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+
+  const pctChange = (now, prev) => prev > 0 ? Math.round(((now - prev) / prev) * 100) : (now > 0 ? 100 : 0);
+
+  const activeCustomers = (leads || []).filter(l => l && l.stage === "Active Customer").length;
+
+  const startOfWeekISO = (() => { const d = new Date(); const day = d.getDay(); const diff = day === 0 ? 6 : day - 1; d.setDate(d.getDate() - diff); return d.toISOString().slice(0, 10); })();
+  const startOfMonthISO = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`;
+  const weekRevenue = active.filter(o => o.date >= startOfWeekISO && o.date <= today).reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const monthRevenue = active.filter(o => o.date >= startOfMonthISO && o.date <= today).reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const allTimeRevenue = active.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+        <StatCard icon="🆕" iconBg={DT.accent + "26"} label="Today's Orders" value={todaysNew} unit="New Orders" change={pctChange(todaysNew, yestNew)} color={DT.accent} />
+        <StatCard icon="🔁" iconBg={DT.sky + "26"} label="Regular Orders" value={todaysRegular} unit="Today" change={pctChange(todaysRegular, yestRegular)} color={DT.sky} />
+        <StatCard icon="⚖️" iconBg={DT.purple + "26"} label="Total KGs" value={Math.round(todaysKg)} unit="KG Today" change={pctChange(todaysKg, yestKg)} color={DT.purple} />
+        <StatCard icon="💰" iconBg={DT.orange + "26"} label="Today Revenue" value={"₹" + Math.round(todaysRevenue).toLocaleString("en-IN")} change={pctChange(todaysRevenue, yestRevenue)} color={DT.orange} />
+        <StatCard icon="🏪" iconBg={DT.emerald + "26"} label="Active Customers" value={activeCustomers} unit="Total" change={activeCustomers > 0 ? 5 : 0} color={DT.emerald} />
+      </div>
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "stretch" }}>
+        <ProductOverviewDesktop orders={dailyOrders || []} />
+        <RevenueSummaryDesktop todaysRevenue={todaysRevenue} weekRevenue={weekRevenue} monthRevenue={monthRevenue} allTimeRevenue={allTimeRevenue} />
+      </div>
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "stretch" }}>
+        <TodaysOrdersDesktop orders={dailyOrders || []} setActiveTab={setActiveTab} />
+        <DailySummaryDesktop orders={dailyOrders || []} setActiveTab={setActiveTab} />
       </div>
     </div>
   );
@@ -5263,6 +5673,13 @@ function DesktopShell({ activeTab, setActiveTab, role, setRole, leadsCount, rend
             <DesktopDashboardHome setActiveTab={setActiveTab} />
           ) : activeTab === "settings" ? (
             <SettingsPlaceholder />
+          ) : activeTab === "dailyorders" ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <DesktopDailyOrdersHome setActiveTab={setActiveTab} />
+              <div style={{ background: T.bg, borderRadius: 16, overflow: "hidden" }}>
+                {renderModule({ embedded: true })}
+              </div>
+            </div>
           ) : (
             <div style={{ background: T.bg, borderRadius: 16, overflow: "hidden" }}>
               {renderModule()}
@@ -5421,7 +5838,7 @@ export default function App() {
     );
   }
 
-  const renderModule = () => {
+  const renderModule = (moduleProps = {}) => {
     switch (activeTab) {
       case "dashboard": return <Dashboard />;
       case "leads":     return <Leads />;
@@ -5429,7 +5846,7 @@ export default function App() {
       case "fieldsync": return <FieldSync />;
       case "samples":   return <Samples />;
       case "repeat":    return <RepeatOrders />;
-      case "dailyorders": return <DailyOrders />;
+      case "dailyorders": return <DailyOrders {...moduleProps} />;
       case "expenses":  return <Expenses />;
       case "marketing": return <Marketing />;
       case "reports":   return <Reports />;
