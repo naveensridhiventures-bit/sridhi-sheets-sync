@@ -3719,8 +3719,9 @@ function DailyOrders({ embedded = false } = {}) {
         // Column layout: Time, Customer, Contact, Address, Map, <one col per product>, Order Type, Amount
         const contactColIdx = 2;
         const mapColIdx = 4;
-        const typeColIdx = 5 + productCols.length;
-        const amountColIdx = 6 + productCols.length;
+        const porterColIdx = 5;
+        const typeColIdx = 6 + productCols.length;
+        const amountColIdx = 7 + productCols.length;
 
         const body = dayOrders.map(o => {
           const items = orderLineItems(o);
@@ -3730,13 +3731,13 @@ function DailyOrders({ embedded = false } = {}) {
           });
           const typeLabel = o.orderType === "Sample" ? `Sample (${o.sampleType || "Free"})` : o.orderType.replace(" Order", "");
           const fullAddress = [o.address, o.area].filter(Boolean).join(", ") || "—";
-          return [timeInfo(o).label, o.customer, o.contact || "—", fullAddress, o.mapLink ? "View Map" : "—", ...kgByProduct, typeLabel, `Rs ${(o.amount || 0).toLocaleString("en-IN")}`];
+          return [timeInfo(o).label, o.customer, o.contact || "—", fullAddress, o.mapLink ? "View Map" : "—", fullAddress !== "—" ? "Book" : "—", ...kgByProduct, typeLabel, `Rs ${(o.amount || 0).toLocaleString("en-IN")}`];
         });
 
         autoTable(doc, {
           startY: y,
           margin: { left: margin, right: margin, bottom: 40 },
-          head: [["Time", "Customer Name", "Contact", "Address (full)", "Map", ...productCols, "Order Type", "Amount"]],
+          head: [["Time", "Customer Name", "Contact", "Address (full)", "Map", "Porter", ...productCols, "Order Type", "Amount"]],
           body,
           theme: "grid",
           styles: { font: "helvetica", fontSize: 9, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "middle" },
@@ -3747,6 +3748,7 @@ function DailyOrders({ embedded = false } = {}) {
             1: { fontStyle: "bold" },                        // Customer name
             3: { cellWidth: 150 },                            // Full address gets room to breathe
             4: { halign: "center", cellWidth: 46 },           // Map link
+            [porterColIdx]: { halign: "center", cellWidth: 46 }, // Porter booking link
             [amountColIdx]: { halign: "right", fontStyle: "bold" },
           },
           didParseCell: (data) => {
@@ -3763,6 +3765,10 @@ function DailyOrders({ embedded = false } = {}) {
               data.cell.styles.textColor = INDIGO;
               data.cell.styles.fontStyle = "bold";
             }
+            if (data.section === "body" && data.column.index === porterColIdx && data.cell.raw === "Book") {
+              data.cell.styles.textColor = AMBER; // Porter's brand-ish amber to distinguish from the Maps link
+              data.cell.styles.fontStyle = "bold";
+            }
             if (data.section === "body" && data.column.index === contactColIdx && data.cell.raw !== "—") {
               data.cell.styles.textColor = [37, 130, 90]; // WhatsApp-green to signal it's tappable
               data.cell.styles.fontStyle = "bold";
@@ -3775,6 +3781,12 @@ function DailyOrders({ embedded = false } = {}) {
               if (order && order.mapLink) {
                 doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: order.mapLink });
               }
+            }
+            // Make the "Book" cell open Porter so the driver/accountant can book a Porter pickup for this delivery.
+            // Porter doesn't support prefilling pickup/drop via a public URL, so this opens Porter's
+            // booking page/app — the address is already right there in the row to copy in.
+            if (data.section === "body" && data.column.index === porterColIdx && data.cell.raw === "Book") {
+              doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: "https://porter.in/" });
             }
             // Make the Contact cell an actual clickable link that opens a WhatsApp chat with that number.
             if (data.section === "body" && data.column.index === contactColIdx) {
