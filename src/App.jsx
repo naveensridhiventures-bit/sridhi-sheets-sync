@@ -3717,6 +3717,7 @@ function DailyOrders({ embedded = false } = {}) {
       } else {
         const productCols = PRODUCTS.map(p => p.name);
         // Column layout: Time, Customer, Contact, Address, Map, <one col per product>, Order Type, Amount
+        const contactColIdx = 2;
         const mapColIdx = 4;
         const typeColIdx = 5 + productCols.length;
         const amountColIdx = 6 + productCols.length;
@@ -3762,6 +3763,10 @@ function DailyOrders({ embedded = false } = {}) {
               data.cell.styles.textColor = INDIGO;
               data.cell.styles.fontStyle = "bold";
             }
+            if (data.section === "body" && data.column.index === contactColIdx && data.cell.raw !== "—") {
+              data.cell.styles.textColor = [37, 130, 90]; // WhatsApp-green to signal it's tappable
+              data.cell.styles.fontStyle = "bold";
+            }
           },
           didDrawCell: (data) => {
             // Make the "View Map" cell an actual clickable link to the saved Google Maps URL.
@@ -3769,6 +3774,15 @@ function DailyOrders({ embedded = false } = {}) {
               const order = dayOrders[data.row.index];
               if (order && order.mapLink) {
                 doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: order.mapLink });
+              }
+            }
+            // Make the Contact cell an actual clickable link that opens a WhatsApp chat with that number.
+            if (data.section === "body" && data.column.index === contactColIdx) {
+              const order = dayOrders[data.row.index];
+              const digits = order && order.contact ? String(order.contact).replace(/[^0-9]/g, "") : "";
+              if (digits) {
+                const withCountryCode = digits.length === 10 ? "91" + digits : digits;
+                doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: `https://wa.me/${withCountryCode}` });
               }
             }
           },
