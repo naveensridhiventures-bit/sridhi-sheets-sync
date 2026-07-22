@@ -3988,14 +3988,10 @@ function DailyOrders({ embedded = false } = {}) {
       <Sheet open={showForm} onClose={() => { setShowForm(false); setEditingId(null); }} title={editingId ? "Edit Order" : "Log Order"}>
         <Field label="Order Date *" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
         <Dropdown label="Customer *" value={customerPick} onChange={e => pickCustomer(e.target.value)} options={customerOptions} />
-        {customerPick === NEW_CUSTOMER_OPTION ? (
-          <>
-            <Field label="New Customer Name *" value={form.customer} onChange={e => setForm({ ...form, customer: e.target.value })} placeholder="e.g. Ganesh Stores" />
-            <Field label="Area" value={form.area} onChange={e => setForm({ ...form, area: e.target.value })} placeholder="e.g. Ambattur" />
-          </>
-        ) : (
-          <div style={{ fontSize: 11, color: T.t3, marginTop: -8, marginBottom: 14 }}>Area: {form.area || "—"}</div>
+        {customerPick === NEW_CUSTOMER_OPTION && (
+          <Field label="New Customer Name *" value={form.customer} onChange={e => setForm({ ...form, customer: e.target.value })} placeholder="e.g. Ganesh Stores" />
         )}
+        <Field label="Area" value={form.area} onChange={e => setForm({ ...form, area: e.target.value })} placeholder="e.g. Ambattur" />
         <Field label="Contact Number" type="tel" value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder="e.g. 9876543210" />
         <Field label="Delivery Address (full address)" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="Door no., street, landmark — for the driver" />
         <Field label="Google Maps Link (optional)" value={form.mapLink} onChange={e => setForm({ ...form, mapLink: e.target.value })} placeholder="Paste a Google Maps share link" />
