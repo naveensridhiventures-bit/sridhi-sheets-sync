@@ -25,7 +25,7 @@ TAB_CONFIG = {
     "expenses":        {"tab": "Expenses",         "headers": ["id","category","amount","date","type","subtype"]},
     "repeatCustomers": {"tab": "RepeatCustomers",  "headers": ["id","name","area","contact","product","qty","frequency","lastOrder","nextDue","status","revenue"]},
     "hrLeads": {"tab": "HRLeads", "headers": ["contact"]},
-    "dailyOrders": {"tab": "DailyOrders", "headers": ["id","date","customer","area","orderType","product","items","kgs","amount","telecaller","status","cancelReason","cancelRemarks","sampleType","amountMode","manualAmount","createdAt"]},
+    "dailyOrders": {"tab": "DailyOrders", "headers": ["id","date","customer","area","contact","address","mapLink","deliveryTime","orderType","product","items","kgs","amount","telecaller","status","cancelReason","cancelRemarks","sampleType","amountMode","manualAmount","createdAt"]},
 }
 
 _cache = {}
