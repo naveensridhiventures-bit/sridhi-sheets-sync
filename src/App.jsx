@@ -2782,7 +2782,7 @@ function formatDateReadable(iso) {
 }
 function emptyOrderForm(date) {
   return {
-    date: date || todayISO(), customer: "", area: "", orderType: "New Order",
+    date: date || todayISO(), customer: "", area: "", contact: "", address: "", orderType: "New Order",
     items: PRODUCTS.map(p => ({ product: p.name, kgs: "" })),
     telecaller: "",
     sampleType: "Free", amountMode: "Auto", manualAmount: "",
@@ -2832,6 +2832,8 @@ function DailyOrders({ embedded = false } = {}) {
   const [reportTo, setReportTo] = useState(todayISO());
   const [generatingPDF, setGeneratingPDF] = useState(false);
   const [reportPreset, setReportPreset] = useState("last30");
+  const [acctDate, setAcctDate] = useState(todayISO());
+  const [generatingAcctPDF, setGeneratingAcctPDF] = useState(false);
 
   const applyPreset = (preset) => {
     setReportPreset(preset);
@@ -2857,17 +2859,23 @@ function DailyOrders({ embedded = false } = {}) {
   // pick an existing customer instead of retyping their name/area every time.
   const knownCustomers = (() => {
     const map = new Map();
-    (leads || []).forEach(l => { const n = (l.name || "").trim(); if (n) map.set(n.toLowerCase(), { name: n, area: l.area || "" }); });
-    (repeatCustomers || []).forEach(c => { const n = (c.name || "").trim(); if (n) map.set(n.toLowerCase(), { name: n, area: c.area || "" }); });
-    orders.forEach(o => { const n = (o.customer || "").trim(); if (n) { const existing = map.get(n.toLowerCase()); map.set(n.toLowerCase(), { name: n, area: o.area || existing?.area || "" }); } });
+    (leads || []).forEach(l => { const n = (l.name || "").trim(); if (n) map.set(n.toLowerCase(), { name: n, area: l.area || "", contact: l.contact || "", address: l.address || "" }); });
+    (repeatCustomers || []).forEach(c => { const n = (c.name || "").trim(); if (n) map.set(n.toLowerCase(), { name: n, area: c.area || "", contact: c.contact || map.get(n.toLowerCase())?.contact || "", address: c.address || map.get(n.toLowerCase())?.address || "" }); });
+    orders.forEach(o => {
+      const n = (o.customer || "").trim();
+      if (n) {
+        const existing = map.get(n.toLowerCase());
+        map.set(n.toLowerCase(), { name: n, area: o.area || existing?.area || "", contact: o.contact || existing?.contact || "", address: o.address || existing?.address || "" });
+      }
+    });
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
   })();
   const customerOptions = [NEW_CUSTOMER_OPTION, ...knownCustomers.map(c => c.name)];
   const pickCustomer = (value) => {
     setCustomerPick(value);
-    if (value === NEW_CUSTOMER_OPTION) { setForm(f => ({ ...f, customer: "", area: "" })); return; }
+    if (value === NEW_CUSTOMER_OPTION) { setForm(f => ({ ...f, customer: "", area: "", contact: "", address: "" })); return; }
     const match = knownCustomers.find(c => c.name === value);
-    setForm(f => ({ ...f, customer: value, area: match ? match.area : f.area }));
+    setForm(f => ({ ...f, customer: value, area: match ? match.area : f.area, contact: match ? match.contact : f.contact, address: match ? match.address : f.address }));
   };
 
   const today = todayISO();
@@ -2938,7 +2946,7 @@ function DailyOrders({ embedded = false } = {}) {
     setEditingId(o.id);
     const existing = orderLineItems(o);
     setForm({
-      date: o.date, customer: o.customer, area: o.area || "", orderType: o.orderType,
+      date: o.date, customer: o.customer, area: o.area || "", contact: o.contact || "", address: o.address || "", orderType: o.orderType,
       items: PRODUCTS.map(p => {
         const match = existing.find(i => i.product === p.name);
         return { product: p.name, kgs: match ? String(match.kgs) : "" };
@@ -3545,6 +3553,188 @@ function DailyOrders({ embedded = false } = {}) {
     }
   };
 
+  // ── Accountant / Dispatch Report ───────────────────────────────────────
+  // A SEPARATE, additional report — does not touch or replace the report
+  // above. Built for handing to the accountant/driver each day: sorted by
+  // the time the order was logged (so dispatch order is clear), with
+  // customer name, phone, address, a KG column per product, order type,
+  // and amount — laid out to be read at a glance for billing + delivery.
+  const downloadAccountantReport = async () => {
+    if (generatingAcctPDF) return;
+    setGeneratingAcctPDF(true);
+    try {
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+        import("jspdf"),
+        import("jspdf-autotable"),
+      ]);
+
+      const dayOrders = orders
+        .filter(o => o.date === acctDate && o.status !== "Cancelled")
+        .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)); // time priority: earliest logged first, for dispatch order
+
+      const NAVY = [10, 14, 26];
+      const TEAL = [14, 168, 144];
+      const TEAL_TINT = [232, 250, 246];
+      const AMBER = [180, 110, 5];
+      const AMBER_TINT = [254, 246, 224];
+      const INDIGO = [79, 70, 229];
+      const ORANGE = [217, 119, 6];
+      const INK = [26, 32, 46];
+      const SUBTLE = [110, 118, 138];
+      const GRID = [228, 231, 238];
+      const typeColor = (t) => t === "New Order" ? TEAL : t === "Sample" ? ORANGE : INDIGO;
+
+      const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 36;
+
+      const header = () => {
+        doc.setFillColor(...NAVY);
+        doc.rect(0, 0, pageW, 78, "F");
+        doc.setFillColor(...TEAL);
+        doc.rect(0, 76, pageW, 2, "F");
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(18);
+        doc.text("Sridhi Ventures — Accountant & Dispatch Report", margin, 32);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9.5);
+        doc.setTextColor(190, 198, 216);
+        doc.text(`For billing + driver dispatch  ·  Sorted by time logged (earliest first)`, margin, 48);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(13);
+        doc.setTextColor(...TEAL.map(c => Math.min(255, c + 60)));
+        doc.text(formatDateReadable(acctDate), pageW - margin, 32, { align: "right" });
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(190, 198, 216);
+        doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`, pageW - margin, 48, { align: "right" });
+      };
+
+      const footer = () => {
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+          doc.setPage(i);
+          doc.setDrawColor(...GRID);
+          doc.setLineWidth(0.6);
+          doc.line(margin, pageH - 28, pageW - margin, pageH - 28);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8);
+          doc.setTextColor(...SUBTLE);
+          doc.text("Sridhi Ventures · Accountant & Dispatch Report", margin, pageH - 14);
+          doc.text(`Page ${i} of ${pageCount}`, pageW - margin, pageH - 14, { align: "right" });
+        }
+      };
+
+      header();
+      let y = 96;
+
+      // ── Headline summary strip: total orders, total per product KG, total ₹ ──
+      const activeCount = dayOrders.length;
+      const newCount = dayOrders.filter(o => o.orderType === "New Order").length;
+      const regularCount = dayOrders.filter(o => o.orderType === "Regular Order").length;
+      const sampleCount = dayOrders.filter(o => o.orderType === "Sample").length;
+      const productTotals = PRODUCTS.map(p => {
+        let kgs = 0;
+        dayOrders.forEach(o => orderLineItems(o).forEach(i => { if (i.product === p.name) kgs += parseFloat(i.kgs) || 0; }));
+        return { name: p.name, kgs };
+      });
+      const totalAmount = dayOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+
+      const chips = [
+        [`${activeCount} Orders`, TEAL, TEAL_TINT],
+        [`${newCount} New · ${regularCount} Regular${sampleCount ? ` · ${sampleCount} Sample` : ""}`, INDIGO, [235, 234, 253]],
+        ...productTotals.filter(p => p.kgs > 0).map(p => [`${p.name}: ${p.kgs.toLocaleString("en-IN", { maximumFractionDigits: 1 })} KG`, AMBER, AMBER_TINT]),
+        [`Total ₹${Math.round(totalAmount).toLocaleString("en-IN")}`, TEAL, TEAL_TINT],
+      ];
+      let cx = margin;
+      const chipH = 26;
+      chips.forEach(([label, color, tint]) => {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9.5);
+        const w = doc.getTextWidth(label) + 24;
+        if (cx + w > pageW - margin) { cx = margin; y += chipH + 8; }
+        doc.setFillColor(...tint);
+        doc.setDrawColor(...color);
+        doc.setLineWidth(0.8);
+        doc.roundedRect(cx, y, w, chipH, 13, 13, "FD");
+        doc.setTextColor(...color);
+        doc.text(label, cx + 12, y + 17);
+        cx += w + 8;
+      });
+      y += chipH + 18;
+
+      if (!dayOrders.length) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(11);
+        doc.setTextColor(...SUBTLE);
+        doc.text(`No active orders logged for ${formatDateReadable(acctDate)}.`, margin, y + 10);
+      } else {
+        const productCols = PRODUCTS.map(p => p.name);
+        const body = dayOrders.map(o => {
+          const items = orderLineItems(o);
+          const kgByProduct = productCols.map(name => {
+            const it = items.find(i => i.product === name);
+            return it && it.kgs ? `${it.kgs} KG` : "—";
+          });
+          const time = o.createdAt ? new Date(o.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—";
+          const typeLabel = o.orderType === "Sample" ? `Sample (${o.sampleType || "Free"})` : o.orderType.replace(" Order", "");
+          return [time, o.customer, o.contact || "—", o.address || o.area || "—", ...kgByProduct, typeLabel, `Rs ${(o.amount || 0).toLocaleString("en-IN")}`];
+        });
+
+        autoTable(doc, {
+          startY: y,
+          margin: { left: margin, right: margin, bottom: 40 },
+          head: [["Time", "Customer Name", "Contact", "Address", ...productCols, "Order Type", "Amount"]],
+          body,
+          theme: "grid",
+          styles: { font: "helvetica", fontSize: 9, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "middle" },
+          headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 },
+          alternateRowStyles: { fillColor: [249, 250, 252] },
+          columnStyles: {
+            0: { fontStyle: "bold", cellWidth: 50 },     // Time — prioritized visually
+            1: { fontStyle: "bold" },                     // Customer name
+            3: { cellWidth: 140 },                         // Address gets room to breathe
+            [productCols.length + 5]: { halign: "right", fontStyle: "bold" }, // Amount
+          },
+          didParseCell: (data) => {
+            const typeColIdx = 4 + productCols.length;
+            if (data.section === "body" && data.column.index === typeColIdx) {
+              const raw = String(data.cell.raw);
+              const col = raw.startsWith("New") ? TEAL : raw.startsWith("Sample") ? ORANGE : INDIGO;
+              data.cell.styles.textColor = col;
+              data.cell.styles.fontStyle = "bold";
+            }
+            if (data.section === "body" && data.column.index === 0) {
+              data.cell.styles.textColor = TEAL;
+            }
+          },
+        });
+        y = doc.lastAutoTable.finalY + 24;
+      }
+
+      // ── Signature / handoff strip for accountant + driver ────────────
+      if (y < pageH - 90) {
+        doc.setDrawColor(...GRID);
+        doc.setLineWidth(0.8);
+        const sigW = (pageW - margin * 2 - 24) / 2;
+        [["Prepared By (Accountant)", margin], ["Received By (Driver)", margin + sigW + 24]].forEach(([label, x]) => {
+          doc.line(x, y + 34, x + sigW, y + 34);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.setTextColor(...SUBTLE);
+          doc.text(label, x, y + 48);
+        });
+      }
+
+      footer();
+      doc.save(`Sridhi-Accountant-Dispatch-Report_${acctDate}.pdf`);
+    } finally {
+      setGeneratingAcctPDF(false);
+    }
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {!embedded && (
@@ -3612,6 +3802,24 @@ function DailyOrders({ embedded = false } = {}) {
           <Btn label={generatingPDF ? "Generating…" : "📄 Download PDF Report"} full onClick={downloadPDFReport} />
           <Btn label="Raw CSV" color={T.t2} ghost onClick={downloadCSVReport} />
         </div>
+      </Card>
+
+      <Card accent={T.amber}>
+        <Label sub="A separate, driver-friendly report for one day — name, contact, address, KG per product and order type, sorted by the time each order was logged so dispatch is clear">Accountant / Dispatch Report</Label>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10, marginBottom: 14 }}>
+          <div style={{ flex: "1 1 160px" }}>
+            <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Date</div>
+            <input type="date" value={acctDate} onChange={e => setAcctDate(e.target.value)} style={inputStyle} />
+          </div>
+          <button onClick={() => setAcctDate(todayISO())} style={{
+            background: acctDate === todayISO() ? T.amber : "transparent",
+            color: acctDate === todayISO() ? "#1A1200" : T.t2,
+            border: `1px solid ${acctDate === todayISO() ? T.amber : T.border}`,
+            borderRadius: 10, padding: "10px 14px", fontSize: 12, fontWeight: 700,
+            cursor: "pointer", fontFamily: FONT, height: 44,
+          }}>Today</button>
+        </div>
+        <Btn label={generatingAcctPDF ? "Generating…" : "🧾 Download Accountant Report"} full color={T.amber} onClick={downloadAccountantReport} />
       </Card>
 
       <Card id="orders-by-date-section">
@@ -3754,6 +3962,8 @@ function DailyOrders({ embedded = false } = {}) {
         ) : (
           <div style={{ fontSize: 11, color: T.t3, marginTop: -8, marginBottom: 14 }}>Area: {form.area || "—"}</div>
         )}
+        <Field label="Contact Number" type="tel" value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder="e.g. 9876543210" />
+        <Field label="Delivery Address" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="Full address for the driver / accountant" />
         <Dropdown label="Order Type" value={form.orderType} onChange={e => setForm({ ...form, orderType: e.target.value, sampleType: "Free", amountMode: "Auto", manualAmount: "" })} options={ORDER_TYPES} />
         {form.orderType === "Sample" && (
           <>
