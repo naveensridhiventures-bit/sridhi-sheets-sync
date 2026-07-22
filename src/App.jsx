@@ -2819,7 +2819,7 @@ function downloadCSV(filename, content) {
 
 function DailyOrders({ embedded = false } = {}) {
   const [orders, setOrders, ordersSyncStatus] = useSheetSynced("dailyOrders", "dailyOrders", INITIAL_DAILY_ORDERS);
-  const [leads] = useSheetSynced("leads", "leads", []);
+  const [leads, setLeads] = useSheetSynced("leads", "leads", []);
   const [repeatCustomers] = useSheetSynced("repeatCustomers", "repeatCustomers", []);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -2960,6 +2960,36 @@ function DailyOrders({ embedded = false } = {}) {
     setShowForm(true);
   };
 
+  // Whenever an order is saved, push the customer's contact/area/address/
+  // map link into the CRM (Leads) too — so it's stored centrally, not just
+  // local to Daily Orders, and next time this customer is picked (here or
+  // in the CRM) it's already filled in.
+  const syncCustomerToCRM = (customer, area, contact, address, mapLink, telecaller) => {
+    const name = (customer || "").trim();
+    if (!name) return;
+    const idx = leads.findIndex(l => (l.name || "").trim().toLowerCase() === name.toLowerCase());
+    if (idx >= 0) {
+      const existing = leads[idx];
+      const updated = {
+        ...existing,
+        area: area || existing.area || "",
+        contact: contact || existing.contact || "",
+        address: address || existing.address || "",
+        mapLink: mapLink || existing.mapLink || "",
+      };
+      const changed = ["area", "contact", "address", "mapLink"].some(f => (updated[f] || "") !== (existing[f] || ""));
+      if (changed) setLeads(leads.map((l, i) => i === idx ? updated : l));
+    } else {
+      setLeads([{
+        id: Date.now() + Math.random(),
+        name, contact: contact || "", business: name, type: "",
+        area: area || "", address: address || "", mapLink: mapLink || "",
+        stage: "Active Customer", source: "Daily Orders", telecaller: telecaller || "",
+        lastContact: "Today", priority: "Medium", remarks: [], createdAt: Date.now(),
+      }, ...leads]);
+    }
+  };
+
   const saveOrder = () => {
     const items = form.items
       .map(i => ({ product: i.product, kgs: parseFloat(i.kgs) || 0, rate: rateForProduct(i.product) }))
@@ -2986,6 +3016,7 @@ function DailyOrders({ embedded = false } = {}) {
         createdAt: Date.now(),
       }, ...orders]);
     }
+    syncCustomerToCRM(form.customer, form.area, form.contact, form.address, form.mapLink, form.telecaller);
     setShowForm(false); setEditingId(null); setForm(emptyOrderForm(filterDate));
   };
 
@@ -3568,20 +3599,17 @@ function DailyOrders({ embedded = false } = {}) {
         import("jspdf-autotable"),
       ]);
 
-      // Time shown/sorted by: the customer's actual delivery time if set,
-      // otherwise falls back to the time the order was logged (marked with ~).
+      // Time shown/sorted: only the customer's actual delivery time is
+      // displayed. Orders without one don't get a guessed time — they just
+      // show "—" and sort after every order that does have a time set.
       const timeInfo = (o) => {
         if (o.deliveryTime) {
           const [hh, mm] = o.deliveryTime.split(":").map(Number);
           const d = new Date(); d.setHours(hh || 0, mm || 0, 0, 0);
-          return { sortKey: o.deliveryTime, label: d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) };
+          return { sortKey: "0:" + o.deliveryTime, label: d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) };
         }
-        if (o.createdAt) {
-          const d = new Date(o.createdAt);
-          const sortKey = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-          return { sortKey, label: "~" + d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) };
-        }
-        return { sortKey: "99:99", label: "—" };
+        const fallbackOrder = o.createdAt ? String(o.createdAt).padStart(14, "0") : "99999999999999";
+        return { sortKey: "1:" + fallbackOrder, label: "—" };
       };
 
       const dayOrders = orders
@@ -3617,7 +3645,7 @@ function DailyOrders({ embedded = false } = {}) {
         doc.setFont("helvetica", "normal");
         doc.setFontSize(9.5);
         doc.setTextColor(190, 198, 216);
-        doc.text(`For billing + driver dispatch  ·  Sorted by customer delivery time (~ = order logged time, no delivery time set)`, margin, 48);
+        doc.text(`For billing + driver dispatch  ·  Sorted by customer delivery time (— = no delivery time set)`, margin, 48);
         doc.setFont("helvetica", "bold");
         doc.setFontSize(13);
         doc.setTextColor(...TEAL.map(c => Math.min(255, c + 60)));
