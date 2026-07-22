@@ -2782,7 +2782,7 @@ function formatDateReadable(iso) {
 }
 function emptyOrderForm(date) {
   return {
-    date: date || todayISO(), customer: "", area: "", contact: "", address: "", orderType: "New Order",
+    date: date || todayISO(), customer: "", area: "", contact: "", address: "", mapLink: "", deliveryTime: "", orderType: "New Order",
     items: PRODUCTS.map(p => ({ product: p.name, kgs: "" })),
     telecaller: "",
     sampleType: "Free", amountMode: "Auto", manualAmount: "",
@@ -2859,13 +2859,13 @@ function DailyOrders({ embedded = false } = {}) {
   // pick an existing customer instead of retyping their name/area every time.
   const knownCustomers = (() => {
     const map = new Map();
-    (leads || []).forEach(l => { const n = (l.name || "").trim(); if (n) map.set(n.toLowerCase(), { name: n, area: l.area || "", contact: l.contact || "", address: l.address || "" }); });
-    (repeatCustomers || []).forEach(c => { const n = (c.name || "").trim(); if (n) map.set(n.toLowerCase(), { name: n, area: c.area || "", contact: c.contact || map.get(n.toLowerCase())?.contact || "", address: c.address || map.get(n.toLowerCase())?.address || "" }); });
+    (leads || []).forEach(l => { const n = (l.name || "").trim(); if (n) map.set(n.toLowerCase(), { name: n, area: l.area || "", contact: l.contact || "", address: l.address || "", mapLink: l.mapLink || "" }); });
+    (repeatCustomers || []).forEach(c => { const n = (c.name || "").trim(); if (n) map.set(n.toLowerCase(), { name: n, area: c.area || "", contact: c.contact || map.get(n.toLowerCase())?.contact || "", address: c.address || map.get(n.toLowerCase())?.address || "", mapLink: c.mapLink || map.get(n.toLowerCase())?.mapLink || "" }); });
     orders.forEach(o => {
       const n = (o.customer || "").trim();
       if (n) {
         const existing = map.get(n.toLowerCase());
-        map.set(n.toLowerCase(), { name: n, area: o.area || existing?.area || "", contact: o.contact || existing?.contact || "", address: o.address || existing?.address || "" });
+        map.set(n.toLowerCase(), { name: n, area: o.area || existing?.area || "", contact: o.contact || existing?.contact || "", address: o.address || existing?.address || "", mapLink: o.mapLink || existing?.mapLink || "" });
       }
     });
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
@@ -2873,9 +2873,9 @@ function DailyOrders({ embedded = false } = {}) {
   const customerOptions = [NEW_CUSTOMER_OPTION, ...knownCustomers.map(c => c.name)];
   const pickCustomer = (value) => {
     setCustomerPick(value);
-    if (value === NEW_CUSTOMER_OPTION) { setForm(f => ({ ...f, customer: "", area: "", contact: "", address: "" })); return; }
+    if (value === NEW_CUSTOMER_OPTION) { setForm(f => ({ ...f, customer: "", area: "", contact: "", address: "", mapLink: "" })); return; }
     const match = knownCustomers.find(c => c.name === value);
-    setForm(f => ({ ...f, customer: value, area: match ? match.area : f.area, contact: match ? match.contact : f.contact, address: match ? match.address : f.address }));
+    setForm(f => ({ ...f, customer: value, area: match ? match.area : f.area, contact: match ? match.contact : f.contact, address: match ? match.address : f.address, mapLink: match ? match.mapLink : f.mapLink }));
   };
 
   const today = todayISO();
@@ -2946,7 +2946,7 @@ function DailyOrders({ embedded = false } = {}) {
     setEditingId(o.id);
     const existing = orderLineItems(o);
     setForm({
-      date: o.date, customer: o.customer, area: o.area || "", contact: o.contact || "", address: o.address || "", orderType: o.orderType,
+      date: o.date, customer: o.customer, area: o.area || "", contact: o.contact || "", address: o.address || "", mapLink: o.mapLink || "", deliveryTime: o.deliveryTime || "", orderType: o.orderType,
       items: PRODUCTS.map(p => {
         const match = existing.find(i => i.product === p.name);
         return { product: p.name, kgs: match ? String(match.kgs) : "" };
@@ -3568,9 +3568,25 @@ function DailyOrders({ embedded = false } = {}) {
         import("jspdf-autotable"),
       ]);
 
+      // Time shown/sorted by: the customer's actual delivery time if set,
+      // otherwise falls back to the time the order was logged (marked with ~).
+      const timeInfo = (o) => {
+        if (o.deliveryTime) {
+          const [hh, mm] = o.deliveryTime.split(":").map(Number);
+          const d = new Date(); d.setHours(hh || 0, mm || 0, 0, 0);
+          return { sortKey: o.deliveryTime, label: d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) };
+        }
+        if (o.createdAt) {
+          const d = new Date(o.createdAt);
+          const sortKey = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+          return { sortKey, label: "~" + d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) };
+        }
+        return { sortKey: "99:99", label: "—" };
+      };
+
       const dayOrders = orders
         .filter(o => o.date === acctDate && o.status !== "Cancelled")
-        .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)); // time priority: earliest logged first, for dispatch order
+        .sort((a, b) => timeInfo(a).sortKey.localeCompare(timeInfo(b).sortKey)); // customer delivery time priority
 
       const NAVY = [10, 14, 26];
       const TEAL = [14, 168, 144];
@@ -3601,7 +3617,7 @@ function DailyOrders({ embedded = false } = {}) {
         doc.setFont("helvetica", "normal");
         doc.setFontSize(9.5);
         doc.setTextColor(190, 198, 216);
-        doc.text(`For billing + driver dispatch  ·  Sorted by time logged (earliest first)`, margin, 48);
+        doc.text(`For billing + driver dispatch  ·  Sorted by customer delivery time (~ = order logged time, no delivery time set)`, margin, 48);
         doc.setFont("helvetica", "bold");
         doc.setFontSize(13);
         doc.setTextColor(...TEAL.map(c => Math.min(255, c + 60)));
@@ -3646,7 +3662,7 @@ function DailyOrders({ embedded = false } = {}) {
         [`${activeCount} Orders`, TEAL, TEAL_TINT],
         [`${newCount} New · ${regularCount} Regular${sampleCount ? ` · ${sampleCount} Sample` : ""}`, INDIGO, [235, 234, 253]],
         ...productTotals.filter(p => p.kgs > 0).map(p => [`${p.name}: ${p.kgs.toLocaleString("en-IN", { maximumFractionDigits: 1 })} KG`, AMBER, AMBER_TINT]),
-        [`Total ₹${Math.round(totalAmount).toLocaleString("en-IN")}`, TEAL, TEAL_TINT],
+        [`Total Rs ${Math.round(totalAmount).toLocaleString("en-IN")}`, TEAL, TEAL_TINT],
       ];
       let cx = margin;
       const chipH = 26;
@@ -3672,34 +3688,39 @@ function DailyOrders({ embedded = false } = {}) {
         doc.text(`No active orders logged for ${formatDateReadable(acctDate)}.`, margin, y + 10);
       } else {
         const productCols = PRODUCTS.map(p => p.name);
+        // Column layout: Time, Customer, Contact, Address, Map, <one col per product>, Order Type, Amount
+        const mapColIdx = 4;
+        const typeColIdx = 5 + productCols.length;
+        const amountColIdx = 6 + productCols.length;
+
         const body = dayOrders.map(o => {
           const items = orderLineItems(o);
           const kgByProduct = productCols.map(name => {
             const it = items.find(i => i.product === name);
             return it && it.kgs ? `${it.kgs} KG` : "—";
           });
-          const time = o.createdAt ? new Date(o.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—";
           const typeLabel = o.orderType === "Sample" ? `Sample (${o.sampleType || "Free"})` : o.orderType.replace(" Order", "");
-          return [time, o.customer, o.contact || "—", o.address || o.area || "—", ...kgByProduct, typeLabel, `Rs ${(o.amount || 0).toLocaleString("en-IN")}`];
+          const fullAddress = [o.address, o.area].filter(Boolean).join(", ") || "—";
+          return [timeInfo(o).label, o.customer, o.contact || "—", fullAddress, o.mapLink ? "View Map" : "—", ...kgByProduct, typeLabel, `Rs ${(o.amount || 0).toLocaleString("en-IN")}`];
         });
 
         autoTable(doc, {
           startY: y,
           margin: { left: margin, right: margin, bottom: 40 },
-          head: [["Time", "Customer Name", "Contact", "Address", ...productCols, "Order Type", "Amount"]],
+          head: [["Time", "Customer Name", "Contact", "Address (full)", "Map", ...productCols, "Order Type", "Amount"]],
           body,
           theme: "grid",
           styles: { font: "helvetica", fontSize: 9, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "middle" },
           headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 },
           alternateRowStyles: { fillColor: [249, 250, 252] },
           columnStyles: {
-            0: { fontStyle: "bold", cellWidth: 50 },     // Time — prioritized visually
-            1: { fontStyle: "bold" },                     // Customer name
-            3: { cellWidth: 140 },                         // Address gets room to breathe
-            [productCols.length + 5]: { halign: "right", fontStyle: "bold" }, // Amount
+            0: { fontStyle: "bold", cellWidth: 55 },        // Time — prioritized visually
+            1: { fontStyle: "bold" },                        // Customer name
+            3: { cellWidth: 150 },                            // Full address gets room to breathe
+            4: { halign: "center", cellWidth: 46 },           // Map link
+            [amountColIdx]: { halign: "right", fontStyle: "bold" },
           },
           didParseCell: (data) => {
-            const typeColIdx = 4 + productCols.length;
             if (data.section === "body" && data.column.index === typeColIdx) {
               const raw = String(data.cell.raw);
               const col = raw.startsWith("New") ? TEAL : raw.startsWith("Sample") ? ORANGE : INDIGO;
@@ -3708,6 +3729,19 @@ function DailyOrders({ embedded = false } = {}) {
             }
             if (data.section === "body" && data.column.index === 0) {
               data.cell.styles.textColor = TEAL;
+            }
+            if (data.section === "body" && data.column.index === mapColIdx && data.cell.raw === "View Map") {
+              data.cell.styles.textColor = INDIGO;
+              data.cell.styles.fontStyle = "bold";
+            }
+          },
+          didDrawCell: (data) => {
+            // Make the "View Map" cell an actual clickable link to the saved Google Maps URL.
+            if (data.section === "body" && data.column.index === mapColIdx) {
+              const order = dayOrders[data.row.index];
+              if (order && order.mapLink) {
+                doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: order.mapLink });
+              }
             }
           },
         });
@@ -3963,7 +3997,10 @@ function DailyOrders({ embedded = false } = {}) {
           <div style={{ fontSize: 11, color: T.t3, marginTop: -8, marginBottom: 14 }}>Area: {form.area || "—"}</div>
         )}
         <Field label="Contact Number" type="tel" value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder="e.g. 9876543210" />
-        <Field label="Delivery Address" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="Full address for the driver / accountant" />
+        <Field label="Delivery Address (full address)" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="Door no., street, landmark — for the driver" />
+        <Field label="Google Maps Link (optional)" value={form.mapLink} onChange={e => setForm({ ...form, mapLink: e.target.value })} placeholder="Paste a Google Maps share link" />
+        <Field label="Customer Delivery Time" type="time" value={form.deliveryTime} onChange={e => setForm({ ...form, deliveryTime: e.target.value })} />
+        <div style={{ fontSize: 10.5, color: T.t3, marginTop: -8, marginBottom: 14 }}>Leave blank to use the time this order was logged. Setting this controls the order shown in the Accountant/Dispatch Report.</div>
         <Dropdown label="Order Type" value={form.orderType} onChange={e => setForm({ ...form, orderType: e.target.value, sampleType: "Free", amountMode: "Auto", manualAmount: "" })} options={ORDER_TYPES} />
         {form.orderType === "Sample" && (
           <>
