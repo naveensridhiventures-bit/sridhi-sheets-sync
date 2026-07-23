@@ -59,6 +59,8 @@ const PIPELINE_STAGES = [
 const INITIAL_SAMPLES = [
 ];
 
+const LOST_REASONS = ["Not Delivered on Time", "Quality Not Good", "Outstanding", "Others"];
+
 
 const INITIAL_EXPENSES = [
 ];
@@ -546,7 +548,7 @@ function ProspectFinder() {
             <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>BUSINESS TYPE</div>
             <select value={form.type2} onChange={e => setForm({...form, type2:e.target.value})}
               style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
-              {["Restaurant","Mess","Hotel","Bakery","Cloud Kitchen","Catering","Other"].map(t => <option key={t}>{t}</option>)}
+              {["Home","Restaurant","Mess","Hotel","Bakery","Cloud Kitchen","Catering","Other"].map(t => <option key={t}>{t}</option>)}
             </select>
           </div>
           <div>
@@ -1257,7 +1259,7 @@ function HRLeads() {
             <select value={form.type} onChange={e => setForm({...form, type:e.target.value})}
               style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1,
                 padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
-              {["Restaurant","Mess","Hotel","Bakery","Cloud Kitchen","Other"].map(t => <option key={t}>{t}</option>)}
+              {["Home","Restaurant","Mess","Hotel","Bakery","Cloud Kitchen","Other"].map(t => <option key={t}>{t}</option>)}
             </select>
           </div>
           <div>
@@ -1739,7 +1741,7 @@ function Leads() {
               <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>BUSINESS TYPE</div>
               <select value={editForm.type||""} onChange={e => setEditForm({...editForm,type:e.target.value})}
                 style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
-                {["Restaurant","Mess","Hotel","Bakery","Cloud Kitchen","Catering","Other"].map(t => <option key={t}>{t}</option>)}
+                {["Home","Restaurant","Mess","Hotel","Bakery","Cloud Kitchen","Catering","Other"].map(t => <option key={t}>{t}</option>)}
               </select>
             </div>
             <div style={{ marginBottom:10 }}>
@@ -1992,7 +1994,7 @@ function Leads() {
         <Field label="Business Name" value={newLead.business} onChange={e => setNewLead({...newLead,business:e.target.value})} />
         <Field label="Area" value={newLead.area} onChange={e => setNewLead({...newLead,area:e.target.value})} />
         <Field label="Address" value={newLead.address} onChange={e => setNewLead({...newLead,address:e.target.value})} />
-        <Dropdown label="Business Type" value={newLead.type} onChange={e => setNewLead({...newLead,type:e.target.value})} options={["Restaurant","Mess","Hotel","Bakery","Cloud Kitchen","Distributor","Retailer"]} />
+        <Dropdown label="Business Type" value={newLead.type} onChange={e => setNewLead({...newLead,type:e.target.value})} options={["Home","Restaurant","Mess","Hotel","Bakery","Cloud Kitchen","Distributor","Retailer"]} />
         <Dropdown label="Lead Source" value={newLead.source} onChange={e => setNewLead({...newLead,source:e.target.value})} options={["Instagram","Facebook","WhatsApp","Google","Referral","Field Sales","Telecalling"]} />
         <Dropdown label="Assigned Telecaller" value={newLead.telecaller} onChange={e => setNewLead({...newLead,telecaller:e.target.value})} options={["Thulasi","Ramya"]} />
         <div style={{ display:"flex", gap:10, marginTop:4 }}>
@@ -2381,6 +2383,123 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ─── LOST CUSTOMERS ───────────────────────────────────────────────────────
+function LostCustomers() {
+  const [allLeads, setAllLeads] = useSheetSynced("leads", "leads", INITIAL_LEADS);
+  const [selectedLead, setSelectedLead] = useState(null);
+  const [customReason, setCustomReason] = useState("");
+
+  // Only customers currently sitting in the "Lost Customer" pipeline stage
+  const leads = (allLeads || []).filter(l => l && l.name && l.stage === "Lost Customer");
+
+  const selectReason = (id, r, note) => {
+    setAllLeads(allLeads.map(l => l.id === id ? { ...l, lostReason: r, lostReasonNote: r === "Others" ? (note ?? l.lostReasonNote ?? "") : "" } : l));
+  };
+
+  const reactivate = (id) => {
+    setAllLeads(allLeads.map(l => l.id === id ? { ...l, stage: "Active Customer", lastContact: "Today" } : l));
+    setSelectedLead(null);
+  };
+
+  if (selectedLead) {
+    const lead = allLeads.find(l => l.id === selectedLead.id) || selectedLead;
+    return (
+      <div style={{ display:"flex", flexDirection:"column", gap:12, paddingBottom:80 }}>
+        <button onClick={() => { setSelectedLead(null); setCustomReason(""); }}
+          style={{ background:"none", border:"none", color:T.accent, fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:FONT, textAlign:"left", padding:"4px 0" }}>
+          ← Back to lost customers
+        </button>
+
+        <Card accent={T.rose}>
+          <div style={{ fontSize:18, fontWeight:800, color:T.t1 }}>{lead.name}</div>
+          <div style={{ fontSize:12, color:T.t2 }}>{lead.business}</div>
+          <div style={{ fontSize:11, color:T.t3 }}>{lead.type} · {lead.area}</div>
+          <div style={{ marginTop:12 }}>
+            {[["Contact",lead.contact],["Area",lead.area],["Address",lead.address],["Telecaller",lead.telecaller],["Last contact",lead.lastContact]].map(([k,v]) => v ? (
+              <div key={k} style={{ display:"flex", padding:"8px 0", borderBottom:`1px solid ${T.border}` }}>
+                <span style={{ fontSize:11, color:T.t3, width:100, flexShrink:0, fontWeight:600 }}>{k}</span>
+                <span style={{ fontSize:12, fontWeight:600, color:T.t1 }}>{v}</span>
+              </div>
+            ) : null)}
+          </div>
+          <div style={{ display:"flex", gap:8, marginTop:14 }}>
+            <button onClick={() => { const p=(lead.contact||"").replace(/[^0-9]/g,""); if(p) window.location.href="tel:+91"+p; }}
+              style={{ flex:1, background:T.emerald+"22", border:`1px solid ${T.emerald}44`, borderRadius:10, color:T.emerald, padding:"10px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:FONT }}>📞 Call</button>
+            <button onClick={() => { const p=(lead.contact||"").replace(/[^0-9]/g,""); window.open("https://wa.me/91"+p,"_blank"); }}
+              style={{ flex:1, background:"#25D36622", border:"1px solid #25D36644", borderRadius:10, color:"#25D366", padding:"10px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:FONT }}>💬 WhatsApp</button>
+          </div>
+        </Card>
+
+        <Card>
+          <Label sub="Why did this customer stop ordering?">Reason for stopping</Label>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginTop:10 }}>
+            {LOST_REASONS.map(r => (
+              <button key={r} onClick={() => { selectReason(lead.id, r); if (r === "Others") setCustomReason(lead.lostReasonNote || ""); }}
+                style={{
+                  background: lead.lostReason===r ? T.rose+"22" : T.surface,
+                  border:`1px solid ${lead.lostReason===r ? T.rose : T.border}`,
+                  borderRadius:10, padding:"10px 14px", fontSize:12, fontWeight:700,
+                  color: lead.lostReason===r ? T.rose : T.t2, cursor:"pointer", fontFamily:FONT,
+                }}>
+                {r}
+              </button>
+            ))}
+          </div>
+
+          {lead.lostReason === "Others" ? (
+            <div style={{ marginTop:12 }}>
+              <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>TYPE THE REASON</div>
+              <textarea value={customReason} onChange={e => setCustomReason(e.target.value)} rows={3}
+                placeholder="e.g. Switched to a local supplier, moved out of area..."
+                style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"10px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box", resize:"none" }} />
+              <button onClick={() => selectReason(lead.id, "Others", customReason)}
+                style={{ marginTop:8, background:T.accent, border:"none", borderRadius:12, color:"#060B16", padding:"11px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT, width:"100%" }}>
+                Save Reason
+              </button>
+            </div>
+          ) : lead.lostReason ? (
+            <div style={{ marginTop:12, fontSize:12, color:T.t2 }}>
+              ✓ Saved: <span style={{ color:T.rose, fontWeight:700 }}>{lead.lostReason}</span>
+            </div>
+          ) : (
+            <div style={{ marginTop:12, fontSize:12, color:T.t3, fontStyle:"italic" }}>No reason set yet — pick one above.</div>
+          )}
+        </Card>
+
+        <button onClick={() => reactivate(lead.id)}
+          style={{ background:T.emerald+"18", border:`1px solid ${T.emerald}44`, borderRadius:12, color:T.emerald, padding:"12px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
+          ↩ Customer is back — mark as Active Customer
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      <Card accent={T.rose}>
+        <Label sub={`${leads.length} customer${leads.length===1?"":"s"} marked as lost`}>Lost Customers</Label>
+      </Card>
+      {leads.length === 0 && (
+        <div style={{ textAlign:"center", color:T.t3, fontSize:13, padding:40 }}>No lost customers right now 🎉</div>
+      )}
+      {leads.map(l => (
+        <div key={l.id} onClick={() => setSelectedLead(l)}
+          style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:14, cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div>
+            <div style={{ fontSize:14, fontWeight:700, color:T.t1 }}>{l.name}</div>
+            <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>{l.area} · {l.telecaller}</div>
+            {l.contact && <div style={{ fontSize:11, color:T.accent, marginTop:2, fontWeight:600 }}>📞 {l.contact}</div>}
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:4, alignItems:"flex-end" }}>
+            <Chip label={l.lostReason ? (l.lostReason==="Others" ? (l.lostReasonNote || "Others") : l.lostReason) : "Reason not set"} color={l.lostReason ? T.rose : T.t3} />
+            <span style={{ fontSize:10, color:T.accent }}>Tap to update →</span>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -5130,6 +5249,7 @@ const MORE_MENU = [
   { id:"dailyorders", label:"Daily Orders", icon:"📦" },
   { id:"samples",   label:"Samples",       icon:"🧪" },
   { id:"repeat",    label:"Repeat Orders", icon:"🔁" },
+  { id:"lostcustomers", label:"Lost Customers", icon:"🚫" },
   { id:"expenses",  label:"Expenses",      icon:"💸" },
   { id:"marketing", label:"Marketing",     icon:"📢" },
   { id:"reports",   label:"Reports",       icon:"📈" },
@@ -5199,6 +5319,7 @@ function DIcon({ id, size = 18, color = "currentColor", strokeWidth = 1.8 }) {
     case "crm": return <svg {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
     case "pipeline": return <svg {...p}><path d="M3 4h18l-7 9v6l-4 2v-8L3 4z"/></svg>;
     case "orders": return <svg {...p}><path d="M6 8V6a3 3 0 0 1 6 0v2"/><rect x="3" y="8" width="12" height="13" rx="2"/><path d="M14 8h4l3 4v9h-4"/><circle cx="7" cy="21" r="1.4"/><circle cx="17" cy="21" r="1.4"/></svg>;
+    case "lostuser": return <svg {...p}><circle cx="9" cy="7" r="4"/><path d="M1 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><line x1="17" y1="8" x2="22" y2="13"/><line x1="22" y1="8" x2="17" y2="13"/></svg>;
     case "dispatch": return <svg {...p}><rect x="1" y="6" width="14" height="11" rx="1.5"/><path d="M15 10h4l3 3v4h-7z"/><circle cx="6" cy="19.5" r="1.6"/><circle cx="17.5" cy="19.5" r="1.6"/></svg>;
     case "samples": return <svg {...p}><path d="M10 2v6.2L4.5 18a2 2 0 0 0 1.7 3h11.6a2 2 0 0 0 1.7-3L14 8.2V2"/><path d="M8.5 2h7"/><path d="M7 15h10"/></svg>;
     case "phone": return <svg {...p}><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.7a2 2 0 0 1-.4 2.1L8 9.9a16 16 0 0 0 6 6l1.4-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.5 2.7.6a2 2 0 0 1 1.8 2.1z"/></svg>;
@@ -5233,6 +5354,7 @@ const DESKTOP_NAV = [
   { id: "leads",     label: "CRM",          icon: "crm" },
   { id: "pipeline",  label: "Pipeline",     icon: "pipeline" },
   { id: "repeat",    label: "Orders",       icon: "orders" },
+  { id: "lostcustomers", label: "Lost Customers", icon: "lostuser" },
   { id: "dailyorders", label: "Daily Orders", icon: "cart" },
   { id: "fieldsync", label: "Dispatch",     icon: "dispatch" },
   { id: "samples",   label: "Samples",      icon: "samples" },
@@ -6308,7 +6430,7 @@ export default function App() {
 
   useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; }, [activeTab]);
 
-  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", dailyorders:"Daily Orders", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads", today:"Today Tasks", prospects:"Find Prospects" };
+  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", dailyorders:"Daily Orders", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads", today:"Today Tasks", prospects:"Find Prospects", lostcustomers:"Lost Customers" };
 
   // ── INSTALL BANNER ──
   const InstallBanner = () => showInstall ? (
@@ -6402,6 +6524,7 @@ export default function App() {
       case "fieldsync": return <FieldSync />;
       case "samples":   return <Samples />;
       case "repeat":    return <RepeatOrders />;
+      case "lostcustomers": return <LostCustomers />;
       case "dailyorders": return <DailyOrders {...moduleProps} />;
       case "expenses":  return <Expenses />;
       case "marketing": return <Marketing />;
