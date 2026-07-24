@@ -396,16 +396,17 @@ function Dropdown({ label, value, onChange, options }) {
   );
 }
 
-function Btn({ label, color=T.accent, onClick, full, ghost, small }) {
+function Btn({ label, color=T.accent, onClick, full, ghost, small, disabled }) {
   return (
-    <button onClick={onClick} style={{
+    <button onClick={disabled ? undefined : onClick} disabled={disabled} style={{
       background: ghost ? "transparent" : color,
       color: ghost ? color : "#060B16",
       border: `1px solid ${ghost ? color+"55" : color}`,
       borderRadius:12, padding: small ? "8px 14px" : "12px 20px",
-      fontWeight:700, fontSize: small ? 12 : 13, cursor:"pointer",
+      fontWeight:700, fontSize: small ? 12 : 13, cursor: disabled ? "not-allowed" : "pointer",
       width: full ? "100%" : "auto", fontFamily:FONT,
       letterSpacing:"-0.01em",
+      opacity: disabled ? 0.45 : 1,
       transition:"opacity 0.15s",
     }}>{label}</button>
   );
@@ -2884,7 +2885,7 @@ function orderTypeColor(o, theme) {
   if (o.orderType === "Sample") return theme.orange;
   return theme.indigo;
 }
-const CANCEL_REASONS = ["Delivery Issue", "Quality Issue", "Other"];
+const CANCEL_REASONS = ["Plan Changed", "Batter Quality Issue", "Delivery Delay", "Other"];
 const NEW_CUSTOMER_OPTION = "+ Add New Customer";
 const INITIAL_DAILY_ORDERS = [];
 
@@ -2919,6 +2920,58 @@ function sampleAmount(form, autoAmount) {
 function orderLineItems(o) {
   if (Array.isArray(o.items) && o.items.length) return o.items;
   return [{ product: o.product || PRODUCTS[0].name, kgs: parseFloat(o.kgs) || 0, rate: o.rate ?? rateForProduct(o.product), amount: o.amount || 0 }];
+}
+
+// A customer is "Regular" once they've ordered on more than 2 distinct days.
+// This also works out each regular customer's rough ordering rhythm (Daily,
+// Every 2 days, Weekly, etc.) from the average gap between their order days,
+// and whether they've ordered today — used by the Dashboard and both reports.
+function computeCustomerPatterns(orders, asOfDate) {
+  const today = asOfDate || todayISO();
+  const active = (orders || []).filter(o => o.status !== "Cancelled" && o.customer && o.date);
+  const byCustomer = new Map();
+  active.forEach(o => {
+    const name = (o.customer || "").trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (!byCustomer.has(key)) byCustomer.set(key, { name, dates: new Set(), orderCount: 0, totalKg: 0, totalRevenue: 0, area: "", contact: "" });
+    const c = byCustomer.get(key);
+    c.dates.add(o.date);
+    c.orderCount += 1;
+    c.totalKg += parseFloat(o.kgs) || 0;
+    c.totalRevenue += parseFloat(o.amount) || 0;
+    if (o.area) c.area = o.area;
+    if (o.contact) c.contact = o.contact;
+  });
+
+  return Array.from(byCustomer.values()).map(c => {
+    const dates = Array.from(c.dates).sort();
+    const dayCount = dates.length;
+    const lastDate = dates[dates.length - 1];
+    const daysSince = Math.round((new Date(today) - new Date(lastDate)) / 86400000);
+    let avgGap = null;
+    if (dates.length > 1) {
+      const gaps = [];
+      for (let i = 1; i < dates.length; i++) gaps.push((new Date(dates[i]) - new Date(dates[i - 1])) / 86400000);
+      avgGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    }
+    let pattern = "Not enough data yet";
+    if (avgGap !== null) {
+      if (avgGap <= 1.4) pattern = "Daily";
+      else if (avgGap <= 2.5) pattern = "Every 2 days";
+      else if (avgGap <= 4) pattern = "Every 3 days";
+      else if (avgGap <= 9) pattern = "Weekly";
+      else if (avgGap <= 20) pattern = "Fortnightly";
+      else pattern = "Occasional";
+    }
+    return {
+      name: c.name, area: c.area, contact: c.contact,
+      dayCount, orderCount: c.orderCount, totalKg: c.totalKg, totalRevenue: c.totalRevenue,
+      isRegular: dayCount > 2, // ordered on more than 2 distinct days
+      lastDate, daysSince, avgGap, pattern,
+      orderedToday: dates.includes(today),
+    };
+  }).sort((a, b) => b.dayCount - a.dayCount);
 }
 
 // ── CSV report export helpers ──────────────────────────────────────────────
@@ -3559,6 +3612,30 @@ function DailyOrders({ embedded = false } = {}) {
       });
     }
 
+    // ── Regular customers who haven't ordered recently ────────────────────
+    // A customer is "Regular" once they've ordered on more than 2 distinct
+    // days (based on full order history, not just this report's range).
+    // "Not ordered" here means they didn't order on the report's end date.
+    const regularPatterns = computeCustomerPatterns(orders, reportTo);
+    const missingRegularsRange = regularPatterns.filter(c => c.isRegular && !c.orderedToday).sort((a, b) => a.daysSince - b.daysSince);
+    if (missingRegularsRange.length) {
+      if (y > pageH - 160) { doc.addPage(); header(); y = 118; }
+      sectionTitle(`Regular Customers Not Ordered on ${formatDateReadable(reportTo)}`, AMBER);
+      const missBody = missingRegularsRange.map(c => [c.name, c.contact || "—", c.pattern, `${c.orderCount} orders / ${c.dayCount} days`, `${c.daysSince} day${c.daysSince === 1 ? "" : "s"} ago`]);
+      autoTable(doc, {
+        startY: y,
+        margin: { left: margin, right: margin, bottom: 50 },
+        head: [["Customer", "Contact", "Usual Pattern", "History", "Last Ordered"]],
+        body: missBody,
+        theme: "grid",
+        styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5.5, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+        headStyles: { fillColor: AMBER, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+        alternateRowStyles: { fillColor: [254, 246, 224] },
+        columnStyles: { 4: { fontStyle: "bold", textColor: AMBER } },
+      });
+      y = doc.lastAutoTable.finalY + 30;
+    }
+
     // ── Leads & Conversion Summary — final page ────────────────────────────
     const EMERALD = [16, 150, 110];
     const SKY = [56, 189, 248];
@@ -3734,6 +3811,10 @@ function DailyOrders({ embedded = false } = {}) {
       const dayOrders = orders
         .filter(o => o.date === acctDate && o.status !== "Cancelled")
         .sort((a, b) => timeInfo(a).sortKey.localeCompare(timeInfo(b).sortKey)); // customer delivery time priority
+      const dayCancelled = orders.filter(o => o.date === acctDate && o.status === "Cancelled");
+      const missingRegulars = computeCustomerPatterns(orders, acctDate)
+        .filter(c => c.isRegular && !c.orderedToday)
+        .sort((a, b) => a.daysSince - b.daysSince);
 
       const NAVY = [10, 14, 26];
       const TEAL = [14, 168, 144];
@@ -3810,6 +3891,8 @@ function DailyOrders({ embedded = false } = {}) {
         [`${newCount} New · ${regularCount} Regular${sampleCount ? ` · ${sampleCount} Sample` : ""}`, INDIGO, [235, 234, 253]],
         ...productTotals.filter(p => p.kgs > 0).map(p => [`${p.name}: ${p.kgs.toLocaleString("en-IN", { maximumFractionDigits: 1 })} KG`, AMBER, AMBER_TINT]),
         [`Total Rs ${Math.round(totalAmount).toLocaleString("en-IN")}`, TEAL, TEAL_TINT],
+        ...(dayCancelled.length ? [[`${dayCancelled.length} Cancelled`, [190, 30, 65], [253, 232, 235]]] : []),
+        ...(missingRegulars.length ? [[`${missingRegulars.length} Regulars missing today`, [180, 110, 5], AMBER_TINT]] : []),
       ];
       let cx = margin;
       const chipH = 26;
@@ -3917,6 +4000,57 @@ function DailyOrders({ embedded = false } = {}) {
               }
             }
           },
+        });
+        y = doc.lastAutoTable.finalY + 24;
+      }
+
+      // ── Cancelled / stopped orders for this day ─────────────────────
+      const ROSE = [190, 30, 65];
+      const ROSE_TINT = [253, 232, 235];
+      if (dayCancelled.length) {
+        if (y > pageH - 140) { doc.addPage(); header(); y = 96; }
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11.5);
+        doc.setTextColor(...ROSE);
+        doc.text(`Cancelled / Stopped Orders (${dayCancelled.length})`, margin, y);
+        y += 12;
+        const cancelBody = dayCancelled.map(o => [o.customer, [o.address, o.area].filter(Boolean).join(", ") || "—", String(o.kgs), o.cancelReason || "Other", o.cancelRemarks || "—"]);
+        autoTable(doc, {
+          startY: y,
+          margin: { left: margin, right: margin, bottom: 40 },
+          head: [["Customer", "Address", "KG", "Reason", "Remarks"]],
+          body: cancelBody,
+          theme: "grid",
+          styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5.5, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+          headStyles: { fillColor: ROSE, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+          alternateRowStyles: { fillColor: ROSE_TINT },
+          columnStyles: { 3: { fontStyle: "bold", textColor: ROSE } },
+        });
+        y = doc.lastAutoTable.finalY + 24;
+      }
+
+      // ── Regular customers who haven't ordered today ─────────────────
+      // A customer is "Regular" once they've ordered on more than 2 distinct
+      // days. This flags regulars who are missing from today's dispatch —
+      // useful for a quick follow-up call.
+      if (missingRegulars.length) {
+        if (y > pageH - 140) { doc.addPage(); header(); y = 96; }
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11.5);
+        doc.setTextColor(...AMBER);
+        doc.text(`Regular Customers Who Haven't Ordered Today (${missingRegulars.length})`, margin, y);
+        y += 12;
+        const missBody = missingRegulars.map(c => [c.name, c.contact || "—", c.pattern, `${c.orderCount} orders / ${c.dayCount} days`, `${c.daysSince} day${c.daysSince === 1 ? "" : "s"} ago`]);
+        autoTable(doc, {
+          startY: y,
+          margin: { left: margin, right: margin, bottom: 40 },
+          head: [["Customer", "Contact", "Usual Pattern", "History", "Last Ordered"]],
+          body: missBody,
+          theme: "grid",
+          styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5.5, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+          headStyles: { fillColor: [180, 110, 5], textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+          alternateRowStyles: { fillColor: AMBER_TINT },
+          columnStyles: { 4: { fontStyle: "bold", textColor: AMBER } },
         });
         y = doc.lastAutoTable.finalY + 24;
       }
@@ -4230,10 +4364,15 @@ function DailyOrders({ embedded = false } = {}) {
           </div>
         )}
         <Dropdown label="Reason for cancellation" value={cancelForm.reason} onChange={e => setCancelForm({ ...cancelForm, reason: e.target.value })} options={CANCEL_REASONS} />
-        <Field label="Remarks (optional)" value={cancelForm.remarks} onChange={e => setCancelForm({ ...cancelForm, remarks: e.target.value })} placeholder="Any extra detail" />
+        <Field
+          label={cancelForm.reason === "Other" ? "Reason (required) *" : "Remarks (optional)"}
+          value={cancelForm.remarks}
+          onChange={e => setCancelForm({ ...cancelForm, remarks: e.target.value })}
+          placeholder={cancelForm.reason === "Other" ? "Please describe the reason" : "Any extra detail"}
+        />
         <div style={{ display: "flex", gap: 10 }}>
           <Btn label="Back" color={T.t2} ghost full onClick={() => setCancelTarget(null)} />
-          <Btn label="Confirm Cancel" color={T.rose} full onClick={confirmCancel} />
+          <Btn label="Confirm Cancel" color={T.rose} full onClick={confirmCancel} disabled={cancelForm.reason === "Other" && !cancelForm.remarks.trim()} />
         </div>
       </Sheet>
     </div>
@@ -5579,11 +5718,11 @@ function seededWave(seed, n, base, spread) {
   return out;
 }
 
-function StatCard({ icon, iconBg, label, value, unit, change, color }) {
+function StatCard({ icon, iconBg, label, value, unit, change, color, onClick, hint }) {
   const up = change >= 0;
   const spark = seededWave(label.length + value.toString().length, 8, 10, 8);
   return (
-    <div style={{
+    <div onClick={onClick} style={{
       flex: 1,
       minWidth: 175,
       background: `radial-gradient(130% 130% at 12% 15%, ${color}3D 0%, ${color}14 32%, ${DT.card} 62%)`,
@@ -5593,6 +5732,7 @@ function StatCard({ icon, iconBg, label, value, unit, change, color }) {
       display: "flex",
       flexDirection: "column",
       gap: 12,
+      cursor: onClick ? "pointer" : "default",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{ width: 36, height: 36, borderRadius: 10, background: `linear-gradient(135deg, ${color}F2 0%, ${color}B8 100%)`, boxShadow: `0 4px 12px ${color}4D`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{icon}</div>
@@ -5602,10 +5742,14 @@ function StatCard({ icon, iconBg, label, value, unit, change, color }) {
         {value}{unit && <span style={{ fontSize: 13, color: DT.t3, fontWeight: 600 }}> {unit}</span>}
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 700, color: up ? DT.emerald : DT.rose }}>
-          <DIcon id={up ? "up" : "down"} size={11} color={up ? DT.emerald : DT.rose} strokeWidth={3} />
-          {Math.abs(change)}% <span style={{ color: DT.t3, fontWeight: 500 }}>vs Yesterday</span>
-        </div>
+        {hint ? (
+          <div style={{ fontSize: 11.5, fontWeight: 700, color }}>{hint}</div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 700, color: up ? DT.emerald : DT.rose }}>
+            <DIcon id={up ? "up" : "down"} size={11} color={up ? DT.emerald : DT.rose} strokeWidth={3} />
+            {Math.abs(change)}% <span style={{ color: DT.t3, fontWeight: 500 }}>vs Yesterday</span>
+          </div>
+        )}
         <MiniSparkline data={spark} color={color} />
       </div>
     </div>
@@ -6022,12 +6166,53 @@ function RecentLeadsDesktop({ leads, setActiveTab }) {
 }
 
 // ── Full desktop dashboard home ──────────────────────────────────────────
+// ── Regular Customers detail modal — shown from the Dashboard stat card ──
+function RegularCustomersModal({ open, onClose, customers }) {
+  if (!open) return null;
+  const notToday = customers.filter(c => !c.orderedToday);
+  return (
+    <Sheet open={open} onClose={onClose} title={`Regular Customers (${customers.length})`}>
+      <div style={{ fontSize: 12, color: T.t2, marginBottom: 14 }}>
+        Ordered on more than 2 different days. {notToday.length > 0 && (
+          <span style={{ color: T.amber, fontWeight: 700 }}>{notToday.length} haven't ordered today.</span>
+        )}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: "60vh", overflowY: "auto" }}>
+        {customers.map(c => (
+          <div key={c.name} style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            padding: "10px 12px", borderRadius: 10,
+            background: c.orderedToday ? T.cardHigh : T.amber + "14",
+            border: `1px solid ${c.orderedToday ? T.border : T.amber + "44"}`,
+          }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: T.t1 }}>{c.name}</div>
+              <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>
+                {c.orderCount} orders · {c.dayCount} days · {c.pattern}
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              {c.orderedToday ? (
+                <Chip label="Ordered today" color={T.emerald} />
+              ) : (
+                <Chip label={`${c.daysSince}d since last order`} color={T.amber} />
+              )}
+            </div>
+          </div>
+        ))}
+        {!customers.length && <div style={{ fontSize: 12, color: T.t3, textAlign: "center", padding: 20 }}>No regular customers yet.</div>}
+      </div>
+    </Sheet>
+  );
+}
+
 function DesktopDashboardHome({ setActiveTab }) {
   const [leads] = useSheetSynced("leads", "leads", []);
   const [samples] = useSheetSynced("samples", "samples", []);
   const [repeatCustomers] = useSheetSynced("repeatCustomers", "repeatCustomers", []);
   const [dailyOrders] = useSheetSynced("dailyOrders", "dailyOrders", []);
   const [expenses] = useSheetSynced("expenses", "expenses", []);
+  const [showRegularModal, setShowRegularModal] = useState(false);
 
   const activeLeads = (leads || []).filter(l => l && l.name && l.stage);
   const activeCustomers = activeLeads.filter(l => l.stage === "Active Customer").length;
@@ -6035,6 +6220,11 @@ function DesktopDashboardHome({ setActiveTab }) {
   const convRate = activeLeads.length > 0 ? Math.round((ordersReceived.length / activeLeads.length) * 100) : 0;
 
   const samplesSentKg = (samples || []).reduce((a, b) => a + (Number(b.qty) || 0), 0);
+
+  // ── Regular customers — ordered on more than 2 distinct days ───────────
+  const customerPatterns = computeCustomerPatterns(dailyOrders || []);
+  const regularCustomers = customerPatterns.filter(c => c.isRegular);
+  const regularNotToday = regularCustomers.filter(c => !c.orderedToday).length;
 
   // ── Revenue & Sales — sourced directly from Daily Orders (matches the Daily Orders page exactly) ──
   const today = todayISO();
@@ -6070,8 +6260,17 @@ function DesktopDashboardHome({ setActiveTab }) {
         <StatCard icon="📈" iconBg={(netToday >= 0 ? DT.emerald : DT.rose) + "26"} label="Net Profit (Today)" value={"₹" + netToday.toLocaleString("en-IN")} change={netToday >= 0 ? 1 : -1} color={netToday >= 0 ? DT.emerald : DT.rose} />
         <StatCard icon="🎯" iconBg={DT.sky + "26"} label="Conversion Rate" value={convRate + "%"} change={convRate > 0 ? 8 : 0} color={DT.sky} />
         <StatCard icon="🏪" iconBg={DT.orange + "26"} label="Active Customers" value={activeCustomers} change={activeCustomers > 0 ? 5 : 0} color={DT.orange} />
+        <StatCard
+          icon="🔁" iconBg={DT.indigo + "26"} label="Regular Customers"
+          value={regularCustomers.length}
+          color={DT.indigo}
+          onClick={() => setShowRegularModal(true)}
+          hint={regularNotToday > 0 ? `${regularNotToday} haven't ordered today · Tap for details` : "Tap for details"}
+        />
         <StatCard icon="🧪" iconBg={DT.purple + "26"} label="Samples Sent" value={samplesSentKg} unit="KG" change={samplesSentKg > 0 ? -4 : 0} color={DT.purple} />
       </div>
+
+      <RegularCustomersModal open={showRegularModal} onClose={() => setShowRegularModal(false)} customers={regularCustomers} />
 
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "stretch" }}>
         <SalesTrendChart orders={dailyOrders || []} />
