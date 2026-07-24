@@ -686,7 +686,7 @@ function ProspectFinder() {
         <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:24, textAlign:"center" }}>
           <div style={{ fontSize:40, marginBottom:8 }}>🗺️</div>
           <div style={{ fontSize:14, fontWeight:700, color:T.t1, marginBottom:6 }}>Find New Customers</div>
-          <div style={{ fontSize:12, color:T.t3, lineHeight:1.7 }}>Search hotels, restaurants, mess and catering in any Chennai or Bengaluru area. One tap to add to your CRM pipeline.</div>
+          <div style={{ fontSize:12, color:T.t3, lineHeight:1.7 }}>Search hotels, restaurants, mess and catering in any Chennai area. One tap to add to your CRM pipeline.</div>
         </div>
       )}
     </div>
@@ -2155,7 +2155,7 @@ function Pipeline() {
   </div>
   <div class="date">
     <div style="font-size:20px;font-weight:900;color:#00C9A7">${today}</div>
-    <div style="margin-top:4px">Bengaluru · Food Distribution</div>
+    <div style="margin-top:4px">Chennai · Food Distribution</div>
   </div>
 </div>
 <div class="overview">
@@ -4865,7 +4865,7 @@ function Reports() {
   </div>
   <div class="date">
     <div style="font-size:20px;font-weight:900;color:#00C9A7">${today}</div>
-    <div style="margin-top:4px">Bengaluru · Food Distribution</div>
+    <div style="margin-top:4px">Chennai · Food Distribution</div>
   </div>
 </div>
 
@@ -5057,7 +5057,7 @@ function AIAssistant() {
   const convRate2 = leads.length>0?Math.round(converted2/leads.length*100):0;
   const todayStr2 = new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
 
-  const CONTEXT = "You are an AI business assistant for Sridhi Ventures, a fresh dosa and idli batter distributor in Bengaluru, India. Answer questions using the LIVE data below. Be specific, use actual names." +
+  const CONTEXT = "You are an AI business assistant for Sridhi Ventures, a fresh dosa and idli batter distributor in Chennai, India. Answer questions using the LIVE data below. Be specific, use actual names." +
     "\n\nTODAY: " + todayStr2 +
     "\nTotal Leads: " + leads.length + " | Active Customers: " + activeCustomers + " | Conversion: " + convRate2 + "%" +
     "\nTotal Expenses: Rs." + totalExpenses.toLocaleString("en-IN") +
@@ -5191,7 +5191,7 @@ const PIPELINE_STAGE_LIST = [
 ];
 
 const DEFAULT_TEMPLATES = [
-  { id:1, name:"Introduction", stage:"New Lead", message:"Hi {customer_name}, I\'m calling from Sridhi Ventures, Bengaluru. We supply fresh dosa & idli batter to restaurants. Would you be interested in a free 3 KG trial? 🙏" },
+  { id:1, name:"Introduction", stage:"New Lead", message:"Hi {customer_name}, I\'m calling from Sridhi Ventures, Chennai. We supply fresh dosa & idli batter to restaurants. Would you be interested in a free 3 KG trial? 🙏" },
   { id:2, name:"Sample Follow-up", stage:"Sample Requested", message:"Hello {customer_name} ji, your {product} sample is ready! Our executive {executive} will deliver it to {address} today. Please confirm your availability 🙏" },
   { id:3, name:"Feedback Request", stage:"Sample Delivered", message:"Namaste {customer_name} ji! Hope you enjoyed our {product} sample. Did it meet your quality expectations? We can offer {qty} KG/week at great prices 😊" },
   { id:4, name:"Order Confirmation", stage:"Order Received", message:"Thank you {customer_name} ji! 🎉 Your order of {qty} KG {product} is confirmed. We will deliver fresh tomorrow morning. Sridhi Ventures!" },
@@ -6616,6 +6616,108 @@ function DesktopShell({ activeTab, setActiveTab, role, setRole, leadsCount, rend
 }
 
 
+// ─── LOGIN HERO — animated illustration: workers joyfully making fresh
+// idli/dosa batter on the wet grinder, batter poured, dosa on the tawa,
+// steam rising off the idli stand. Pure SVG + CSS keyframes (no images),
+// drawn in the brand's forest-green / emerald / gold palette.
+function FactoryHero() {
+  return (
+    <div style={{ width: "100%", maxWidth: 380, margin: "0 auto 8px", position: "relative" }}>
+      <style>{`
+        @keyframes svGrind   { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes svSteamA  { 0% { transform: translateY(0) scaleX(1); opacity:0; } 18% { opacity:.6; } 100% { transform: translateY(-30px) scaleX(1.3); opacity:0; } }
+        @keyframes svSteamB  { 0% { transform: translateY(0) scaleX(1); opacity:0; } 22% { opacity:.5; } 100% { transform: translateY(-36px) scaleX(1.4); opacity:0; } }
+        @keyframes svBob     { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-2.5px) rotate(-2deg); } }
+        @keyframes svBob2    { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-3px) rotate(2deg); } }
+        @keyframes svStir    { 0%,100% { transform: rotate(-14deg); } 50% { transform: rotate(14deg); } }
+        @keyframes svPour    { 0%,55%,100% { opacity:0; } 15%,40% { opacity:1; } }
+        @keyframes svSizzle  { 0%,100% { opacity:.85; } 50% { opacity:1; } }
+        .sv-hero * { transform-box: fill-box; transform-origin: center; }
+        .sv-grinder-wheel { animation: svGrind 5s linear infinite; }
+        .sv-steam-1 { animation: svSteamA 2.4s ease-in-out infinite; }
+        .sv-steam-2 { animation: svSteamB 2.8s ease-in-out infinite .5s; }
+        .sv-steam-3 { animation: svSteamA 2.6s ease-in-out infinite 1.1s; }
+        .sv-worker-l { animation: svBob 2.2s ease-in-out infinite; }
+        .sv-worker-r { animation: svBob2 2.5s ease-in-out infinite .3s; }
+        .sv-ladle { animation: svStir 1.8s ease-in-out infinite; }
+        .sv-pour { animation: svPour 3.4s ease-in-out infinite; }
+        .sv-sizzle { animation: svSizzle 1.2s ease-in-out infinite; }
+      `}</style>
+      <svg className="sv-hero" viewBox="0 0 380 210" width="100%" height="auto" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <radialGradient id="svGlow" cx="50%" cy="45%" r="60%">
+            <stop offset="0%" stopColor="#1a8f52" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="#1a8f52" stopOpacity="0" />
+          </radialGradient>
+          <linearGradient id="svBatter" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#fdf7e8" />
+            <stop offset="100%" stopColor="#f3e6c4" />
+          </linearGradient>
+          <linearGradient id="svSteel" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#cfd8d4" />
+            <stop offset="100%" stopColor="#93a29c" />
+          </linearGradient>
+        </defs>
+        <ellipse cx="190" cy="105" rx="185" ry="100" fill="url(#svGlow)" />
+        {/* floor shelf */}
+        <rect x="14" y="176" width="352" height="6" rx="3" fill="#123322" opacity="0.35" />
+
+        {/* ── LEFT: traditional wet grinder ── */}
+        <g transform="translate(38,108)">
+          <ellipse cx="34" cy="66" rx="40" ry="9" fill="#0d2e1c" opacity="0.25" />
+          <rect x="10" y="20" width="48" height="46" rx="10" fill="url(#svSteel)" stroke="#5c6d66" strokeWidth="1.5" />
+          <circle className="sv-grinder-wheel" cx="34" cy="20" r="30" fill="#e9ede9" stroke="#8a9992" strokeWidth="2" />
+          <circle cx="34" cy="20" r="30" fill="none" stroke="#c7d1cb" strokeWidth="1" strokeDasharray="2 5" />
+          <circle cx="34" cy="20" r="7" fill="#17794a" />
+          <rect x="30" y="-4" width="8" height="14" rx="3" fill="#17794a" />
+        </g>
+
+        {/* ── CENTER: mixing bowl + worker stirring ── */}
+        <g transform="translate(150,60)">
+          {/* worker silhouette, stirring */}
+          <g className="sv-worker-l">
+            <circle cx="34" cy="10" r="11" fill="#0c3a24" />
+            <path d="M14 46 Q16 22 34 21 Q52 22 54 46 Z" fill="#17794a" />
+            <g className="sv-ladle" style={{ transformOrigin: "34px 34px" }}>
+              <rect x="32" y="10" width="4" height="30" rx="2" fill="#c98a1c" />
+              <circle cx="34" cy="42" r="6" fill="#e8b64a" />
+            </g>
+          </g>
+          {/* bowl */}
+          <path d="M2 62 Q34 90 66 62 L60 66 Q34 82 8 66 Z" fill="#7d8b85" />
+          <ellipse cx="34" cy="60" rx="32" ry="11" fill="url(#svBatter)" stroke="#e2d3a3" strokeWidth="1.5" />
+          <path d="M4 60 Q34 68 64 60" fill="none" stroke="#e7d7ab" strokeWidth="1.5" opacity="0.8" />
+          {/* steam off the batter */}
+          <path className="sv-steam-1" d="M20 52 Q16 44 22 38" stroke="#dfe9e3" strokeWidth="2.4" fill="none" strokeLinecap="round" opacity="0" />
+          <path className="sv-steam-2" d="M46 52 Q50 44 44 38" stroke="#dfe9e3" strokeWidth="2.4" fill="none" strokeLinecap="round" opacity="0" />
+        </g>
+
+        {/* pour stream from grinder toward bowl */}
+        <path className="sv-pour" d="M96 140 Q120 150 148 140" stroke="#f3e6c4" strokeWidth="3.5" fill="none" strokeLinecap="round" opacity="0" />
+
+        {/* ── RIGHT: tawa with dosa + idli stand, second worker ── */}
+        <g transform="translate(258,96)">
+          <g className="sv-worker-r">
+            <circle cx="30" cy="6" r="10" fill="#0c3a24" />
+            <path d="M12 40 Q14 18 30 17 Q46 18 48 40 Z" fill="#0f8a52" />
+          </g>
+          {/* tawa (griddle) */}
+          <ellipse cx="26" cy="60" rx="30" ry="9" fill="#26262a" />
+          <ellipse cx="26" cy="57" rx="24" ry="7" fill="#caa14a" className="sv-sizzle" />
+          {/* idli stand */}
+          <g transform="translate(58,34)">
+            <ellipse cx="12" cy="30" rx="16" ry="5" fill="#d9d9d9" />
+            <ellipse cx="12" cy="22" rx="16" ry="5" fill="#eee" />
+            <ellipse cx="12" cy="14" rx="16" ry="5" fill="#fff" />
+            <path className="sv-steam-3" d="M6 8 Q2 0 8 -8" stroke="#e7f1ea" strokeWidth="2.2" fill="none" strokeLinecap="round" opacity="0" />
+            <path className="sv-steam-1" d="M18 8 Q22 0 16 -8" stroke="#e7f1ea" strokeWidth="2.2" fill="none" strokeLinecap="round" opacity="0" />
+          </g>
+        </g>
+      </svg>
+    </div>
+  );
+}
+
 // SVG icons for nav
 function NavIcon({ id, active }) {
   const col = active ? T.accent : T.t3;
@@ -6708,14 +6810,10 @@ export default function App() {
       <div style={{ minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24, fontFamily:FONT }}>
         <div style={{ position:"fixed", top:"10%", left:"50%", transform:"translateX(-50%)", width:360, height:360, borderRadius:"50%", background:`radial-gradient(circle, ${T.accentGlow} 0%, transparent 65%)`, pointerEvents:"none" }} />
         <div style={{ position:"relative", zIndex:1, textAlign:"center", marginBottom:44 }}>
-          <div style={{
-            width:56, height:56, borderRadius:16, background:T.accentSub,
-            border:`1px solid ${T.accentGlow}`, display:"flex", alignItems:"center", justifyContent:"center",
-            margin:"0 auto 18px", fontSize:26,
-          }}>⚡</div>
+          <FactoryHero />
           <div style={{ fontSize:28, fontWeight:900, color:T.t1, letterSpacing:"-0.04em" }}>Sridhi Ventures</div>
           <div style={{ fontSize:11, color:T.accent, fontWeight:700, letterSpacing:"0.12em", textTransform:"uppercase", marginTop:6 }}>Business Operating System</div>
-          <div style={{ fontSize:11, color:T.t3, marginTop:6, fontWeight:500 }}>Bengaluru · Food Distribution</div>
+          <div style={{ fontSize:11, color:T.t3, marginTop:6, fontWeight:500 }}>Chennai · Food Distribution</div>
         </div>
         <div style={{ position:"relative", zIndex:1, width:"100%", maxWidth:360, display:"flex", flexDirection:"column", gap:10 }}>
           {[
