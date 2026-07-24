@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useSheets, SYNC_ENABLED } from "./useSheets.js";
+import { SRIDHI_LOGO_PNG } from "./lib/logo.js";
 
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────
 const T = {
@@ -3311,9 +3312,11 @@ function DailyOrders({ embedded = false } = {}) {
     ]);
     const { rangeOrders, rangeCancelled, rangeByDate, rangeByProduct, sampleSummary, totalNew, totalRegular, totalSample, totalNewKg, totalKg, totalRevenue } = getReportData();
 
-    const NAVY = [10, 14, 26];
-    const TEAL = [14, 168, 144];
-    const TEAL_TINT = [232, 250, 246];
+    // Brand palette — drawn from the Sridhi Ventures logo (deep forest green
+    // header with the signature emerald accent), rather than generic navy/teal.
+    const NAVY = [8, 40, 25];        // deep forest green header background
+    const TEAL = [23, 148, 74];      // brand emerald (from the logo wordmark)
+    const TEAL_TINT = [229, 248, 238]; // pale emerald tint for banners
     const INDIGO = [79, 70, 229];
     const AMBER = [180, 110, 5];
     const ROSE = [190, 24, 72];
@@ -3329,22 +3332,41 @@ function DailyOrders({ embedded = false } = {}) {
     const margin = 40;
 
     const header = () => {
+      const headerH = 92;
       doc.setFillColor(...NAVY);
-      doc.rect(0, 0, pageW, 92, "F");
+      doc.rect(0, 0, pageW, headerH, "F");
+      // Two-tone brand accent line under the header (emerald → pale emerald)
       doc.setFillColor(...TEAL);
-      doc.rect(0, 90, pageW, 2, "F");
+      doc.rect(0, headerH - 3, pageW * 0.65, 3, "F");
+      doc.setFillColor(...TEAL.map(c => Math.min(255, c + 60)));
+      doc.rect(pageW * 0.65, headerH - 3, pageW * 0.35, 3, "F");
+
+      // Logo badge — white rounded card so the logo's own white background
+      // reads as an intentional badge rather than a stray box.
+      const logoSize = 46;
+      const badgePad = 7;
+      const badgeSize = logoSize + badgePad * 2;
+      const badgeX = margin, badgeY = (headerH - badgeSize) / 2 - 2;
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(badgeX, badgeY, badgeSize, badgeSize, 10, 10, "F");
+      try {
+        doc.addImage(SRIDHI_LOGO_PNG, "PNG", badgeX + badgePad, badgeY + badgePad, logoSize, logoSize);
+      } catch (e) { /* logo optional — never block report generation */ }
+
+      const textX = badgeX + badgeSize + 16;
       doc.setTextColor(255, 255, 255);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(19);
-      doc.text("Sridhi Ventures", margin, 38);
-      doc.setFontSize(10.5);
-      doc.setTextColor(...TEAL.map(c => Math.min(255, c + 40)));
-      doc.text(`${presetLabel().toUpperCase().replace(/-/g, " ")} ORDERS REPORT — NEW & REGULAR CONVERSIONS`, margin, 56);
+      doc.setFontSize(17);
+      doc.text("SRIDHI VENTURES", textX, 34);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(...TEAL.map(c => Math.min(255, c + 70)));
+      doc.text(`${presetLabel().toUpperCase().replace(/-/g, " ")} ORDERS REPORT — NEW & REGULAR CONVERSIONS`, textX, 51);
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor(190, 198, 216);
-      doc.text(`Period: ${formatDateReadable(reportFrom)}  –  ${formatDateReadable(reportTo)}`, margin, 74);
-      doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}`, pageW - margin, 74, { align: "right" });
+      doc.setFontSize(8.5);
+      doc.setTextColor(200, 214, 205);
+      doc.text(`Period: ${formatDateReadable(reportFrom)}  –  ${formatDateReadable(reportTo)}`, textX, 68);
+      doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}`, pageW - margin, 68, { align: "right" });
     };
 
     const footer = () => {
@@ -3610,6 +3632,11 @@ function DailyOrders({ embedded = false } = {}) {
         doc.text(label, bx + 8, y);
         bx += w + 8;
       });
+      // NOTE: without this, y never advances past the reason-breakdown chip
+      // row, so the next section header ("Regular Customers Not Ordered…")
+      // gets drawn on the same line and overlaps it — this was the alignment
+      // bug in the report.
+      y += 28;
     }
 
     // ── Regular customers who haven't ordered recently ────────────────────
@@ -3816,9 +3843,11 @@ function DailyOrders({ embedded = false } = {}) {
         .filter(c => c.isRegular && !c.orderedToday)
         .sort((a, b) => a.daysSince - b.daysSince);
 
-      const NAVY = [10, 14, 26];
-      const TEAL = [14, 168, 144];
-      const TEAL_TINT = [232, 250, 246];
+      // Same brand palette as the Daily Orders report — deep forest green +
+      // brand emerald, drawn from the Sridhi logo.
+      const NAVY = [8, 40, 25];
+      const TEAL = [23, 148, 74];
+      const TEAL_TINT = [229, 248, 238];
       const AMBER = [180, 110, 5];
       const AMBER_TINT = [254, 246, 224];
       const INDIGO = [79, 70, 229];
@@ -3834,25 +3863,38 @@ function DailyOrders({ embedded = false } = {}) {
       const margin = 36;
 
       const header = () => {
+        const headerH = 78;
         doc.setFillColor(...NAVY);
-        doc.rect(0, 0, pageW, 78, "F");
+        doc.rect(0, 0, pageW, headerH, "F");
         doc.setFillColor(...TEAL);
-        doc.rect(0, 76, pageW, 2, "F");
+        doc.rect(0, headerH - 2, pageW, 2, "F");
+
+        const logoSize = 40;
+        const badgePad = 6;
+        const badgeSize = logoSize + badgePad * 2;
+        const badgeX = margin, badgeY = (headerH - badgeSize) / 2 - 1;
+        doc.setFillColor(255, 255, 255);
+        doc.roundedRect(badgeX, badgeY, badgeSize, badgeSize, 9, 9, "F");
+        try {
+          doc.addImage(SRIDHI_LOGO_PNG, "PNG", badgeX + badgePad, badgeY + badgePad, logoSize, logoSize);
+        } catch (e) { /* logo optional — never block report generation */ }
+
+        const textX = badgeX + badgeSize + 14;
         doc.setTextColor(255, 255, 255);
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(18);
-        doc.text("Sridhi Ventures — Accountant & Dispatch Report", margin, 32);
+        doc.setFontSize(16);
+        doc.text("SRIDHI VENTURES — Accountant & Dispatch Report", textX, 31);
         doc.setFont("helvetica", "normal");
-        doc.setFontSize(9.5);
-        doc.setTextColor(190, 198, 216);
-        doc.text(`For billing + driver dispatch  ·  Sorted by customer delivery time (— = no delivery time set)`, margin, 48);
+        doc.setFontSize(9);
+        doc.setTextColor(200, 214, 205);
+        doc.text(`For billing + driver dispatch  ·  Sorted by customer delivery time (— = no delivery time set)`, textX, 47);
         doc.setFont("helvetica", "bold");
         doc.setFontSize(13);
-        doc.setTextColor(...TEAL.map(c => Math.min(255, c + 60)));
+        doc.setTextColor(...TEAL.map(c => Math.min(255, c + 70)));
         doc.text(formatDateReadable(acctDate), pageW - margin, 32, { align: "right" });
         doc.setFont("helvetica", "normal");
         doc.setFontSize(8.5);
-        doc.setTextColor(190, 198, 216);
+        doc.setTextColor(200, 214, 205);
         doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`, pageW - margin, 48, { align: "right" });
       };
 
