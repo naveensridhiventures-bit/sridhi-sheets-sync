@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useSheets, SYNC_ENABLED } from "./useSheets.js";
 import { SRIDHI_LOGO_PNG } from "./lib/logo.js";
 
@@ -6616,104 +6616,244 @@ function DesktopShell({ activeTab, setActiveTab, role, setRole, leadsCount, rend
 }
 
 
-// ─── LOGIN HERO — animated illustration: workers joyfully making fresh
-// idli/dosa batter on the wet grinder, batter poured, dosa on the tawa,
-// steam rising off the idli stand. Pure SVG + CSS keyframes (no images),
-// drawn in the brand's forest-green / emerald / gold palette.
+// ─── LOGIN HERO — a small "movie": batter is ground fresh at the Sridhi
+// factory, loaded onto the delivery truck, and driven out to happy hotels,
+// restaurants, caterers and PG/hostel kitchens — each lighting up with a
+// smile as the truck arrives. Pure SVG + CSS keyframes, no image assets,
+// drawn entirely in the brand's forest-green / emerald / gold palette so it
+// reads as one continuous scene rather than a bolted-on graphic.
 function FactoryHero() {
   return (
-    <div style={{ width: "100%", maxWidth: 380, margin: "0 auto 8px", position: "relative" }}>
+    <div style={{ width: "100%", maxWidth: 430, margin: "0 auto 8px", position: "relative", overflow: "hidden", borderRadius: 18 }}>
       <style>{`
-        @keyframes svGrind   { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        @keyframes svSteamA  { 0% { transform: translateY(0) scaleX(1); opacity:0; } 18% { opacity:.6; } 100% { transform: translateY(-30px) scaleX(1.3); opacity:0; } }
-        @keyframes svSteamB  { 0% { transform: translateY(0) scaleX(1); opacity:0; } 22% { opacity:.5; } 100% { transform: translateY(-36px) scaleX(1.4); opacity:0; } }
-        @keyframes svBob     { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-2.5px) rotate(-2deg); } }
-        @keyframes svBob2    { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-3px) rotate(2deg); } }
-        @keyframes svStir    { 0%,100% { transform: rotate(-14deg); } 50% { transform: rotate(14deg); } }
-        @keyframes svPour    { 0%,55%,100% { opacity:0; } 15%,40% { opacity:1; } }
-        @keyframes svSizzle  { 0%,100% { opacity:.85; } 50% { opacity:1; } }
+        @keyframes svGrind    { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes svSteamA   { 0% { transform: translateY(0) scaleX(1); opacity:0; } 18% { opacity:.6; } 100% { transform: translateY(-26px) scaleX(1.3); opacity:0; } }
+        @keyframes svSteamB   { 0% { transform: translateY(0) scaleX(1); opacity:0; } 22% { opacity:.5; } 100% { transform: translateY(-32px) scaleX(1.4); opacity:0; } }
+        @keyframes svBob      { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-2.5px) rotate(-2deg); } }
+        @keyframes svStir     { 0%,100% { transform: rotate(-14deg); } 50% { transform: rotate(14deg); } }
+        @keyframes svSizzle   { 0%,100% { opacity:.85; } 50% { opacity:1; } }
+        @keyframes svRoad     { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -48; } }
+        @keyframes svWheel    { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes svShine    { 0%,85%,100% { transform: translateX(-140px) skewX(-18deg); opacity:0; } 90% { opacity:.35; } 95% { transform: translateX(720px) skewX(-18deg); opacity:0; } }
+
+        @keyframes svTruckMove {
+          0%   { transform: translateX(0px); }
+          6%   { transform: translateX(0px); }
+          20%  { transform: translateX(150px); }
+          30%  { transform: translateX(150px); }
+          44%  { transform: translateX(280px); }
+          54%  { transform: translateX(280px); }
+          68%  { transform: translateX(410px); }
+          78%  { transform: translateX(410px); }
+          92%  { transform: translateX(536px); }
+          100% { transform: translateX(536px); }
+        }
+        @keyframes svTruckFade {
+          0% { opacity:0; } 4% { opacity:1; } 96% { opacity:1; } 100% { opacity:0; }
+        }
+        @keyframes svDust {
+          0%,100% { opacity:0; } 10%,92% { opacity:.45; } 50% { opacity:.2; }
+        }
+        @keyframes svBubHotel {
+          0%,17%,36%,100% { opacity:0; transform:scale(.4) translateY(6px); }
+          21%,31%          { opacity:1; transform:scale(1) translateY(0); }
+        }
+        @keyframes svBubResto {
+          0%,41%,60%,100% { opacity:0; transform:scale(.4) translateY(6px); }
+          45%,55%          { opacity:1; transform:scale(1) translateY(0); }
+        }
+        @keyframes svBubCater {
+          0%,65%,84%,100% { opacity:0; transform:scale(.4) translateY(6px); }
+          69%,79%          { opacity:1; transform:scale(1) translateY(0); }
+        }
+        @keyframes svBubPg {
+          0%,89%,100%      { opacity:0; transform:scale(.4) translateY(6px); }
+          93%,98%          { opacity:1; transform:scale(1) translateY(0); }
+        }
+
         .sv-hero * { transform-box: fill-box; transform-origin: center; }
         .sv-grinder-wheel { animation: svGrind 5s linear infinite; }
         .sv-steam-1 { animation: svSteamA 2.4s ease-in-out infinite; }
         .sv-steam-2 { animation: svSteamB 2.8s ease-in-out infinite .5s; }
         .sv-steam-3 { animation: svSteamA 2.6s ease-in-out infinite 1.1s; }
         .sv-worker-l { animation: svBob 2.2s ease-in-out infinite; }
-        .sv-worker-r { animation: svBob2 2.5s ease-in-out infinite .3s; }
         .sv-ladle { animation: svStir 1.8s ease-in-out infinite; }
-        .sv-pour { animation: svPour 3.4s ease-in-out infinite; }
         .sv-sizzle { animation: svSizzle 1.2s ease-in-out infinite; }
+        .sv-road { animation: svRoad 1.1s linear infinite; }
+        .sv-wheel { animation: svWheel 0.7s linear infinite; }
+        .sv-shine { animation: svShine 7s ease-in-out infinite; }
+        .sv-truck-move { animation: svTruckMove 16s cubic-bezier(.45,0,.55,1) infinite; }
+        .sv-truck-fade { animation: svTruckFade 16s linear infinite; }
+        .sv-dust { animation: svDust 16s linear infinite; }
+        .sv-bub-hotel  { animation: svBubHotel 16s linear infinite; transform-origin: center bottom; }
+        .sv-bub-resto  { animation: svBubResto 16s linear infinite; transform-origin: center bottom; }
+        .sv-bub-cater  { animation: svBubCater 16s linear infinite; transform-origin: center bottom; }
+        .sv-bub-pg     { animation: svBubPg 16s linear infinite; transform-origin: center bottom; }
       `}</style>
-      <svg className="sv-hero" viewBox="0 0 380 210" width="100%" height="auto" xmlns="http://www.w3.org/2000/svg">
+      <svg className="sv-hero" viewBox="0 0 640 210" style={{ display: "block", width: "100%", height: "auto" }} xmlns="http://www.w3.org/2000/svg">
         <defs>
-          <radialGradient id="svGlow" cx="50%" cy="45%" r="60%">
-            <stop offset="0%" stopColor="#1a8f52" stopOpacity="0.28" />
-            <stop offset="100%" stopColor="#1a8f52" stopOpacity="0" />
+          <radialGradient id="svGlow" cx="50%" cy="40%" r="70%">
+            <stop offset="0%" stopColor="#1a8f52" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="#0a2e1c" stopOpacity="0" />
           </radialGradient>
           <linearGradient id="svBatter" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#fdf7e8" />
-            <stop offset="100%" stopColor="#f3e6c4" />
+            <stop offset="0%" stopColor="#fdf7e8" /><stop offset="100%" stopColor="#f3e6c4" />
           </linearGradient>
           <linearGradient id="svSteel" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#cfd8d4" />
-            <stop offset="100%" stopColor="#93a29c" />
+            <stop offset="0%" stopColor="#cfd8d4" /><stop offset="100%" stopColor="#93a29c" />
           </linearGradient>
+          <linearGradient id="svSky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#0e3b25" /><stop offset="100%" stopColor="#0a2717" />
+          </linearGradient>
+          <clipPath id="svSceneClip"><rect x="0" y="0" width="640" height="210" rx="18" /></clipPath>
         </defs>
-        <ellipse cx="190" cy="105" rx="185" ry="100" fill="url(#svGlow)" />
-        {/* floor shelf */}
-        <rect x="14" y="176" width="352" height="6" rx="3" fill="#123322" opacity="0.35" />
 
-        {/* ── LEFT: traditional wet grinder ── */}
-        <g transform="translate(38,108)">
-          <ellipse cx="34" cy="66" rx="40" ry="9" fill="#0d2e1c" opacity="0.25" />
-          <rect x="10" y="20" width="48" height="46" rx="10" fill="url(#svSteel)" stroke="#5c6d66" strokeWidth="1.5" />
-          <circle className="sv-grinder-wheel" cx="34" cy="20" r="30" fill="#e9ede9" stroke="#8a9992" strokeWidth="2" />
-          <circle cx="34" cy="20" r="30" fill="none" stroke="#c7d1cb" strokeWidth="1" strokeDasharray="2 5" />
-          <circle cx="34" cy="20" r="7" fill="#17794a" />
-          <rect x="30" y="-4" width="8" height="14" rx="3" fill="#17794a" />
-        </g>
+        <g clipPath="url(#svSceneClip)">
+          <rect x="0" y="0" width="640" height="210" fill="url(#svSky)" />
+          <ellipse cx="320" cy="90" rx="340" ry="120" fill="url(#svGlow)" />
+          {/* cinematic light sweep */}
+          <rect className="sv-shine" x="0" y="0" width="60" height="210" fill="#ffffff" opacity="0" />
 
-        {/* ── CENTER: mixing bowl + worker stirring ── */}
-        <g transform="translate(150,60)">
-          {/* worker silhouette, stirring */}
-          <g className="sv-worker-l">
-            <circle cx="34" cy="10" r="11" fill="#0c3a24" />
-            <path d="M14 46 Q16 22 34 21 Q52 22 54 46 Z" fill="#17794a" />
-            <g className="sv-ladle" style={{ transformOrigin: "34px 34px" }}>
-              <rect x="32" y="10" width="4" height="30" rx="2" fill="#c98a1c" />
-              <circle cx="34" cy="42" r="6" fill="#e8b64a" />
+          {/* road */}
+          <line x1="6" y1="180" x2="634" y2="180" stroke="#123322" strokeWidth="3" opacity="0.5" />
+          <line className="sv-road" x1="6" y1="180" x2="634" y2="180" stroke="#3fae7a" strokeWidth="2" strokeDasharray="10 14" opacity="0.55" />
+
+          {/* ── FACTORY (grinder + worker) ── */}
+          <g transform="translate(18,86)">
+            <ellipse cx="30" cy="70" rx="36" ry="8" fill="#0d2e1c" opacity="0.3" />
+            <rect x="8" y="24" width="44" height="42" rx="9" fill="url(#svSteel)" stroke="#5c6d66" strokeWidth="1.4" />
+            <circle className="sv-grinder-wheel" cx="30" cy="24" r="27" fill="#e9ede9" stroke="#8a9992" strokeWidth="2" />
+            <circle cx="30" cy="24" r="27" fill="none" stroke="#c7d1cb" strokeWidth="1" strokeDasharray="2 5" />
+            <circle cx="30" cy="24" r="6.5" fill="#17794a" />
+            <rect x="26.5" y="1" width="7" height="12" rx="3" fill="#17794a" />
+          </g>
+          <g transform="translate(96,46)">
+            <g className="sv-worker-l">
+              <circle cx="24" cy="8" r="9.5" fill="#0c3a24" />
+              <path d="M8 40 Q10 20 24 19 Q38 20 40 40 Z" fill="#17794a" />
+              <g className="sv-ladle" style={{ transformOrigin: "24px 28px" }}>
+                <rect x="22" y="8" width="3.4" height="24" rx="1.7" fill="#c98a1c" />
+                <circle cx="24" cy="34" r="5" fill="#e8b64a" />
+              </g>
             </g>
+            <path d="M-4 52 Q24 74 52 52 L47 56 Q24 68 1 56 Z" fill="#7d8b85" />
+            <ellipse cx="24" cy="50" rx="26" ry="9" fill="url(#svBatter)" stroke="#e2d3a3" strokeWidth="1.3" />
+            <path className="sv-steam-1" d="M14 44 Q11 37 16 32" stroke="#dfe9e3" strokeWidth="2" fill="none" strokeLinecap="round" opacity="0" />
+            <path className="sv-steam-2" d="M34 44 Q37 37 32 32" stroke="#dfe9e3" strokeWidth="2" fill="none" strokeLinecap="round" opacity="0" />
           </g>
-          {/* bowl */}
-          <path d="M2 62 Q34 90 66 62 L60 66 Q34 82 8 66 Z" fill="#7d8b85" />
-          <ellipse cx="34" cy="60" rx="32" ry="11" fill="url(#svBatter)" stroke="#e2d3a3" strokeWidth="1.5" />
-          <path d="M4 60 Q34 68 64 60" fill="none" stroke="#e7d7ab" strokeWidth="1.5" opacity="0.8" />
-          {/* steam off the batter */}
-          <path className="sv-steam-1" d="M20 52 Q16 44 22 38" stroke="#dfe9e3" strokeWidth="2.4" fill="none" strokeLinecap="round" opacity="0" />
-          <path className="sv-steam-2" d="M46 52 Q50 44 44 38" stroke="#dfe9e3" strokeWidth="2.4" fill="none" strokeLinecap="round" opacity="0" />
-        </g>
+          <text x="30" y="196" fontSize="9" fontWeight="700" fill="#8fd4b0" textAnchor="middle" fontFamily="Arial, sans-serif">FACTORY</text>
 
-        {/* pour stream from grinder toward bowl */}
-        <path className="sv-pour" d="M96 140 Q120 150 148 140" stroke="#f3e6c4" strokeWidth="3.5" fill="none" strokeLinecap="round" opacity="0" />
-
-        {/* ── RIGHT: tawa with dosa + idli stand, second worker ── */}
-        <g transform="translate(258,96)">
-          <g className="sv-worker-r">
-            <circle cx="30" cy="6" r="10" fill="#0c3a24" />
-            <path d="M12 40 Q14 18 30 17 Q46 18 48 40 Z" fill="#0f8a52" />
+          {/* ── DESTINATIONS ── */}
+          {/* Hotel */}
+          <g transform="translate(200,108)">
+            <rect x="0" y="18" width="40" height="46" rx="3" fill="#e9eef0" />
+            <polygon points="-4,18 44,18 20,2" fill="#caa14a" />
+            <rect x="14" y="42" width="12" height="22" rx="2" fill="#123322" />
+            <rect x="4" y="26" width="8" height="8" rx="1.5" fill="#123322" opacity="0.7" />
+            <rect x="28" y="26" width="8" height="8" rx="1.5" fill="#123322" opacity="0.7" />
+            <circle cx="20" cy="10" r="3.2" fill="#fff" />
+            <g className="sv-bub-hotel" style={{ opacity: 0 }}>
+              <circle cx="20" cy="-10" r="11" fill="#fff" />
+              <circle cx="16" cy="-12" r="1.6" fill="#0c3a24" /><circle cx="24" cy="-12" r="1.6" fill="#0c3a24" />
+              <path d="M14 -7 Q20 -2 26 -7" stroke="#0c3a24" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+            </g>
+            <text x="20" y="78" fontSize="9" fontWeight="700" fill="#8fd4b0" textAnchor="middle" fontFamily="Arial, sans-serif">HOTEL</text>
           </g>
-          {/* tawa (griddle) */}
-          <ellipse cx="26" cy="60" rx="30" ry="9" fill="#26262a" />
-          <ellipse cx="26" cy="57" rx="24" ry="7" fill="#caa14a" className="sv-sizzle" />
-          {/* idli stand */}
-          <g transform="translate(58,34)">
-            <ellipse cx="12" cy="30" rx="16" ry="5" fill="#d9d9d9" />
-            <ellipse cx="12" cy="22" rx="16" ry="5" fill="#eee" />
-            <ellipse cx="12" cy="14" rx="16" ry="5" fill="#fff" />
-            <path className="sv-steam-3" d="M6 8 Q2 0 8 -8" stroke="#e7f1ea" strokeWidth="2.2" fill="none" strokeLinecap="round" opacity="0" />
-            <path className="sv-steam-1" d="M18 8 Q22 0 16 -8" stroke="#e7f1ea" strokeWidth="2.2" fill="none" strokeLinecap="round" opacity="0" />
+
+          {/* Restaurant */}
+          <g transform="translate(330,108)">
+            <rect x="0" y="20" width="40" height="44" rx="3" fill="#eef0e9" />
+            <rect x="-4" y="12" width="48" height="9" rx="3" fill="#b6462f" />
+            <rect x="-4" y="12" width="12" height="9" fill="#eee" /><rect x="20" y="12" width="12" height="9" fill="#eee" />
+            <rect x="14" y="42" width="12" height="22" rx="2" fill="#123322" />
+            <path d="M8 30 v8 M8 30 h1.6 M8 30 h-1.6 M6.6 30 v4" stroke="#123322" strokeWidth="1.1" fill="none" strokeLinecap="round" />
+            <circle cx="32" cy="30" r="0.9" fill="#123322" /><path d="M32 27.5 v3 M30.5 27.5 v6 a1.5 1.5 0 0 0 3 0 v-6" stroke="#123322" strokeWidth="1" fill="none" />
+            <g className="sv-bub-resto" style={{ opacity: 0 }}>
+              <circle cx="20" cy="-6" r="11" fill="#fff" />
+              <circle cx="16" cy="-8" r="1.6" fill="#0c3a24" /><circle cx="24" cy="-8" r="1.6" fill="#0c3a24" />
+              <path d="M14 -3 Q20 2 26 -3" stroke="#0c3a24" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+            </g>
+            <text x="20" y="78" fontSize="9" fontWeight="700" fill="#8fd4b0" textAnchor="middle" fontFamily="Arial, sans-serif">RESTAURANT</text>
+          </g>
+
+          {/* Catering (tent) */}
+          <g transform="translate(460,104)">
+            <polygon points="20,0 44,44 -4,44" fill="#17794a" />
+            <polygon points="20,0 32,44 8,44" fill="#0f5c39" />
+            <rect x="4" y="44" width="32" height="4" fill="#0d2e1c" opacity="0.4" />
+            <ellipse cx="20" cy="58" rx="16" ry="4.5" fill="#caa14a" />
+            <ellipse cx="20" cy="56.5" rx="12" ry="3.2" fill="#f3e6c4" />
+            <g className="sv-bub-cater" style={{ opacity: 0 }}>
+              <circle cx="20" cy="-14" r="11" fill="#fff" />
+              <circle cx="16" cy="-16" r="1.6" fill="#0c3a24" /><circle cx="24" cy="-16" r="1.6" fill="#0c3a24" />
+              <path d="M14 -11 Q20 -6 26 -11" stroke="#0c3a24" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+            </g>
+            <text x="20" y="82" fontSize="9" fontWeight="700" fill="#8fd4b0" textAnchor="middle" fontFamily="Arial, sans-serif">CATERING</text>
+          </g>
+
+          {/* PG / Hostel */}
+          <g transform="translate(578,92)">
+            <rect x="0" y="6" width="40" height="58" rx="3" fill="#e4e9e6" />
+            {[0, 1, 2].map(row => (
+              <g key={row}>
+                <rect x="5" y={13 + row * 15} width="7" height="7" rx="1.2" fill="#123322" opacity="0.7" />
+                <rect x="17" y={13 + row * 15} width="7" height="7" rx="1.2" fill="#123322" opacity="0.7" />
+                <rect x="29" y={13 + row * 15} width="7" height="7" rx="1.2" fill="#123322" opacity="0.7" />
+              </g>
+            ))}
+            <g className="sv-bub-pg" style={{ opacity: 0 }}>
+              <circle cx="20" cy="-8" r="11" fill="#fff" />
+              <circle cx="16" cy="-10" r="1.6" fill="#0c3a24" /><circle cx="24" cy="-10" r="1.6" fill="#0c3a24" />
+              <path d="M14 -5 Q20 0 26 -5" stroke="#0c3a24" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+            </g>
+            <text x="20" y="80" fontSize="9" fontWeight="700" fill="#8fd4b0" textAnchor="middle" fontFamily="Arial, sans-serif">PG / HOSTEL</text>
+          </g>
+
+          {/* ── DELIVERY TRUCK — drives the full route, looping ── */}
+          <g className="sv-truck-fade" opacity="0">
+            <g className="sv-truck-move">
+              <ellipse className="sv-dust" cx="42" cy="182" rx="34" ry="4" fill="#caa14a" opacity="0" />
+              <g transform="translate(30,138)">
+                <rect x="0" y="4" width="34" height="26" rx="3" fill="#e9ede9" stroke="#8a9992" strokeWidth="1.2" />
+                <text x="17" y="20" fontSize="8.5" fontWeight="900" fill="#17794a" textAnchor="middle" fontFamily="Arial, sans-serif">SRIDHI</text>
+                <path d="M34 30 h14 v-14 l8 0 a3 3 0 0 1 3 2.4 l3 9.2 a3 3 0 0 1 .1 .9 v1.5 h-4" fill="#17794a" stroke="#0f5c39" strokeWidth="1" />
+                <rect x="46" y="18" width="9" height="7" rx="1" fill="#cfe9dc" opacity="0.85" />
+                <circle className="sv-wheel" cx="9" cy="32" r="5.5" fill="#1c1f1e" stroke="#555" strokeWidth="1" />
+                <circle className="sv-wheel" cx="49" cy="32" r="5.5" fill="#1c1f1e" stroke="#555" strokeWidth="1" />
+                <circle cx="9" cy="32" r="1.6" fill="#8a9992" /><circle cx="49" cy="32" r="1.6" fill="#8a9992" />
+              </g>
+            </g>
           </g>
         </g>
       </svg>
+    </div>
+  );
+}
+
+// ─── Sand-pour reveal for the brand title — small amber/gold grains fall and
+// settle as the "Sridhi Ventures" wordmark wipes into view, like batter/flour
+// pouring into the name. Plays once on mount (fill-mode forwards).
+function SandTitle({ children, style }) {
+  const particles = useMemo(() => (
+    Array.from({ length: 26 }, (_, i) => ({
+      left: (i * 37) % 100,
+      size: 2 + ((i * 13) % 4),
+      delay: (i % 9) * 0.05,
+      dur: 0.9 + (i % 5) * 0.12,
+    }))
+  ), []);
+  return (
+    <div style={{ position: "relative", display: "inline-block" }}>
+      <style>{`
+        @keyframes sandFall   { 0% { transform: translateY(-34px); opacity:0; } 45% { opacity:.9; } 100% { transform: translateY(26px); opacity:0; } }
+        @keyframes sandReveal { 0% { clip-path: inset(0 100% 0 0); } 100% { clip-path: inset(0 0 0 0); } }
+        .sand-grain  { position:absolute; top:-18px; border-radius:50%; background:#e8b64a; animation-name: sandFall; animation-timing-function: ease-in; animation-fill-mode: forwards; animation-iteration-count: 1; }
+        .sand-reveal { animation: sandReveal 1.15s cubic-bezier(.22,1,.36,1) both; }
+      `}</style>
+      {particles.map((p, i) => (
+        <span key={i} className="sand-grain" style={{ left: `${p.left}%`, width: p.size, height: p.size, animationDelay: `${p.delay}s`, animationDuration: `${p.dur}s` }} />
+      ))}
+      <div className="sand-reveal" style={style}>{children}</div>
     </div>
   );
 }
@@ -6811,7 +6951,7 @@ export default function App() {
         <div style={{ position:"fixed", top:"10%", left:"50%", transform:"translateX(-50%)", width:360, height:360, borderRadius:"50%", background:`radial-gradient(circle, ${T.accentGlow} 0%, transparent 65%)`, pointerEvents:"none" }} />
         <div style={{ position:"relative", zIndex:1, textAlign:"center", marginBottom:44 }}>
           <FactoryHero />
-          <div style={{ fontSize:28, fontWeight:900, color:T.t1, letterSpacing:"-0.04em" }}>Sridhi Ventures</div>
+          <SandTitle style={{ fontSize:28, fontWeight:900, color:T.t1, letterSpacing:"-0.04em" }}>Sridhi Ventures</SandTitle>
           <div style={{ fontSize:11, color:T.accent, fontWeight:700, letterSpacing:"0.12em", textTransform:"uppercase", marginTop:6 }}>Business Operating System</div>
           <div style={{ fontSize:11, color:T.t3, marginTop:6, fontWeight:500 }}>Chennai · Food Distribution</div>
         </div>
