@@ -6901,11 +6901,19 @@ function DesktopSkyline() {
         @keyframes dsGlowPulse { 0%,100% { opacity:.55; } 50% { opacity:.9; } }
         @keyframes dsSteam     { 0% { transform:translateY(0) scaleX(1); opacity:0; } 20% { opacity:.6; } 100% { transform:translateY(-22px) scaleX(1.4); opacity:0; } }
         @keyframes dsWinFlick  { 0%,92%,100% { opacity:1; } 95% { opacity:.4; } }
-        .ds-arc { animation: dsGlowPulse 3.4s ease-in-out infinite; }
+        @keyframes dsSceneIn   { 0% { transform:translateY(26px); opacity:0; } 100% { transform:translateY(0); opacity:1; } }
+        @keyframes dsTruckIn   { 0% { transform:translateX(-220px); opacity:0; } 65% { opacity:1; } 100% { transform:translateX(0); opacity:1; } }
+        @keyframes dsLightning { 0%,100% { opacity:0; } 1%,2.4% { opacity:1; } 3.2% { opacity:.15; } 4.4%,5.6% { opacity:.85; } 6.4% { opacity:0; } }
+        @keyframes dsArcDrawIn { 0% { stroke-dashoffset: 620; opacity:0; } 8% { opacity:1; } 100% { stroke-dashoffset: 0; opacity:1; } }
+        .ds-scene { animation: dsSceneIn 1s cubic-bezier(.22,1,.36,1) both; }
+        .ds-arc { stroke-dasharray: 620; animation: dsArcDrawIn 1.3s cubic-bezier(.3,.8,.4,1) both, dsGlowPulse 3.4s ease-in-out infinite 1.3s; }
         .ds-steam1 { animation: dsSteam 2.6s ease-in-out infinite; }
         .ds-steam2 { animation: dsSteam 3s ease-in-out infinite .7s; }
         .ds-win-a { animation: dsWinFlick 5s ease-in-out infinite; }
         .ds-win-b { animation: dsWinFlick 6.2s ease-in-out infinite 1.4s; }
+        .ds-truck { animation: dsTruckIn 1.1s cubic-bezier(.2,.9,.3,1) both 0.5s; }
+        .ds-bolt { animation: dsLightning 7s ease-in-out infinite; }
+        .ds-bolt2 { animation: dsLightning 8.5s ease-in-out infinite 2.4s; }
       `}</style>
       <svg viewBox="0 0 640 190" width="100%" height="auto" style={{ display: "block" }} xmlns="http://www.w3.org/2000/svg">
         <defs>
@@ -6917,74 +6925,79 @@ function DesktopSkyline() {
             <stop offset="100%" stopColor="#1fe0b8" stopOpacity="0" />
           </radialGradient>
         </defs>
-        {/* big glowing arc behind the skyline */}
-        <path className="ds-arc" d="M40 168 C 40 40, 600 40, 600 168" fill="none" stroke="#22e0a8" strokeWidth="2.5" opacity="0.7" />
-        {/* ground glow + baseline */}
-        <ellipse cx="320" cy="176" rx="300" ry="16" fill="url(#dsGround)" />
-        <line x1="30" y1="176" x2="610" y2="176" stroke="#1fe0b8" strokeWidth="2" opacity="0.8" />
+        <g className="ds-scene">
+          {/* big glowing arc behind the skyline — draws itself in, then pulses */}
+          <path className="ds-arc" d="M40 168 C 40 40, 600 40, 600 168" fill="none" stroke="#22e0a8" strokeWidth="2.5" opacity="0.7" />
+          {/* lightning crackle accents off the arc */}
+          <path className="ds-bolt" d="M120 90 L134 100 L124 104 L142 122" fill="none" stroke="#c9fff0" strokeWidth="1.6" strokeLinecap="round" opacity="0" />
+          <path className="ds-bolt2" d="M520 88 L508 98 L518 102 L500 120" fill="none" stroke="#c9fff0" strokeWidth="1.6" strokeLinecap="round" opacity="0" />
+          {/* ground glow + baseline */}
+          <ellipse cx="320" cy="176" rx="300" ry="16" fill="url(#dsGround)" />
+          <line x1="30" y1="176" x2="610" y2="176" stroke="#1fe0b8" strokeWidth="2" opacity="0.8" />
 
-        {/* factory silo + steaming bowl */}
-        <g transform="translate(58,90)">
-          <rect x="0" y="26" width="30" height="60" rx="4" fill="#123322" stroke="#1fe0b8" strokeWidth="1" opacity="0.9" />
-          <rect x="-4" y="20" width="38" height="8" rx="3" fill="#0d2e1c" />
-          <path d="M15 20 a7 7 0 0 1 -7 -7 a7 7 0 0 1 7 -7 a5 5 0 0 1 5 5" fill="none" stroke="#22e0a8" strokeWidth="2" strokeLinecap="round" />
-          <circle cx="15" cy="12" r="2.4" fill="#22e0a8" />
-        </g>
-        <g transform="translate(96,104)">
-          <ellipse cx="20" cy="44" rx="22" ry="6" fill="#0d2e1c" />
-          <path d="M2 40 Q20 56 38 40 L34 44 Q20 52 6 44 Z" fill="#1c1f1e" />
-          <ellipse cx="20" cy="38" rx="18" ry="7" fill="#f2f2ec" />
-          <path className="ds-steam1" d="M12 30 Q9 22 14 16" stroke="#bff2df" strokeWidth="2.2" fill="none" strokeLinecap="round" opacity="0" />
-          <path className="ds-steam2" d="M28 30 Q31 22 26 16" stroke="#bff2df" strokeWidth="2.2" fill="none" strokeLinecap="round" opacity="0" />
-        </g>
+          {/* factory silo + steaming bowl */}
+          <g transform="translate(58,90)">
+            <rect x="0" y="26" width="30" height="60" rx="4" fill="#123322" stroke="#1fe0b8" strokeWidth="1" opacity="0.9" />
+            <rect x="-4" y="20" width="38" height="8" rx="3" fill="#0d2e1c" />
+            <path d="M15 20 a7 7 0 0 1 -7 -7 a7 7 0 0 1 7 -7 a5 5 0 0 1 5 5" fill="none" stroke="#22e0a8" strokeWidth="2" strokeLinecap="round" />
+            <circle cx="15" cy="12" r="2.4" fill="#22e0a8" />
+          </g>
+          <g transform="translate(96,104)">
+            <ellipse cx="20" cy="44" rx="22" ry="6" fill="#0d2e1c" />
+            <path d="M2 40 Q20 56 38 40 L34 44 Q20 52 6 44 Z" fill="#1c1f1e" />
+            <ellipse cx="20" cy="38" rx="18" ry="7" fill="#f2f2ec" />
+            <path className="ds-steam1" d="M12 30 Q9 22 14 16" stroke="#bff2df" strokeWidth="2.2" fill="none" strokeLinecap="round" opacity="0" />
+            <path className="ds-steam2" d="M28 30 Q31 22 26 16" stroke="#bff2df" strokeWidth="2.2" fill="none" strokeLinecap="round" opacity="0" />
+          </g>
 
-        {/* house 1 */}
-        <g transform="translate(180,108)">
-          <polygon points="0,26 40,26 20,4" fill="#0f1a14" />
-          <rect x="4" y="26" width="32" height="40" fill="#12201a" />
-          <rect className="ds-win-a" x="10" y="36" width="8" height="10" rx="1.4" fill="url(#dsWin)" />
-          <rect className="ds-win-b" x="22" y="36" width="8" height="10" rx="1.4" fill="url(#dsWin)" />
-          <rect x="15" y="52" width="10" height="14" fill="#08150f" />
-        </g>
-        {/* house 2 */}
-        <g transform="translate(255,102)">
-          <polygon points="0,30 46,30 23,6" fill="#0f1a14" />
-          <rect x="4" y="30" width="38" height="46" fill="#12201a" />
-          <rect className="ds-win-b" x="10" y="40" width="9" height="11" rx="1.4" fill="url(#dsWin)" />
-          <rect className="ds-win-a" x="27" y="40" width="9" height="11" rx="1.4" fill="url(#dsWin)" />
-          <rect x="17" y="58" width="12" height="18" fill="#08150f" />
-        </g>
+          {/* house 1 */}
+          <g transform="translate(180,108)">
+            <polygon points="0,26 40,26 20,4" fill="#0f1a14" />
+            <rect x="4" y="26" width="32" height="40" fill="#12201a" />
+            <rect className="ds-win-a" x="10" y="36" width="8" height="10" rx="1.4" fill="url(#dsWin)" />
+            <rect className="ds-win-b" x="22" y="36" width="8" height="10" rx="1.4" fill="url(#dsWin)" />
+            <rect x="15" y="52" width="10" height="14" fill="#08150f" />
+          </g>
+          {/* house 2 */}
+          <g transform="translate(255,102)">
+            <polygon points="0,30 46,30 23,6" fill="#0f1a14" />
+            <rect x="4" y="30" width="38" height="46" fill="#12201a" />
+            <rect className="ds-win-b" x="10" y="40" width="9" height="11" rx="1.4" fill="url(#dsWin)" />
+            <rect className="ds-win-a" x="27" y="40" width="9" height="11" rx="1.4" fill="url(#dsWin)" />
+            <rect x="17" y="58" width="12" height="18" fill="#08150f" />
+          </g>
 
-        {/* delivery van */}
-        <g transform="translate(345,138)">
-          <ellipse cx="26" cy="34" rx="30" ry="5" fill="#0d2e1c" opacity="0.6" />
-          <rect x="0" y="8" width="34" height="20" rx="2.4" fill="#e9ede9" />
-          <text x="17" y="21" fontSize="7" fontWeight="900" fill="#17794a" textAnchor="middle" fontFamily="Arial, sans-serif">SRIDHI</text>
-          <path d="M34 28 h12 v-11 l7 0 a2.6 2.6 0 0 1 2.5 2 l2.3 7.4 a2.6 2.6 0 0 1 .1 .8 v.8 h-3.4" fill="#1fae7c" stroke="#0f5c39" strokeWidth="0.8" />
-          <rect x="44" y="18" width="7.5" height="6" rx="1" fill="#cfe9dc" opacity="0.85" />
-          <circle cx="9" cy="30" r="4.6" fill="#141414" /><circle cx="46" cy="30" r="4.6" fill="#141414" />
-        </g>
+          {/* delivery van — drives in from off-screen left as part of the intro */}
+          <g className="ds-truck" transform="translate(345,138)">
+            <ellipse cx="26" cy="34" rx="30" ry="5" fill="#0d2e1c" opacity="0.6" />
+            <rect x="0" y="8" width="34" height="20" rx="2.4" fill="#e9ede9" />
+            <text x="17" y="21" fontSize="7" fontWeight="900" fill="#17794a" textAnchor="middle" fontFamily="Arial, sans-serif">SRIDHI</text>
+            <path d="M34 28 h12 v-11 l7 0 a2.6 2.6 0 0 1 2.5 2 l2.3 7.4 a2.6 2.6 0 0 1 .1 .8 v.8 h-3.4" fill="#1fae7c" stroke="#0f5c39" strokeWidth="0.8" />
+            <rect x="44" y="18" width="7.5" height="6" rx="1" fill="#cfe9dc" opacity="0.85" />
+            <circle cx="9" cy="30" r="4.6" fill="#141414" /><circle cx="46" cy="30" r="4.6" fill="#141414" />
+          </g>
 
-        {/* tree */}
-        <g transform="translate(432,120)">
-          <rect x="12" y="34" width="6" height="18" fill="#3a2a18" />
-          <polygon points="15,0 30,30 0,30" fill="#0f5c39" />
-          <polygon points="15,12 27,38 3,38" fill="#0d4a2e" />
-        </g>
+          {/* tree */}
+          <g transform="translate(432,120)">
+            <rect x="12" y="34" width="6" height="18" fill="#3a2a18" />
+            <polygon points="15,0 30,30 0,30" fill="#0f5c39" />
+            <polygon points="15,12 27,38 3,38" fill="#0d4a2e" />
+          </g>
 
-        {/* apartment tower */}
-        <g transform="translate(486,60)">
-          <rect x="0" y="0" width="66" height="116" rx="3" fill="#0f1a14" stroke="#1c3a2a" strokeWidth="1" />
-          {Array.from({ length: 5 }, (_, row) => (
-            <g key={row}>
-              {[0, 1, 2, 3].map(col => (
-                <rect key={col}
-                  className={(row + col) % 3 === 0 ? "ds-win-a" : (row + col) % 3 === 1 ? "ds-win-b" : ""}
-                  x={8 + col * 14} y={10 + row * 20} width="9" height="12" rx="1.3"
-                  fill={(row * 4 + col) % 4 === 3 ? "#1c2b24" : "url(#dsWin)"} />
-              ))}
-            </g>
-          ))}
+          {/* apartment tower */}
+          <g transform="translate(486,60)">
+            <rect x="0" y="0" width="66" height="116" rx="3" fill="#0f1a14" stroke="#1c3a2a" strokeWidth="1" />
+            {Array.from({ length: 5 }, (_, row) => (
+              <g key={row}>
+                {[0, 1, 2, 3].map(col => (
+                  <rect key={col}
+                    className={(row + col) % 3 === 0 ? "ds-win-a" : (row + col) % 3 === 1 ? "ds-win-b" : ""}
+                    x={8 + col * 14} y={10 + row * 20} width="9" height="12" rx="1.3"
+                    fill={(row * 4 + col) % 4 === 3 ? "#1c2b24" : "url(#dsWin)"} />
+                ))}
+              </g>
+            ))}
+          </g>
         </g>
       </svg>
     </div>
@@ -7022,7 +7035,9 @@ function DesktopLoginBackdrop() {
   );
 }
 
-// ─── DESKTOP LOGIN — full landing screen for wide viewports ───────────────
+// ─── DESKTOP LOGIN — full landing screen for wide viewports, with a staged
+// cinematic entrance: flash → skyline rises → emblem flashes in → title does
+// a chrome wipe+shine reveal → cards fly in one by one with a radar ping.
 function DesktopLogin({ installPrompt, handleInstall, setRole }) {
   const { dateStr, timeStr } = useLiveClock();
   const THEME = {
@@ -7044,14 +7059,47 @@ function DesktopLogin({ installPrompt, handleInstall, setRole }) {
     { icon: "team",        title: "Team Collaboration",sub: "Work Better Together" },
   ];
   const pillStyle = { display: "inline-flex", alignItems: "center", gap: 8, padding: "9px 16px", borderRadius: 999, border: "1px solid rgba(31,224,184,0.35)", background: "rgba(15,25,20,0.6)", color: "#cfe9dc", fontSize: 12.5, fontWeight: 700, letterSpacing: "0.04em" };
+  const CARD_START = 1.75, CARD_STEP = 0.16;
 
   return (
     <div style={{ minHeight: "100vh", position: "relative", fontFamily: FONT, padding: "32px 40px 56px" }}>
-      <style>{`@keyframes dlPulseDot { 0%,100% { box-shadow:0 0 0 0 rgba(31,224,184,.55);} 50% { box-shadow:0 0 0 6px rgba(31,224,184,0);} }
-        @keyframes dlRing { 0% { transform:scale(0.85); opacity:.5; } 100% { transform:scale(1.6); opacity:0; } }`}</style>
+      <style>{`
+        @keyframes dlPulseDot  { 0%,100% { box-shadow:0 0 0 0 rgba(31,224,184,.55);} 50% { box-shadow:0 0 0 6px rgba(31,224,184,0);} }
+        @keyframes dlRing      { 0% { transform:scale(0.85); opacity:.5; } 100% { transform:scale(1.6); opacity:0; } }
+        @keyframes dlFlash     { 0% { opacity:0; } 6% { opacity:1; } 100% { opacity:0; } }
+        @keyframes dlBarIn     { 0% { transform:translateY(-14px); opacity:0; } 100% { transform:translateY(0); opacity:1; } }
+        @keyframes dlEmblemIn  { 0% { transform:scale(.35) rotate(-8deg); opacity:0; filter:blur(8px) brightness(2.4); } 55% { transform:scale(1.12) rotate(1deg); opacity:1; filter:blur(0) brightness(1.6); } 75% { transform:scale(.97) rotate(0deg); } 100% { transform:scale(1); opacity:1; filter:blur(0) brightness(1); } }
+        @keyframes dlEmblemGlow{ 0%,100% { box-shadow:0 0 18px rgba(31,224,184,.5); } 50% { box-shadow:0 0 32px rgba(31,224,184,.85); } }
+        @keyframes dlWipe      { 0% { clip-path:inset(0 100% 0 0); } 100% { clip-path:inset(0 0 0 0); } }
+        @keyframes dlShine     { 0% { background-position:-160% 0; } 100% { background-position:260% 0; } }
+        @keyframes dlRise      { 0% { transform:translateY(20px); opacity:0; } 100% { transform:translateY(0); opacity:1; } }
+        @keyframes dlCardIn    { 0% { transform:translateY(46px) scale(.92); opacity:0; } 70% { transform:translateY(-4px) scale(1.015); opacity:1; } 100% { transform:translateY(0) scale(1); opacity:1; } }
+        @keyframes dlPing      { 0% { transform:scale(.6); opacity:.9; } 100% { transform:scale(2.4); opacity:0; } }
+        .dl-bar    { animation: dlBarIn .7s ease-out both; }
+        .dl-emblem { animation: dlEmblemIn 1s cubic-bezier(.2,.8,.3,1) both .35s, dlEmblemGlow 2.6s ease-in-out infinite 1.4s; }
+        .dl-title-wipe { display:inline-block; animation: dlWipe .85s cubic-bezier(.65,0,.35,1) both .95s; }
+        .dl-title-shine {
+          background-image: linear-gradient(100deg, #F8FAFC 40%, #ffffff 50%, #F8FAFC 60%);
+          background-size: 250% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+          animation: dlShine 1.4s ease-out both 1.3s;
+        }
+        .dl-title-shine-g {
+          background-image: linear-gradient(100deg, #1fb888 35%, #baffe8 50%, #1fb888 65%);
+          background-size: 250% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+          animation: dlShine 1.4s ease-out both 1.3s;
+        }
+        .dl-sub   { animation: dlRise .6s ease-out both 1.7s; }
+        .dl-tag   { animation: dlRise .6s ease-out both 1.85s; }
+        .dl-card  { animation: dlCardIn .7s cubic-bezier(.2,.85,.3,1.1) both; }
+        .dl-ping  { animation: dlPing 1s ease-out both; }
+        .dl-install { animation: dlRise .6s ease-out both; }
+        .dl-feat  { animation: dlRise .6s ease-out both; }
+      `}</style>
       <DesktopLoginBackdrop />
+      {/* cinematic opening flash */}
+      <div style={{ position: "fixed", inset: 0, zIndex: 5, pointerEvents: "none", background: "radial-gradient(circle at 50% 30%, rgba(255,255,255,0.9), rgba(31,224,184,0.25) 40%, transparent 70%)", animation: "dlFlash 1s ease-out both", mixBlendMode: "screen" }} />
 
-      <div style={{ position: "relative", zIndex: 2, maxWidth: 1400, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div className="dl-bar" style={{ position: "relative", zIndex: 2, maxWidth: 1400, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={pillStyle}>
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#22e0a8", animation: "dlPulseDot 1.8s ease-in-out infinite" }} />
           SYSTEM ONLINE
@@ -7065,25 +7113,33 @@ function DesktopLogin({ installPrompt, handleInstall, setRole }) {
       <div style={{ position: "relative", zIndex: 2, maxWidth: 900, margin: "8px auto 0", textAlign: "center" }}>
         <DesktopSkyline />
 
-        <div style={{ position: "relative", display: "inline-block", marginTop: 4 }}>
-          <svg width="46" height="30" style={{ position: "absolute", left: -66, top: "50%", marginTop: -15, opacity: 0.5 }} viewBox="0 0 46 30"><path d="M46 15H20L10 5" stroke="#1fe0b8" strokeWidth="1.2" fill="none" /><circle cx="8" cy="3" r="2.4" fill="#1fe0b8" /></svg>
-          <svg width="46" height="30" style={{ position: "absolute", right: -66, top: "50%", marginTop: -15, opacity: 0.5 }} viewBox="0 0 46 30"><path d="M0 15h26l10-10" stroke="#1fe0b8" strokeWidth="1.2" fill="none" /><circle cx="38" cy="3" r="2.4" fill="#1fe0b8" /></svg>
-          <h1 style={{ fontSize: 52, fontWeight: 900, letterSpacing: "-0.03em", margin: 0, lineHeight: 1.05 }}>
-            <span style={{ color: "#F8FAFC" }}>Sridhi </span>
-            <span style={{ background: "linear-gradient(180deg,#4ff0c8,#1fb888)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Ventures</span>
-          </h1>
+        <img src={SRIDHI_LOGO_PNG} alt="" className="dl-emblem" style={{ width: 64, height: 64, borderRadius: 16, objectFit: "cover", marginTop: 4, background: "#fff" }} />
+
+        <div style={{ position: "relative", display: "block", marginTop: 6 }}>
+          <svg width="46" height="30" style={{ position: "absolute", left: "calc(50% - 300px)", top: "50%", marginTop: -15, opacity: 0.5 }} viewBox="0 0 46 30"><path d="M46 15H20L10 5" stroke="#1fe0b8" strokeWidth="1.2" fill="none" /><circle cx="8" cy="3" r="2.4" fill="#1fe0b8" /></svg>
+          <svg width="46" height="30" style={{ position: "absolute", right: "calc(50% - 300px)", top: "50%", marginTop: -15, opacity: 0.5 }} viewBox="0 0 46 30"><path d="M0 15h26l10-10" stroke="#1fe0b8" strokeWidth="1.2" fill="none" /><circle cx="38" cy="3" r="2.4" fill="#1fe0b8" /></svg>
+          <div className="dl-title-wipe">
+            <h1 style={{ fontSize: 52, fontWeight: 900, letterSpacing: "-0.03em", margin: 0, lineHeight: 1.05 }}>
+              <span className="dl-title-shine">Sridhi </span>
+              <span className="dl-title-shine-g">Ventures</span>
+            </h1>
+          </div>
         </div>
-        <div style={{ fontSize: 14, color: "#22e0a8", fontWeight: 800, letterSpacing: "0.22em", textTransform: "uppercase", marginTop: 10 }}>Business Operating System</div>
-        <div style={{ fontSize: 14, color: "#8CA3B5", marginTop: 6 }}>Chennai • Food Distribution</div>
+        <div className="dl-sub" style={{ fontSize: 14, color: "#22e0a8", fontWeight: 800, letterSpacing: "0.22em", textTransform: "uppercase", marginTop: 10 }}>Business Operating System</div>
+        <div className="dl-tag" style={{ fontSize: 14, color: "#8CA3B5", marginTop: 6 }}>Chennai • Food Distribution</div>
       </div>
 
       <div style={{ position: "relative", zIndex: 2, maxWidth: 1160, margin: "40px auto 0", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 22 }}>
-        {ROLES.map(r => {
+        {ROLES.map((r, i) => {
           const th = THEME[r.theme];
+          const delay = CARD_START + i * CARD_STEP;
           return (
-            <div key={r.key} style={{ background: "rgba(10,16,14,0.55)", border: `1px solid ${th.c}55`, borderRadius: 18, padding: "30px 22px 24px", textAlign: "center", boxShadow: `0 0 30px -14px ${th.glow}` }}>
-              <div style={{ width: 68, height: 68, margin: "0 auto 18px", borderRadius: "50%", background: th.bg, border: `1.5px solid ${th.c}`, boxShadow: `0 0 22px ${th.glow}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <LIcon id={r.icon} size={28} color={th.c} />
+            <div key={r.key} className="dl-card" style={{ animationDelay: `${delay}s`, background: "rgba(10,16,14,0.55)", border: `1px solid ${th.c}55`, borderRadius: 18, padding: "30px 22px 24px", textAlign: "center", boxShadow: `0 0 30px -14px ${th.glow}` }}>
+              <div style={{ position: "relative", width: 68, height: 68, margin: "0 auto 18px" }}>
+                <span className="dl-ping" style={{ animationDelay: `${delay + 0.55}s`, position: "absolute", inset: 0, borderRadius: "50%", border: `1.5px solid ${th.c}` }} />
+                <div style={{ width: 68, height: 68, borderRadius: "50%", background: th.bg, border: `1.5px solid ${th.c}`, boxShadow: `0 0 22px ${th.glow}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <LIcon id={r.icon} size={28} color={th.c} />
+                </div>
               </div>
               <div style={{ fontSize: 19, fontWeight: 800, color: "#F1F5F9" }}>{r.key}</div>
               <div style={{ width: 30, height: 2.5, borderRadius: 2, background: th.c, margin: "8px auto 12px" }} />
@@ -7101,7 +7157,7 @@ function DesktopLogin({ installPrompt, handleInstall, setRole }) {
       </div>
 
       {installPrompt && (
-        <div style={{ position: "relative", zIndex: 2, textAlign: "center", marginTop: 40 }}>
+        <div className="dl-install" style={{ animationDelay: "2.5s", position: "relative", zIndex: 2, textAlign: "center", marginTop: 40 }}>
           <div style={{ position: "relative", display: "inline-block" }}>
             <span style={{ position: "absolute", inset: -14, borderRadius: 999, border: "1.5px solid rgba(31,224,184,.4)", animation: "dlRing 2.6s ease-out infinite" }} />
             <span style={{ position: "absolute", inset: -14, borderRadius: 999, border: "1.5px solid rgba(31,224,184,.4)", animation: "dlRing 2.6s ease-out infinite 1.3s" }} />
@@ -7120,7 +7176,7 @@ function DesktopLogin({ installPrompt, handleInstall, setRole }) {
         </div>
       )}
 
-      <div style={{ position: "relative", zIndex: 2, maxWidth: 1000, margin: "48px auto 0", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 24 }}>
+      <div className="dl-feat" style={{ animationDelay: "2.7s", position: "relative", zIndex: 2, maxWidth: 1000, margin: "48px auto 0", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 24 }}>
         {FEATURES.map(f => (
           <div key={f.title} style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center" }}>
             <LIcon id={f.icon} size={20} color="#5fb894" />
