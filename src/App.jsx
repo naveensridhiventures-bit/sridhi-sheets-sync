@@ -6858,6 +6858,285 @@ function SandTitle({ children, style }) {
   );
 }
 
+// ─── Live clock for the desktop login header ───────────────────────────────
+function useLiveClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 15000);
+    return () => clearInterval(id);
+  }, []);
+  return {
+    dateStr: now.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }).toUpperCase(),
+    timeStr: now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }),
+  };
+}
+
+// Small inline icon set just for the desktop login screen.
+function LIcon({ id, size = 26, color = "currentColor" }) {
+  const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: color, strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round" };
+  switch (id) {
+    case "shieldlock": return <svg {...p}><path d="M12 2l8 3.5v6c0 5-3.4 8.7-8 10.5-4.6-1.8-8-5.5-8-10.5v-6z"/><rect x="9" y="11" width="6" height="5" rx="1.3"/><path d="M10.3 11V9.3a1.7 1.7 0 0 1 3.4 0V11"/></svg>;
+    case "phone":      return <svg {...p}><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.7a2 2 0 0 1-.4 2.1L8 9.9a16 16 0 0 0 6 6l1.4-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.5 2.7.6a2 2 0 0 1 1.8 2.1z"/></svg>;
+    case "truck":      return <svg {...p}><rect x="1" y="7" width="13" height="10" rx="1.4"/><path d="M14 10h4l4 3.4V17h-8z"/><circle cx="6" cy="19.4" r="1.7"/><circle cx="17.5" cy="19.4" r="1.7"/></svg>;
+    case "chart":      return <svg {...p}><path d="M4 20V11"/><path d="M12 20V4"/><path d="M20 20v-7"/></svg>;
+    case "calendar":   return <svg {...p}><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M3 10h18"/></svg>;
+    case "download":   return <svg {...p}><path d="M12 3v13"/><path d="m6 11 6 6 6-6"/><path d="M4 21h16"/></svg>;
+    case "devicecheck":return <svg {...p}><rect x="6" y="2" width="12" height="20" rx="2.4"/><path d="M10 18h4"/></svg>;
+    case "shieldcheck":return <svg {...p}><path d="M12 2l8 3.5v6c0 5-3.4 8.7-8 10.5-4.6-1.8-8-5.5-8-10.5v-6z"/><path d="m9 12 2 2 4-4"/></svg>;
+    case "bolt":       return <svg {...p}><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg>;
+    case "cloud":      return <svg {...p}><path d="M7 18a4.5 4.5 0 0 1-.7-8.94A5.5 5.5 0 0 1 17 8a4 4 0 0 1-.4 8H7z"/><path d="M12 12v6"/><path d="m9.5 15.5 2.5-2.5 2.5 2.5"/></svg>;
+    case "team":       return <svg {...p}><circle cx="9" cy="8" r="3.2"/><circle cx="16.5" cy="9.5" r="2.6"/><path d="M3 20v-.6A5.4 5.4 0 0 1 8.4 14h1.2A5.4 5.4 0 0 1 15 19.4V20"/><path d="M16 14.3a4.2 4.2 0 0 1 5 4.1V20"/></svg>;
+    case "chevron":    return <svg {...p} strokeWidth="2.6"><polyline points="9 6 15 12 9 18"/></svg>;
+    default: return null;
+  }
+}
+
+// ─── Desktop login skyline — dark building silhouettes with warm lit
+// windows: factory silo (steaming), two shopfronts, a delivery van, a tree,
+// and an apartment tower — sitting on a glowing brand-green ground arc.
+function DesktopSkyline() {
+  return (
+    <div style={{ width: "100%", maxWidth: 640, margin: "0 auto" }}>
+      <style>{`
+        @keyframes dsGlowPulse { 0%,100% { opacity:.55; } 50% { opacity:.9; } }
+        @keyframes dsSteam     { 0% { transform:translateY(0) scaleX(1); opacity:0; } 20% { opacity:.6; } 100% { transform:translateY(-22px) scaleX(1.4); opacity:0; } }
+        @keyframes dsWinFlick  { 0%,92%,100% { opacity:1; } 95% { opacity:.4; } }
+        .ds-arc { animation: dsGlowPulse 3.4s ease-in-out infinite; }
+        .ds-steam1 { animation: dsSteam 2.6s ease-in-out infinite; }
+        .ds-steam2 { animation: dsSteam 3s ease-in-out infinite .7s; }
+        .ds-win-a { animation: dsWinFlick 5s ease-in-out infinite; }
+        .ds-win-b { animation: dsWinFlick 6.2s ease-in-out infinite 1.4s; }
+      `}</style>
+      <svg viewBox="0 0 640 190" width="100%" height="auto" style={{ display: "block" }} xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="dsWin" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#ffd97a" /><stop offset="100%" stopColor="#f0b23c" />
+          </linearGradient>
+          <radialGradient id="dsGround" cx="50%" cy="0%" r="75%">
+            <stop offset="0%" stopColor="#1fe0b8" stopOpacity="0.5" />
+            <stop offset="100%" stopColor="#1fe0b8" stopOpacity="0" />
+          </radialGradient>
+        </defs>
+        {/* big glowing arc behind the skyline */}
+        <path className="ds-arc" d="M40 168 C 40 40, 600 40, 600 168" fill="none" stroke="#22e0a8" strokeWidth="2.5" opacity="0.7" />
+        {/* ground glow + baseline */}
+        <ellipse cx="320" cy="176" rx="300" ry="16" fill="url(#dsGround)" />
+        <line x1="30" y1="176" x2="610" y2="176" stroke="#1fe0b8" strokeWidth="2" opacity="0.8" />
+
+        {/* factory silo + steaming bowl */}
+        <g transform="translate(58,90)">
+          <rect x="0" y="26" width="30" height="60" rx="4" fill="#123322" stroke="#1fe0b8" strokeWidth="1" opacity="0.9" />
+          <rect x="-4" y="20" width="38" height="8" rx="3" fill="#0d2e1c" />
+          <path d="M15 20 a7 7 0 0 1 -7 -7 a7 7 0 0 1 7 -7 a5 5 0 0 1 5 5" fill="none" stroke="#22e0a8" strokeWidth="2" strokeLinecap="round" />
+          <circle cx="15" cy="12" r="2.4" fill="#22e0a8" />
+        </g>
+        <g transform="translate(96,104)">
+          <ellipse cx="20" cy="44" rx="22" ry="6" fill="#0d2e1c" />
+          <path d="M2 40 Q20 56 38 40 L34 44 Q20 52 6 44 Z" fill="#1c1f1e" />
+          <ellipse cx="20" cy="38" rx="18" ry="7" fill="#f2f2ec" />
+          <path className="ds-steam1" d="M12 30 Q9 22 14 16" stroke="#bff2df" strokeWidth="2.2" fill="none" strokeLinecap="round" opacity="0" />
+          <path className="ds-steam2" d="M28 30 Q31 22 26 16" stroke="#bff2df" strokeWidth="2.2" fill="none" strokeLinecap="round" opacity="0" />
+        </g>
+
+        {/* house 1 */}
+        <g transform="translate(180,108)">
+          <polygon points="0,26 40,26 20,4" fill="#0f1a14" />
+          <rect x="4" y="26" width="32" height="40" fill="#12201a" />
+          <rect className="ds-win-a" x="10" y="36" width="8" height="10" rx="1.4" fill="url(#dsWin)" />
+          <rect className="ds-win-b" x="22" y="36" width="8" height="10" rx="1.4" fill="url(#dsWin)" />
+          <rect x="15" y="52" width="10" height="14" fill="#08150f" />
+        </g>
+        {/* house 2 */}
+        <g transform="translate(255,102)">
+          <polygon points="0,30 46,30 23,6" fill="#0f1a14" />
+          <rect x="4" y="30" width="38" height="46" fill="#12201a" />
+          <rect className="ds-win-b" x="10" y="40" width="9" height="11" rx="1.4" fill="url(#dsWin)" />
+          <rect className="ds-win-a" x="27" y="40" width="9" height="11" rx="1.4" fill="url(#dsWin)" />
+          <rect x="17" y="58" width="12" height="18" fill="#08150f" />
+        </g>
+
+        {/* delivery van */}
+        <g transform="translate(345,138)">
+          <ellipse cx="26" cy="34" rx="30" ry="5" fill="#0d2e1c" opacity="0.6" />
+          <rect x="0" y="8" width="34" height="20" rx="2.4" fill="#e9ede9" />
+          <text x="17" y="21" fontSize="7" fontWeight="900" fill="#17794a" textAnchor="middle" fontFamily="Arial, sans-serif">SRIDHI</text>
+          <path d="M34 28 h12 v-11 l7 0 a2.6 2.6 0 0 1 2.5 2 l2.3 7.4 a2.6 2.6 0 0 1 .1 .8 v.8 h-3.4" fill="#1fae7c" stroke="#0f5c39" strokeWidth="0.8" />
+          <rect x="44" y="18" width="7.5" height="6" rx="1" fill="#cfe9dc" opacity="0.85" />
+          <circle cx="9" cy="30" r="4.6" fill="#141414" /><circle cx="46" cy="30" r="4.6" fill="#141414" />
+        </g>
+
+        {/* tree */}
+        <g transform="translate(432,120)">
+          <rect x="12" y="34" width="6" height="18" fill="#3a2a18" />
+          <polygon points="15,0 30,30 0,30" fill="#0f5c39" />
+          <polygon points="15,12 27,38 3,38" fill="#0d4a2e" />
+        </g>
+
+        {/* apartment tower */}
+        <g transform="translate(486,60)">
+          <rect x="0" y="0" width="66" height="116" rx="3" fill="#0f1a14" stroke="#1c3a2a" strokeWidth="1" />
+          {Array.from({ length: 5 }, (_, row) => (
+            <g key={row}>
+              {[0, 1, 2, 3].map(col => (
+                <rect key={col}
+                  className={(row + col) % 3 === 0 ? "ds-win-a" : (row + col) % 3 === 1 ? "ds-win-b" : ""}
+                  x={8 + col * 14} y={10 + row * 20} width="9" height="12" rx="1.3"
+                  fill={(row * 4 + col) % 4 === 3 ? "#1c2b24" : "url(#dsWin)"} />
+              ))}
+            </g>
+          ))}
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+// ─── Desktop login background — deep space gradient, drifting glow waves,
+// and a scatter of twinkling data-points. ─────────────────────────────────
+function DesktopLoginBackdrop() {
+  const dots = useMemo(() => Array.from({ length: 34 }, (_, i) => ({
+    left: (i * 29) % 100, top: (i * 53) % 100,
+    size: 1.4 + (i % 3) * 0.8, delay: (i % 10) * 0.4, dur: 3 + (i % 5),
+  })), []);
+  return (
+    <div style={{ position: "fixed", inset: 0, overflow: "hidden", zIndex: 0, pointerEvents: "none" }}>
+      <style>{`
+        @keyframes dbTwinkle { 0%,100% { opacity:.15; } 50% { opacity:.9; } }
+        @keyframes dbWaveA { 0% { transform: translateX(-4%) translateY(0); } 50% { transform: translateX(2%) translateY(-1.5%); } 100% { transform: translateX(-4%) translateY(0); } }
+        @keyframes dbWaveB { 0% { transform: translateX(3%) translateY(0); } 50% { transform: translateX(-3%) translateY(1.5%); } 100% { transform: translateX(3%) translateY(0); } }
+        .db-dot { position:absolute; border-radius:50%; background:#1fe0b8; animation-name: dbTwinkle; animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
+        .db-wave-a { animation: dbWaveA 18s ease-in-out infinite; }
+        .db-wave-b { animation: dbWaveB 22s ease-in-out infinite; }
+      `}</style>
+      <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse 60% 50% at 50% 8%, rgba(31,224,184,0.10) 0%, transparent 60%), #050b12" }} />
+      <svg className="db-wave-a" style={{ position: "absolute", left: "-10%", top: "10%", width: "70%", opacity: 0.35 }} viewBox="0 0 500 300" fill="none">
+        <path d="M0 150 C 100 40, 200 260, 300 130 S 500 60, 500 150" stroke="#1fe0b8" strokeWidth="1.4" />
+      </svg>
+      <svg className="db-wave-b" style={{ position: "absolute", right: "-10%", top: "45%", width: "70%", opacity: 0.3 }} viewBox="0 0 500 300" fill="none">
+        <path d="M0 150 C 120 250, 220 20, 320 150 S 480 260, 500 150" stroke="#1fe0b8" strokeWidth="1.4" />
+      </svg>
+      {dots.map((d, i) => (
+        <span key={i} className="db-dot" style={{ left: `${d.left}%`, top: `${d.top}%`, width: d.size, height: d.size, animationDelay: `${d.delay}s`, animationDuration: `${d.dur}s` }} />
+      ))}
+    </div>
+  );
+}
+
+// ─── DESKTOP LOGIN — full landing screen for wide viewports ───────────────
+function DesktopLogin({ installPrompt, handleInstall, setRole }) {
+  const { dateStr, timeStr } = useLiveClock();
+  const THEME = {
+    green:  { c: "#1FE0B8", glow: "rgba(31,224,184,.4)",  bg: "rgba(31,224,184,.05)" },
+    purple: { c: "#B36BFF", glow: "rgba(179,107,255,.4)", bg: "rgba(179,107,255,.05)" },
+    blue:   { c: "#38BDF8", glow: "rgba(56,189,248,.4)",  bg: "rgba(56,189,248,.05)" },
+    gold:   { c: "#FBBF24", glow: "rgba(251,191,36,.4)",  bg: "rgba(251,191,36,.05)" },
+  };
+  const ROLES = [
+    { key: "Admin",       icon: "shieldlock", theme: "green",  desc: ["Full access to all modules", "& system reports"], cta: "Open Dashboard" },
+    { key: "Telecaller",  icon: "phone",      theme: "purple", desc: ["Leads, CRM, pipeline", "& follow-ups"],           cta: "Open Workspace" },
+    { key: "Field Sales", icon: "truck",      theme: "blue",   desc: ["Tasks, deliveries &", "order collection"],       cta: "Open Field App" },
+    { key: "Management",  icon: "chart",      theme: "gold",   desc: ["Reports, analytics &", "dashboards"],            cta: "Open Analytics" },
+  ];
+  const FEATURES = [
+    { icon: "shieldcheck", title: "Secure & Reliable", sub: "Enterprise Grade Security" },
+    { icon: "bolt",        title: "Fast & Efficient",  sub: "Optimized Performance" },
+    { icon: "cloud",       title: "Cloud Sync",        sub: "Real-time Data Sync" },
+    { icon: "team",        title: "Team Collaboration",sub: "Work Better Together" },
+  ];
+  const pillStyle = { display: "inline-flex", alignItems: "center", gap: 8, padding: "9px 16px", borderRadius: 999, border: "1px solid rgba(31,224,184,0.35)", background: "rgba(15,25,20,0.6)", color: "#cfe9dc", fontSize: 12.5, fontWeight: 700, letterSpacing: "0.04em" };
+
+  return (
+    <div style={{ minHeight: "100vh", position: "relative", fontFamily: FONT, padding: "32px 40px 56px" }}>
+      <style>{`@keyframes dlPulseDot { 0%,100% { box-shadow:0 0 0 0 rgba(31,224,184,.55);} 50% { box-shadow:0 0 0 6px rgba(31,224,184,0);} }
+        @keyframes dlRing { 0% { transform:scale(0.85); opacity:.5; } 100% { transform:scale(1.6); opacity:0; } }`}</style>
+      <DesktopLoginBackdrop />
+
+      <div style={{ position: "relative", zIndex: 2, maxWidth: 1400, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={pillStyle}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#22e0a8", animation: "dlPulseDot 1.8s ease-in-out infinite" }} />
+          SYSTEM ONLINE
+        </div>
+        <div style={pillStyle}>
+          <LIcon id="calendar" size={14} color="#8fd4b0" />
+          {dateStr}<span style={{ opacity: 0.5 }}>|</span>{timeStr}
+        </div>
+      </div>
+
+      <div style={{ position: "relative", zIndex: 2, maxWidth: 900, margin: "8px auto 0", textAlign: "center" }}>
+        <DesktopSkyline />
+
+        <div style={{ position: "relative", display: "inline-block", marginTop: 4 }}>
+          <svg width="46" height="30" style={{ position: "absolute", left: -66, top: "50%", marginTop: -15, opacity: 0.5 }} viewBox="0 0 46 30"><path d="M46 15H20L10 5" stroke="#1fe0b8" strokeWidth="1.2" fill="none" /><circle cx="8" cy="3" r="2.4" fill="#1fe0b8" /></svg>
+          <svg width="46" height="30" style={{ position: "absolute", right: -66, top: "50%", marginTop: -15, opacity: 0.5 }} viewBox="0 0 46 30"><path d="M0 15h26l10-10" stroke="#1fe0b8" strokeWidth="1.2" fill="none" /><circle cx="38" cy="3" r="2.4" fill="#1fe0b8" /></svg>
+          <h1 style={{ fontSize: 52, fontWeight: 900, letterSpacing: "-0.03em", margin: 0, lineHeight: 1.05 }}>
+            <span style={{ color: "#F8FAFC" }}>Sridhi </span>
+            <span style={{ background: "linear-gradient(180deg,#4ff0c8,#1fb888)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Ventures</span>
+          </h1>
+        </div>
+        <div style={{ fontSize: 14, color: "#22e0a8", fontWeight: 800, letterSpacing: "0.22em", textTransform: "uppercase", marginTop: 10 }}>Business Operating System</div>
+        <div style={{ fontSize: 14, color: "#8CA3B5", marginTop: 6 }}>Chennai • Food Distribution</div>
+      </div>
+
+      <div style={{ position: "relative", zIndex: 2, maxWidth: 1160, margin: "40px auto 0", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 22 }}>
+        {ROLES.map(r => {
+          const th = THEME[r.theme];
+          return (
+            <div key={r.key} style={{ background: "rgba(10,16,14,0.55)", border: `1px solid ${th.c}55`, borderRadius: 18, padding: "30px 22px 24px", textAlign: "center", boxShadow: `0 0 30px -14px ${th.glow}` }}>
+              <div style={{ width: 68, height: 68, margin: "0 auto 18px", borderRadius: "50%", background: th.bg, border: `1.5px solid ${th.c}`, boxShadow: `0 0 22px ${th.glow}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <LIcon id={r.icon} size={28} color={th.c} />
+              </div>
+              <div style={{ fontSize: 19, fontWeight: 800, color: "#F1F5F9" }}>{r.key}</div>
+              <div style={{ width: 30, height: 2.5, borderRadius: 2, background: th.c, margin: "8px auto 12px" }} />
+              <div style={{ fontSize: 12.5, color: "#8CA3B5", lineHeight: 1.6, minHeight: 40 }}>{r.desc[0]}<br />{r.desc[1]}</div>
+              <button onClick={() => setRole(r.key)} style={{
+                marginTop: 16, width: "100%", background: th.bg, border: `1px solid ${th.c}70`, color: th.c,
+                borderRadius: 11, padding: "10px 14px", fontSize: 13, fontWeight: 800, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: FONT,
+              }}>
+                {r.cta} <LIcon id="chevron" size={14} color={th.c} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {installPrompt && (
+        <div style={{ position: "relative", zIndex: 2, textAlign: "center", marginTop: 40 }}>
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <span style={{ position: "absolute", inset: -14, borderRadius: 999, border: "1.5px solid rgba(31,224,184,.4)", animation: "dlRing 2.6s ease-out infinite" }} />
+            <span style={{ position: "absolute", inset: -14, borderRadius: 999, border: "1.5px solid rgba(31,224,184,.4)", animation: "dlRing 2.6s ease-out infinite 1.3s" }} />
+            <button onClick={handleInstall} style={{
+              position: "relative", background: "linear-gradient(180deg,#1fe0b8,#149a71)", border: "none", borderRadius: 999,
+              color: "#04140d", padding: "14px 30px", fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: FONT,
+              display: "flex", alignItems: "center", gap: 12, boxShadow: "0 0 40px rgba(31,224,184,.4)",
+            }}>
+              <LIcon id="devicecheck" size={18} color="#04140d" />
+              Install App on This Device
+              <span style={{ width: 30, height: 30, borderRadius: "50%", background: "rgba(4,20,13,0.18)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <LIcon id="download" size={15} color="#04140d" />
+              </span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div style={{ position: "relative", zIndex: 2, maxWidth: 1000, margin: "48px auto 0", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 24 }}>
+        {FEATURES.map(f => (
+          <div key={f.title} style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center" }}>
+            <LIcon id={f.icon} size={20} color="#5fb894" />
+            <div style={{ textAlign: "left" }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#CBD5E1" }}>{f.title}</div>
+              <div style={{ fontSize: 10.5, color: "#64748B" }}>{f.sub}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ position: "relative", zIndex: 2, textAlign: "center", marginTop: 40, fontSize: 12, color: "#3B4A6B", fontWeight: 500 }}>Sridhi Ventures BOS v3.0</div>
+    </div>
+  );
+}
+
 // SVG icons for nav
 function NavIcon({ id, active }) {
   const col = active ? T.accent : T.t3;
@@ -6946,6 +7225,9 @@ export default function App() {
 
   // ── LOGIN ──
   if (!role) {
+    if (isDesktop) {
+      return <DesktopLogin installPrompt={installPrompt} handleInstall={handleInstall} setRole={setRole} />;
+    }
     return (
       <div style={{ minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24, fontFamily:FONT }}>
         <div style={{ position:"fixed", top:"10%", left:"50%", transform:"translateX(-50%)", width:360, height:360, borderRadius:"50%", background:`radial-gradient(circle, ${T.accentGlow} 0%, transparent 65%)`, pointerEvents:"none" }} />
