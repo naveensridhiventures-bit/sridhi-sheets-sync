@@ -4203,7 +4203,23 @@ function DailyOrders({ embedded = false } = {}) {
       };
 
       header();
-      const y0 = 88;
+
+      // ── Total Sales — shown up top on page 1, not buried at the end ────
+      const dayActiveKg = dayActive.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
+      const boxY = 82, boxW = 300, boxH = 28;
+      doc.setDrawColor(...NAVY);
+      doc.setLineWidth(1.1);
+      doc.setFillColor(...TEAL_TINT);
+      doc.roundedRect(margin, boxY, boxW, boxH, 6, 6, "FD");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10.5);
+      doc.setTextColor(...NAVY);
+      doc.text("TOTAL SALES IN KGs", margin + 14, boxY + boxH / 2 + 4);
+      doc.setFontSize(13);
+      doc.setTextColor(...TEAL);
+      doc.text(`${dayActiveKg.toLocaleString("en-IN", { maximumFractionDigits: 1 })} KG`, margin + boxW - 14, boxY + boxH / 2 + 4, { align: "right" });
+
+      const y0 = boxY + boxH + 20;
 
       // Build one section's table rows: real orders first, then blank ruled
       // rows so the logistics team can add sudden orders in the same format.
@@ -4329,22 +4345,6 @@ function DailyOrders({ embedded = false } = {}) {
         });
         y = doc.lastAutoTable.finalY + 26;
       }
-
-      if (y > pageH - 60) { doc.addPage(); header(); y = y0; }
-
-      const allDayKg = [...regularOrders, ...newOrders].reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
-      const boxW = 340, boxH = 30;
-      doc.setDrawColor(...NAVY);
-      doc.setLineWidth(1.1);
-      doc.setFillColor(...TEAL_TINT);
-      doc.roundedRect(margin, y, boxW, boxH, 6, 6, "FD");
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.setTextColor(...NAVY);
-      doc.text("TOTAL SALES IN KGs", margin + 14, y + boxH / 2 + 4);
-      doc.setFontSize(14);
-      doc.setTextColor(...TEAL);
-      doc.text(`${allDayKg.toLocaleString("en-IN", { maximumFractionDigits: 1 })} KG`, margin + boxW - 14, y + boxH / 2 + 4, { align: "right" });
 
       footer();
       doc.save(`Sridhi-Order-Sheet_${acctDate}.pdf`);
