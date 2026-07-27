@@ -4207,6 +4207,16 @@ function DailyOrders({ embedded = false } = {}) {
 
       // Build one section's table rows: real orders first, then blank ruled
       // rows so the logistics team can add sudden orders in the same format.
+      // Area/Location intentionally shows the short area name (not the full
+      // multi-line address) — full addresses blow rows out to 3-4 lines each
+      // and push the table past a single page, which is what caused the
+      // earlier misalignment. Full addresses are still on the Accountant
+      // Report, which has room for them.
+      const shortLocation = (o) => {
+        if (o.area && o.area.trim()) return o.area.trim();
+        if (o.address && o.address.trim()) return o.address.split(",")[0].trim();
+        return "—";
+      };
       const buildRows = (list) => {
         const dataRows = list.map((o, idx) => {
           const items = orderLineItems(o);
@@ -4214,9 +4224,9 @@ function DailyOrders({ embedded = false } = {}) {
             const it = items.find(i => i.product === name);
             return it && it.kgs ? String(it.kgs) : "";
           });
-          return [String(idx + 1), o.customer, [o.address, o.area].filter(Boolean).join(", ") || o.area || "—", ...kgByProduct, o.contact || ""];
+          return [String(idx + 1), o.customer, shortLocation(o), ...kgByProduct, o.contact || ""];
         });
-        const targetRows = Math.max(dataRows.length + 8, 15);
+        const targetRows = Math.max(dataRows.length + 6, 12);
         const blankRows = Array.from({ length: targetRows - dataRows.length }, (_, i) => [String(dataRows.length + i + 1), "", "", ...productCols.map(() => ""), ""]);
         return [...dataRows, ...blankRows];
       };
@@ -4234,7 +4244,7 @@ function DailyOrders({ embedded = false } = {}) {
       const sectionCols = [
         { label: "S.No", w: 26 },
         { label: "Customer / Hotel Name", w: null },
-        { label: "Area / Location", w: 110 },
+        { label: "Area / Location", w: 95 },
         ...productCols.map(name => ({ label: `${name}\n(KG)`, w: 62 })),
         { label: "Contact No", w: 74 },
       ];
@@ -4245,14 +4255,16 @@ function DailyOrders({ embedded = false } = {}) {
       colStyles[0] = { ...colStyles[0], halign: "center" };
       productCols.forEach((_, i) => { colStyles[3 + i] = { ...colStyles[3 + i], halign: "center" }; });
 
-      const renderSection = (title, list, x) => {
+      // Renders one section's table. If it spills past the current page,
+      // the header/logo banner is redrawn on every continuation page.
+      const renderSection = (title, list, x, startY) => {
         doc.setFont("helvetica", "bold");
         doc.setFontSize(11.5);
         doc.setTextColor(...TEAL);
-        doc.text(title, x, y0 - 8);
+        doc.text(title, x, startY - 8);
         autoTable(doc, {
-          startY: y0,
-          margin: { left: x, right: pageW - x - halfW, bottom: 40 },
+          startY,
+          margin: { left: x, right: pageW - x - halfW, bottom: 40, top: y0 },
           tableWidth: halfW,
           head: [sectionCols.map(c => c.label)],
           body: buildRows(list),
@@ -4263,14 +4275,61 @@ function DailyOrders({ embedded = false } = {}) {
           footStyles: { fillColor: TEAL_TINT, textColor: TEAL, fontStyle: "bold", fontSize: 8.5 },
           columnStyles: colStyles,
           alternateRowStyles: { fillColor: [250, 251, 250] },
+          didDrawPage: () => header(), // keep the branded banner on every continuation page
         });
         return doc.lastAutoTable.finalY;
       };
 
-      const leftBottom = renderSection(`REGULAR ORDERS  (${regularOrders.length})`, regularOrders, margin);
-      const rightBottom = renderSection(`NEW ORDERS  (${newOrders.length})`, newOrders, margin + halfW + 20);
+      const pagesBeforeRegular = doc.internal.getNumberOfPages();
+      const leftBottom = renderSection(`REGULAR ORDERS  (${regularOrders.length})`, regularOrders, margin, y0);
+      const regularOverflowed = doc.internal.getNumberOfPages() > pagesBeforeRegular;
 
-      let y = Math.max(leftBottom, rightBottom) + 26;
+      let rightX = margin + halfW + 20;
+      let rightStartY = y0;
+      if (regularOverflowed) {
+        // Regular Orders needed more than one page — give New Orders a
+        // clean fresh page of its own instead of squeezing it in next to
+        // a continuation table (this was the main misalignment before).
+        doc.addPage();
+        header();
+        rightX = margin;
+      }
+      const rightBottom = renderSection(`NEW ORDERS  (${newOrders.length})`, newOrders, rightX, rightStartY);
+
+      let y = (regularOverflowed ? rightBottom : Math.max(leftBottom, rightBottom)) + 26;
+      if (y > pageH - 60) { doc.addPage(); header(); y = y0; }
+
+      // ── Regular customers who haven't ordered today ─────────────────
+      // Same list as the Accountant Report — a customer is "Regular" once
+      // they've ordered on more than 2 distinct days.
+      const AMBER = [180, 110, 5];
+      const AMBER_TINT = [254, 246, 224];
+      const missingRegulars = computeCustomerPatterns(orders, acctDate)
+        .filter(c => c.isRegular && !c.orderedToday)
+        .sort((a, b) => a.daysSince - b.daysSince);
+      if (missingRegulars.length) {
+        if (y > pageH - 140) { doc.addPage(); header(); y = y0; }
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11.5);
+        doc.setTextColor(...AMBER);
+        doc.text(`Regular Customers Who Haven't Ordered Today (${missingRegulars.length})`, margin, y);
+        y += 12;
+        const missBody = missingRegulars.map(c => [c.name, c.contact || "—", c.pattern, `${c.orderCount} orders / ${c.dayCount} days`, `${c.daysSince} day${c.daysSince === 1 ? "" : "s"} ago`]);
+        autoTable(doc, {
+          startY: y,
+          margin: { left: margin, right: margin, bottom: 40, top: y0 },
+          head: [["Customer", "Contact No", "Usual Pattern", "History", "Last Ordered"]],
+          body: missBody,
+          theme: "grid",
+          styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5.5, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+          headStyles: { fillColor: [180, 110, 5], textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+          alternateRowStyles: { fillColor: AMBER_TINT },
+          columnStyles: { 1: { fontStyle: "bold" }, 4: { fontStyle: "bold", textColor: AMBER } },
+          didDrawPage: () => header(),
+        });
+        y = doc.lastAutoTable.finalY + 26;
+      }
+
       if (y > pageH - 60) { doc.addPage(); header(); y = y0; }
 
       const allDayKg = [...regularOrders, ...newOrders].reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
