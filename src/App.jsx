@@ -4258,14 +4258,18 @@ function DailyOrders({ embedded = false } = {}) {
 
       const halfW = (pageW - margin * 2 - 20) / 2;
       const sectionCols = [
-        { label: "S.No", w: 26 },
+        { label: "S.No", w: 22 },
         { label: "Customer / Hotel Name", w: null },
-        { label: "Area / Location", w: 95 },
-        ...productCols.map(name => ({ label: `${name}\n(KG)`, w: 62 })),
-        { label: "Contact No", w: 74 },
+        { label: "Area / Location", w: 68 },
+        ...productCols.map(name => ({ label: `${name}\n(KG)`, w: 54 })),
+        { label: "Contact No", w: 64 },
       ];
       const sumFixed = sectionCols.reduce((a, c) => a + (c.w || 0), 0);
-      const flexW = (halfW - sumFixed) > 40 ? (halfW - sumFixed) : 90;
+      // Name column gets whatever is left over — this is the column that
+      // actually needs the room (short area names/contact numbers never
+      // wrap, but a cramped name column wraps to 2-3 lines and is what
+      // pushes a normal-sized order list past a single page).
+      const flexW = Math.max(halfW - sumFixed, 100);
       const colStyles = {};
       sectionCols.forEach((c, i) => { colStyles[i] = c.w ? { cellWidth: c.w } : { cellWidth: flexW }; });
       colStyles[0] = { ...colStyles[0], halign: "center" };
@@ -4312,19 +4316,21 @@ function DailyOrders({ embedded = false } = {}) {
       }
       const rightBottom = renderSection(`NEW ORDERS  (${newOrders.length})`, newOrders, rightX, rightStartY);
 
-      let y = (regularOverflowed ? rightBottom : Math.max(leftBottom, rightBottom)) + 26;
-      if (y > pageH - 60) { doc.addPage(); header(); y = y0; }
-
       // ── Regular customers who haven't ordered today ─────────────────
       // Same list as the Accountant Report — a customer is "Regular" once
-      // they've ordered on more than 2 distinct days.
+      // they've ordered on more than 2 distinct days. This always starts
+      // on its own fresh page: Page 1 is Regular + New Orders, Page 2 is
+      // Missing Regulars — never conditionally squeezed onto whatever
+      // room happens to be left at the bottom of page 1.
       const AMBER = [180, 110, 5];
       const AMBER_TINT = [254, 246, 224];
       const missingRegulars = computeCustomerPatterns(orders, acctDate)
         .filter(c => c.isRegular && !c.orderedToday)
         .sort((a, b) => a.daysSince - b.daysSince);
       if (missingRegulars.length) {
-        if (y > pageH - 140) { doc.addPage(); header(); y = y0; }
+        doc.addPage();
+        header();
+        let y = y0;
         doc.setFont("helvetica", "bold");
         doc.setFontSize(11.5);
         doc.setTextColor(...AMBER);
