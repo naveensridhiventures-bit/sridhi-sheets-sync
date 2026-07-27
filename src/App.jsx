@@ -3007,6 +3007,7 @@ function DailyOrders({ embedded = false } = {}) {
   const [reportPreset, setReportPreset] = useState("last30");
   const [acctDate, setAcctDate] = useState(todayISO());
   const [generatingAcctPDF, setGeneratingAcctPDF] = useState(false);
+  const [generatingOrderSheet, setGeneratingOrderSheet] = useState(false);
 
   const applyPreset = (preset) => {
     setReportPreset(preset);
@@ -4118,6 +4119,181 @@ function DailyOrders({ embedded = false } = {}) {
     }
   };
 
+  // ── Order Sheet PDF ──────────────────────────────────────────────────
+  // A separate, additional printout modeled on the paper order-sheet format
+  // the logistics team already uses: Regular Orders and New Orders side by
+  // side, S.No / Name / Area / per-product KG / Contact columns, with blank
+  // ruled rows left at the end of each table so any sudden/walk-in orders
+  // can be written in by hand in the same format.
+  const downloadOrderSheet = async () => {
+    if (generatingOrderSheet) return;
+    setGeneratingOrderSheet(true);
+    try {
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+        import("jspdf"),
+        import("jspdf-autotable"),
+      ]);
+
+      const dayActive = orders.filter(o => o.date === acctDate && o.status !== "Cancelled");
+      const regularOrders = dayActive.filter(o => o.orderType === "Regular Order");
+      const newOrders = dayActive.filter(o => o.orderType === "New Order");
+      const productCols = PRODUCTS.map(p => p.name);
+
+      const NAVY = [8, 40, 25];
+      const TEAL = [23, 148, 74];
+      const TEAL_TINT = [229, 248, 238];
+      const INK = [26, 32, 46];
+      const SUBTLE = [110, 118, 138];
+      const GRID = [200, 206, 200];
+
+      const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 32;
+
+      const header = () => {
+        const headerH = 70;
+        doc.setFillColor(...NAVY);
+        doc.rect(0, 0, pageW, headerH, "F");
+        doc.setFillColor(...TEAL);
+        doc.rect(0, headerH - 2, pageW, 2, "F");
+
+        const logoSize = 34;
+        const badgePad = 5;
+        const badgeSize = logoSize + badgePad * 2;
+        const badgeX = margin, badgeY = (headerH - badgeSize) / 2 - 1;
+        doc.setFillColor(255, 255, 255);
+        doc.roundedRect(badgeX, badgeY, badgeSize, badgeSize, 8, 8, "F");
+        try {
+          doc.addImage(SRIDHI_LOGO_PNG, "PNG", badgeX + badgePad, badgeY + badgePad, logoSize, logoSize);
+        } catch (e) { /* logo optional — never block report generation */ }
+
+        const textX = badgeX + badgeSize + 14;
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(15);
+        doc.text("SRIDHI VENTURES — DAILY ORDER SHEET", textX, 29);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(200, 214, 205);
+        doc.text("Regular & New orders for dispatch  ·  Blank rows for sudden / walk-in orders — fill in by hand", textX, 44);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(13);
+        doc.setTextColor(...TEAL.map(c => Math.min(255, c + 70)));
+        doc.text(formatDateReadable(acctDate), pageW - margin, 28, { align: "right" });
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(200, 214, 205);
+        doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`, pageW - margin, 42, { align: "right" });
+      };
+
+      const footer = () => {
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+          doc.setPage(i);
+          doc.setDrawColor(...GRID);
+          doc.setLineWidth(0.6);
+          doc.line(margin, pageH - 26, pageW - margin, pageH - 26);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(7.5);
+          doc.setTextColor(...SUBTLE);
+          doc.text("Sridhi Ventures · Order Sheet", margin, pageH - 13);
+          doc.text(`Page ${i} of ${pageCount}`, pageW - margin, pageH - 13, { align: "right" });
+        }
+      };
+
+      header();
+      const y0 = 88;
+
+      // Build one section's table rows: real orders first, then blank ruled
+      // rows so the logistics team can add sudden orders in the same format.
+      const buildRows = (list) => {
+        const dataRows = list.map((o, idx) => {
+          const items = orderLineItems(o);
+          const kgByProduct = productCols.map(name => {
+            const it = items.find(i => i.product === name);
+            return it && it.kgs ? String(it.kgs) : "";
+          });
+          return [String(idx + 1), o.customer, [o.address, o.area].filter(Boolean).join(", ") || o.area || "—", ...kgByProduct, o.contact || ""];
+        });
+        const targetRows = Math.max(dataRows.length + 8, 15);
+        const blankRows = Array.from({ length: targetRows - dataRows.length }, (_, i) => [String(dataRows.length + i + 1), "", "", ...productCols.map(() => ""), ""]);
+        return [...dataRows, ...blankRows];
+      };
+
+      const totalsRow = (list) => {
+        const perProduct = productCols.map(name => {
+          let kg = 0;
+          list.forEach(o => orderLineItems(o).forEach(i => { if (i.product === name) kg += parseFloat(i.kgs) || 0; }));
+          return kg > 0 ? kg.toLocaleString("en-IN", { maximumFractionDigits: 1 }) : "";
+        });
+        return ["", "TOTAL", "", ...perProduct, ""];
+      };
+
+      const halfW = (pageW - margin * 2 - 20) / 2;
+      const sectionCols = [
+        { label: "S.No", w: 26 },
+        { label: "Customer / Hotel Name", w: null },
+        { label: "Area / Location", w: 110 },
+        ...productCols.map(name => ({ label: `${name}\n(KG)`, w: 62 })),
+        { label: "Contact No", w: 74 },
+      ];
+      const sumFixed = sectionCols.reduce((a, c) => a + (c.w || 0), 0);
+      const flexW = (halfW - sumFixed) > 40 ? (halfW - sumFixed) : 90;
+      const colStyles = {};
+      sectionCols.forEach((c, i) => { colStyles[i] = c.w ? { cellWidth: c.w } : { cellWidth: flexW }; });
+      colStyles[0] = { ...colStyles[0], halign: "center" };
+      productCols.forEach((_, i) => { colStyles[3 + i] = { ...colStyles[3 + i], halign: "center" }; });
+
+      const renderSection = (title, list, x) => {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11.5);
+        doc.setTextColor(...TEAL);
+        doc.text(title, x, y0 - 8);
+        autoTable(doc, {
+          startY: y0,
+          margin: { left: x, right: pageW - x - halfW, bottom: 40 },
+          tableWidth: halfW,
+          head: [sectionCols.map(c => c.label)],
+          body: buildRows(list),
+          foot: [totalsRow(list)],
+          theme: "grid",
+          styles: { font: "helvetica", fontSize: 8, cellPadding: 5, lineColor: GRID, lineWidth: 0.7, textColor: INK, valign: "middle", minCellHeight: 16 },
+          headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 7.8, halign: "center" },
+          footStyles: { fillColor: TEAL_TINT, textColor: TEAL, fontStyle: "bold", fontSize: 8.5 },
+          columnStyles: colStyles,
+          alternateRowStyles: { fillColor: [250, 251, 250] },
+        });
+        return doc.lastAutoTable.finalY;
+      };
+
+      const leftBottom = renderSection(`REGULAR ORDERS  (${regularOrders.length})`, regularOrders, margin);
+      const rightBottom = renderSection(`NEW ORDERS  (${newOrders.length})`, newOrders, margin + halfW + 20);
+
+      let y = Math.max(leftBottom, rightBottom) + 26;
+      if (y > pageH - 60) { doc.addPage(); header(); y = y0; }
+
+      const allDayKg = [...regularOrders, ...newOrders].reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0);
+      const boxW = 340, boxH = 30;
+      doc.setDrawColor(...NAVY);
+      doc.setLineWidth(1.1);
+      doc.setFillColor(...TEAL_TINT);
+      doc.roundedRect(margin, y, boxW, boxH, 6, 6, "FD");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(...NAVY);
+      doc.text("TOTAL SALES IN KGs", margin + 14, y + boxH / 2 + 4);
+      doc.setFontSize(14);
+      doc.setTextColor(...TEAL);
+      doc.text(`${allDayKg.toLocaleString("en-IN", { maximumFractionDigits: 1 })} KG`, margin + boxW - 14, y + boxH / 2 + 4, { align: "right" });
+
+      footer();
+      doc.save(`Sridhi-Order-Sheet_${acctDate}.pdf`);
+    } finally {
+      setGeneratingOrderSheet(false);
+    }
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {!embedded && (
@@ -4203,6 +4379,9 @@ function DailyOrders({ embedded = false } = {}) {
           }}>Today</button>
         </div>
         <Btn label={generatingAcctPDF ? "Generating…" : "🧾 Download Accountant Report"} full color={T.amber} onClick={downloadAccountantReport} />
+        <div style={{ height: 10 }} />
+        <div style={{ fontSize: 11, color: T.t3, marginBottom: 8 }}>Or a ruled order sheet — Regular vs New, side by side, with blank rows for sudden/walk-in orders to be filled in by hand:</div>
+        <Btn label={generatingOrderSheet ? "Generating…" : "📋 Download Order Sheet"} full color={T.sky} onClick={downloadOrderSheet} />
       </Card>
 
       <Card id="orders-by-date-section">
