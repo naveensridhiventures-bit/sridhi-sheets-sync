@@ -131,6 +131,55 @@ function distanceFromKorattur(mapLink) {
   return haversineKm(KORATTUR_LATLNG.lat, KORATTUR_LATLNG.lng, coords.lat, coords.lng);
 }
 
+// Approximate coordinates for well-known Chennai localities, used to estimate
+// distance from Korattur when a lead only has an Area name typed in (no
+// pinned map location — which is the vast majority of leads). Straight-line
+// distance, not driving distance — good enough for a rough sense of reach,
+// not turn-by-turn routing.
+const CHENNAI_AREA_COORDS = {
+  "korattur": [13.1298, 80.2166], "ambattur": [13.1143, 80.1548], "padi": [13.1181, 80.1930],
+  "villivakkam": [13.1067, 80.2094], "anna nagar": [13.0850, 80.2101], "perambur": [13.1103, 80.2329],
+  "choolaimedu": [13.0733, 80.2231], "kodambakkam": [13.0500, 80.2241], "nungambakkam": [13.0603, 80.2417],
+  "t nagar": [13.0418, 80.2341], "velachery": [12.9789, 80.2201], "adyar": [13.0067, 80.2570],
+  "thiruvanmiyur": [12.9830, 80.2594], "sholinganallur": [12.9010, 80.2279], "pallikaranai": [12.9345, 80.2141],
+  "tambaram": [12.9246, 80.1000], "chromepet": [12.9516, 80.1462], "guindy": [13.0067, 80.2206],
+  "egmore": [13.0732, 80.2609], "chetpet": [13.0708, 80.2419], "mylapore": [13.0339, 80.2685],
+  "royapettah": [13.0524, 80.2645], "triplicane": [13.0569, 80.2758], "madhavaram": [13.1481, 80.2320],
+  "red hills": [13.1919, 80.1830], "avadi": [13.1147, 80.0970], "poonamallee": [13.0475, 80.1000],
+  "porur": [13.0381, 80.1564], "vadapalani": [13.0503, 80.2121], "saidapet": [13.0212, 80.2229],
+  "alwarpet": [13.0339, 80.2551], "besant nagar": [12.9990, 80.2666], "neelankarai": [12.9260, 80.2543],
+  "injambakkam": [12.9165, 80.2508], "koyambedu": [13.0700, 80.1943], "meenambakkam": [12.9950, 80.1650],
+  "pallavaram": [12.9675, 80.1491], "st thomas mount": [13.0011, 80.1966], "alandur": [12.9975, 80.2010],
+  "kolathur": [13.1213, 80.2222], "perungudi": [12.9635, 80.2422], "thoraipakkam": [12.9420, 80.2372],
+  "navalur": [12.8412, 80.2273], "sholavaram": [13.2109, 80.1567], "washermanpet": [13.1170, 80.2890],
+  "tondiarpet": [13.1231, 80.2880], "walltaxroad": [13.0930, 80.2830], "wall tax road": [13.0930, 80.2830],
+  "george town": [13.0930, 80.2830], "purasawalkam": [13.0788, 80.2534], "kilpauk": [13.0776, 80.2378],
+  "aminjikarai": [13.0704, 80.2224], "virugambakkam": [13.0510, 80.1899], "ashok nagar": [13.0361, 80.2101],
+  "k k nagar": [13.0353, 80.1972], "west mambalam": [13.0357, 80.2213], "mambalam": [13.0357, 80.2213],
+};
+// Best-effort match: exact match first, then checks if any known area name
+// appears as a whole word inside the (often messier) typed text, e.g. an
+// area of "VGP Nagar, Velachery, Chennai" should still match "velachery".
+function findAreaCoords(raw) {
+  const text = (raw || "").toLowerCase().replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  if (CHENNAI_AREA_COORDS[text]) return CHENNAI_AREA_COORDS[text];
+  const keys = Object.keys(CHENNAI_AREA_COORDS).sort((a, b) => b.length - a.length); // longer/more specific first
+  for (const key of keys) {
+    if (new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text)) return CHENNAI_AREA_COORDS[key];
+  }
+  return null;
+}
+// Combined distance lookup: prefers an exact pinned map location; falls back
+// to an area-name estimate when only an Area/Address is available.
+function getDistanceFromKorattur(lead) {
+  const exact = distanceFromKorattur(lead && lead.mapLink);
+  if (exact !== null) return { km: exact, exact: true };
+  const coords = findAreaCoords(lead && lead.area) || findAreaCoords(lead && lead.address);
+  if (!coords) return null;
+  return { km: haversineKm(KORATTUR_LATLNG.lat, KORATTUR_LATLNG.lng, coords[0], coords[1]), exact: false };
+}
+
 // ─── SHEETS SYNC CONFIG ───────────────────────────────────────────────────
 // Set VITE_API_KEY in your .env.local (and Vercel dashboard).
 // Sync auto-enables once VITE_API_KEY is set. (See SETUP.md)
@@ -152,6 +201,7 @@ const PIPELINE_STAGES = [
   { id:"Order Received",         color:T.accent,  count:0 },
   { id:"Repeat Order Follow-up", color:T.indigo,  count:0 },
   { id:"Active Customer",        color:T.emerald, count:0 },
+  { id:"Home Customer",          color:"#C084FC", count:0 },
   { id:"Lost Customer",          color:T.rose,    count:0 },
   { id:"Invalid Number",         color:T.t3,      count:0  },
 ];
@@ -2007,7 +2057,7 @@ function Leads() {
       </div>
 
       <div style={{ display:"flex", gap:7, overflowX:"auto", paddingBottom:4 }}>
-        {["All","Needs Follow-up","New Lead","Interested","Sample Requested","Positive Feedback","Negotiation","Order Received","Active Customer","Lost Customer"].map(s => {
+        {["All","Needs Follow-up","New Lead","Interested","Sample Requested","Positive Feedback","Negotiation","Order Received","Active Customer","Home Customer","Lost Customer"].map(s => {
           const active = filterStage===s;
           const col = s==="All" ? T.accent : s==="Needs Follow-up" ? T.rose : getStageColor(s);
           return (
@@ -2416,13 +2466,16 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
                 <div style={{ display:"flex", padding:"8px 0", borderBottom:`1px solid ${T.border}`, alignItems:"center" }}>
                   <span style={{ fontSize:11, color:T.t3, width:100, flexShrink:0, fontWeight:600 }}>Location</span>
                   <a href={lead.mapLink} target="_blank" rel="noreferrer" style={{ fontSize:12, fontWeight:600, color:T.accent }}>📍 View map</a>
-                  {(() => { const d = distanceFromKorattur(lead.mapLink); return d !== null ? (
-                    <span style={{ marginLeft:10, fontSize:11, fontWeight:700, color:T.amber }}>{d.toFixed(1)} km from Korattur</span>
-                  ) : (
-                    <span style={{ marginLeft:10, fontSize:10, color:T.t3 }}>(distance unavailable for this link)</span>
-                  ); })()}
                 </div>
               )}
+              {(() => { const d = getDistanceFromKorattur(lead); return d ? (
+                <div style={{ display:"flex", padding:"8px 0", borderBottom:`1px solid ${T.border}`, alignItems:"center" }}>
+                  <span style={{ fontSize:11, color:T.t3, width:100, flexShrink:0, fontWeight:600 }}>Distance</span>
+                  <span style={{ fontSize:12, fontWeight:700, color:T.amber }}>
+                    {d.km.toFixed(1)} km from Korattur {d.exact ? "" : <span style={{ color:T.t3, fontWeight:500 }}>(estimated from area)</span>}
+                  </span>
+                </div>
+              ) : null; })()}
             </div>
             <div style={{ display:"flex", gap:8, marginTop:14 }}>
               <button onClick={() => { const p=(lead.contact||"").replace(/[^0-9]/g,""); if(p) window.location.href="tel:+91"+p; }}
@@ -2570,6 +2623,11 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
                     <div>
                       <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{l.name}</div>
                       <div style={{ fontSize:10, color:T.t3, marginTop:2 }}>{l.area} · {l.telecaller}</div>
+                      {(() => { const d = getDistanceFromKorattur(l); return d ? (
+                        <div style={{ fontSize:10.5, color:T.amber, marginTop:2, fontWeight:700 }}>
+                          📍 {d.km.toFixed(1)} km from Korattur{!d.exact ? " (est.)" : ""}
+                        </div>
+                      ) : null; })()}
                       {l.contact && (
                         <div style={{ fontSize:11, color:T.accent, marginTop:2, fontWeight:600 }}>📞 {l.contact}</div>
                       )}
