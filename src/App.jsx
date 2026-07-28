@@ -2587,6 +2587,15 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
         const pct = total > 0 ? ((stage.count/total)*100).toFixed(1) : "0.0";
         const isOpen = expanded===stage.id;
         const stageLeads = leads.filter(l => l.stage===stage.id);
+        if (stage.id === "Home Customer") {
+          stageLeads.sort((a, b) => {
+            const da = getDistanceFromKorattur(a), db = getDistanceFromKorattur(b);
+            if (da && db) return da.km - db.km;
+            if (da) return -1;   // known distance sorts before unknown
+            if (db) return 1;
+            return 0;
+          });
+        }
         return (
           <div key={stage.id} style={{
             background: isOpen ? stage.color+"0D" : T.card,
