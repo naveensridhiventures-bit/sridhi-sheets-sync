@@ -32,6 +32,105 @@ const T = {
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
+// ─── AREA NAME NORMALIZATION ────────────────────────────────────────────
+// Telecallers type area names freehand, so the same place ends up spelled
+// several different ways ("KORATTUR", "Korattur", "korattur", "koratur").
+// These treat all of those as one area for grouping/filtering/reports,
+// while still preserving the original text on each individual record.
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+// Groups a list of raw area strings into clusters of near-identical spellings
+// (case/whitespace differences, and small typos on longer words), picking
+// the most frequently-used spelling in each cluster as the display name.
+function clusterAreaNames(rawAreas) {
+  const counts = new Map(); // trimmed-lowercase key -> { display: Map(spelling->count), total }
+  rawAreas.forEach(raw => {
+    const val = (raw || "").trim();
+    if (!val) return;
+    const key = val.toLowerCase().replace(/\s+/g, " ");
+    if (!counts.has(key)) counts.set(key, new Map());
+    const spellings = counts.get(key);
+    spellings.set(val, (spellings.get(val) || 0) + 1);
+  });
+  const keys = Array.from(counts.keys());
+  const clusters = []; // [{ keys: [...], total, spellings: Map }]
+  keys.forEach(key => {
+    // Merge into an existing cluster if it's a near-typo of that cluster's
+    // representative key (only for words long enough that 1-2 edits is
+    // clearly a typo, not a genuinely different place name).
+    const match = clusters.find(c => {
+      const maxLen = Math.max(c.repKey.length, key.length);
+      const threshold = maxLen >= 8 ? 2 : maxLen >= 5 ? 1 : 0;
+      return levenshtein(c.repKey, key) <= threshold;
+    });
+    const spellings = counts.get(key);
+    const keyTotal = Array.from(spellings.values()).reduce((a, b) => a + b, 0);
+    if (match) {
+      match.keys.push(key);
+      match.total += keyTotal;
+      spellings.forEach((c, s) => match.spellings.set(s, (match.spellings.get(s) || 0) + c));
+      if (keyTotal > match.repCount) { match.repKey = key; match.repCount = keyTotal; }
+    } else {
+      clusters.push({ repKey: key, repCount: keyTotal, keys: [key], total: keyTotal, spellings: new Map(spellings) });
+    }
+  });
+  return clusters.map(c => {
+    let display = c.repKey, best = -1;
+    c.spellings.forEach((count, spelling) => { if (count > best) { best = count; display = spelling; } });
+    return { display, count: c.total, rawKeys: c.keys };
+  }).sort((a, b) => b.count - a.count);
+}
+// Canonical area name for a single lead/order — used to tag records
+// consistently even though the underlying stored text varies.
+function canonicalArea(raw, clusters) {
+  const key = (raw || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!key) return "";
+  const cluster = clusters.find(c => c.rawKeys.includes(key));
+  return cluster ? cluster.display : (raw || "").trim();
+}
+
+// Sridhi Ventures' base location — Korattur, Chennai. Used to show how far
+// a customer's saved map location is from the depot/warehouse.
+const KORATTUR_LATLNG = { lat: 13.1298, lng: 80.2166 };
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+// Pulls a lat,lng pair out of a Google Maps link, if the link contains one.
+// Short share links (maps.app.goo.gl/...) don't expose coordinates without
+// following a redirect, which isn't possible from the browser — those will
+// return null rather than a guessed/incorrect distance.
+function extractLatLngFromMapLink(url) {
+  if (!url) return null;
+  const patterns = [/@(-?\d+\.\d+),(-?\d+\.\d+)/, /[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/, /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/];
+  for (const re of patterns) {
+    const m = url.match(re);
+    if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
+  }
+  return null;
+}
+function distanceFromKorattur(mapLink) {
+  const coords = extractLatLngFromMapLink(mapLink);
+  if (!coords) return null;
+  return haversineKm(KORATTUR_LATLNG.lat, KORATTUR_LATLNG.lng, coords.lat, coords.lng);
+}
+
 // ─── SHEETS SYNC CONFIG ───────────────────────────────────────────────────
 // Set VITE_API_KEY in your .env.local (and Vercel dashboard).
 // Sync auto-enables once VITE_API_KEY is set. (See SETUP.md)
@@ -2019,9 +2118,18 @@ function Pipeline() {
   const [remark, setRemark] = useState("");
   const [showEdit, setShowEdit] = useState(false);
   const [editForm, setEditForm] = useState({});
+  const [typeFilter, setTypeFilter] = useState("All");
+  const [areaFilter, setAreaFilter] = useState("All");
 
   // Filter out blank rows from Google Sheet
-  const leads = (allLeads || []).filter(l => l && l.name && l.stage);
+  const allLeadsClean = (allLeads || []).filter(l => l && l.name && l.stage);
+  const leadTypes = ["All", ...Array.from(new Set(allLeadsClean.map(l => l.type).filter(Boolean))).sort()];
+  const areaClusters = clusterAreaNames(allLeadsClean.map(l => l.area));
+  const areaOptions = ["All", ...areaClusters.map(c => c.display)];
+
+  const leads = allLeadsClean
+    .filter(l => typeFilter === "All" || l.type === typeFilter)
+    .filter(l => areaFilter === "All" || canonicalArea(l.area, areaClusters) === areaFilter);
 
   // Build live stage counts from real leads
   const stageCounts = {};
@@ -2179,6 +2287,65 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
     setTimeout(() => { URL.revokeObjectURL(url); setExporting(false); }, 3000);
   };
 
+  // ── Area-wise Excel export ──────────────────────────────────────────
+  // Groups ALL leads (not just the currently filtered view) by normalized
+  // area, so "KORATTUR" / "Korattur" / "korattur" / "koratur" all land in
+  // one section instead of fragmenting the list.
+  const downloadAreaWiseExcel = () => {
+    setExporting(true);
+    const today = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    const clusters = clusterAreaNames(allLeadsClean.map(l => l.area));
+    const grouped = clusters.map(c => ({
+      area: c.display,
+      leads: allLeadsClean.filter(l => canonicalArea(l.area, clusters) === c.display),
+    })).filter(g => g.leads.length > 0);
+    const noArea = allLeadsClean.filter(l => !(l.area || "").trim());
+
+    const sectionRows = (area, list) => list.map((l, i) => `
+      <tr>
+        ${i === 0 ? `<td rowspan="${list.length}" style="background:#0EA5E9;color:#fff;font-weight:bold;text-align:center;vertical-align:middle;">${area}<br/><span style="font-weight:normal;font-size:9pt">(${list.length})</span></td>` : ""}
+        <td>${l.name || ""}</td>
+        <td>${l.business || ""}</td>
+        <td>${l.type || ""}</td>
+        <td>${l.contact || ""}</td>
+        <td>${l.stage || ""}</td>
+        <td>${l.telecaller || ""}</td>
+        <td>${l.address || ""}</td>
+      </tr>`).join("");
+
+    const rowsHtml = grouped.map(g => sectionRows(g.area, g.leads)).join("")
+      + (noArea.length ? sectionRows("(No area set)", noArea) : "");
+
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="UTF-8"/>
+<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>
+<x:Name>Area-wise</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
+</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
+<style>
+  table { border-collapse:collapse; font-family:Calibri,Arial,sans-serif; font-size:11pt; }
+  th { background:#060B16; color:#00C9A7; padding:10px 12px; text-align:left; border:1px solid #060B16; text-transform:uppercase; font-size:9pt; }
+  td { padding:8px 12px; border:1px solid #d9e2f0; vertical-align:top; }
+  tr:nth-child(even) td { background:#f4f8ff; }
+  .title { font-size:20pt; font-weight:bold; color:#00C9A7; }
+  .subtitle { font-size:10pt; color:#7B9DC4; }
+</style></head>
+<body>
+<table>
+  <tr><td colspan="8" class="title">⚡ Sridhi Ventures — Leads by Area</td></tr>
+  <tr><td colspan="8" class="subtitle">Exported ${today} · ${allLeadsClean.length} total leads across ${grouped.length} area(s) · spelling variants merged automatically</td></tr>
+  <tr><td colspan="8">&nbsp;</td></tr>
+  <tr><th>Area</th><th>Name</th><th>Business</th><th>Type</th><th>Contact</th><th>Stage</th><th>Telecaller</th><th>Address</th></tr>
+  ${rowsHtml || `<tr><td colspan="8" style="text-align:center;color:#999">No leads yet</td></tr>`}
+</table>
+</body></html>`;
+
+    const blob = new Blob(["\uFEFF" + html], { type: "application/vnd.ms-excel;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "sridhi-leads-by-area-" + new Date().toISOString().slice(0, 10) + ".xls";
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); setExporting(false); }, 1000);
+  };
 
   const updateStageP = (id, stage) => setAllLeads(allLeads.map(l => l.id===id ? {...l, stage, lastContact:"Today"} : l));
   const addRemarkP = (id) => {
@@ -2205,7 +2372,7 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
               <Label>Edit Lead</Label>
               <button onClick={() => setShowEdit(false)} style={{ background:"none", border:"none", color:T.t3, fontSize:18, cursor:"pointer" }}>✕</button>
             </div>
-            {[["Name","name","text"],["Business","business","text"],["Contact","contact","tel"],["Area","area","text"],["Address","address","text"]].map(([label,key,type]) => (
+            {[["Name","name","text"],["Business","business","text"],["Contact","contact","tel"],["Area","area","text"],["Address","address","text"],["Location (Google Maps link)","mapLink","text"]].map(([label,key,type]) => (
               <div key={key} style={{ marginBottom:10 }}>
                 <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:4 }}>{label.toUpperCase()}</div>
                 <input type={type} value={editForm[key]||""} onChange={e => setEditForm({...editForm,[key]:e.target.value})}
@@ -2245,6 +2412,17 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
                   <span style={{ fontSize:12, fontWeight:600, color:T.t1 }}>{v}</span>
                 </div>
               ) : null)}
+              {lead.mapLink && (
+                <div style={{ display:"flex", padding:"8px 0", borderBottom:`1px solid ${T.border}`, alignItems:"center" }}>
+                  <span style={{ fontSize:11, color:T.t3, width:100, flexShrink:0, fontWeight:600 }}>Location</span>
+                  <a href={lead.mapLink} target="_blank" rel="noreferrer" style={{ fontSize:12, fontWeight:600, color:T.accent }}>📍 View map</a>
+                  {(() => { const d = distanceFromKorattur(lead.mapLink); return d !== null ? (
+                    <span style={{ marginLeft:10, fontSize:11, fontWeight:700, color:T.amber }}>{d.toFixed(1)} km from Korattur</span>
+                  ) : (
+                    <span style={{ marginLeft:10, fontSize:10, color:T.t3 }}>(distance unavailable for this link)</span>
+                  ); })()}
+                </div>
+              )}
             </div>
             <div style={{ display:"flex", gap:8, marginTop:14 }}>
               <button onClick={() => { const p=(lead.contact||"").replace(/[^0-9]/g,""); if(p) window.location.href="tel:+91"+p; }}
@@ -2299,8 +2477,33 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
       <Card accent={T.accent}>
-        <Label sub={`${total} total leads across all stages`}>Pipeline Overview</Label>
+        <Label sub={`${total} leads matching current filters`}>Pipeline Overview</Label>
         <PipelineStrip stages={stages} />
+      </Card>
+      <Card>
+        <Label sub="View just Home customers, or narrow to one area (typo/case variants like KORATTUR / Korattur / koratur are grouped together automatically)">Filter Pipeline</Label>
+        <div style={{ display:"flex", gap:10, marginTop:8, flexWrap:"wrap" }}>
+          <div style={{ flex:1, minWidth:140 }}>
+            <div style={{ fontSize:10.5, color:T.t3, fontWeight:700, marginBottom:4, textTransform:"uppercase" }}>Customer Type</div>
+            <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
+              style={{ background:T.surface, border:`1px solid ${typeFilter==="Home"?T.accent:T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
+              {leadTypes.map(t => <option key={t} value={t}>{t === "All" ? "All Types" : t}</option>)}
+            </select>
+          </div>
+          <div style={{ flex:1, minWidth:140 }}>
+            <div style={{ fontSize:10.5, color:T.t3, fontWeight:700, marginBottom:4, textTransform:"uppercase" }}>Area</div>
+            <select value={areaFilter} onChange={e => setAreaFilter(e.target.value)}
+              style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
+              {areaOptions.map(a => <option key={a} value={a}>{a === "All" ? "All Areas" : a}</option>)}
+            </select>
+          </div>
+        </div>
+        {typeFilter !== "All" && (
+          <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:6 }}>
+            <Chip label={`${typeFilter} Customer Pipeline`} color={T.accent} />
+            <button onClick={() => setTypeFilter("All")} style={{ background:"none", border:"none", color:T.t3, fontSize:11, cursor:"pointer", fontFamily:FONT, textDecoration:"underline" }}>Clear</button>
+          </div>
+        )}
       </Card>
       <Card>
         <Label sub="Downloads real pipeline data">Export Pipeline</Label>
@@ -2316,6 +2519,14 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
               color:T.t1, padding:"13px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT,
               display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
             {exporting ? "⏳ Preparing..." : "📑 PDF"}
+          </button>
+        </div>
+        <div style={{ marginTop:10 }}>
+          <button onClick={downloadAreaWiseExcel} disabled={exporting}
+            style={{ width:"100%", background:T.surface, border:`1px solid ${T.border}`, borderRadius:14,
+              color:T.t1, padding:"13px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT,
+              display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+            {exporting ? "⏳ Preparing..." : "📍 Download Area-wise (Excel)"}
           </button>
         </div>
       </Card>
