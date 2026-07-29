@@ -7771,12 +7771,74 @@ function NavIcon({ id, active }) {
 }
 
 // ─── ROOT ──────────────────────────────────────────────────────────────────
+// ── Branded intro video — plays once per browser session before login ────
+function IntroVideo({ onDone }) {
+  const videoRef = useRef(null);
+  const [muted, setMuted] = useState(true);
+  const [fading, setFading] = useState(false);
+
+  const finish = () => {
+    if (fading) return;
+    setFading(true);
+    setTimeout(onDone, 380); // let the fade-out play before unmounting
+  };
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.play().catch(() => {}); // some mobile browsers still require a user gesture
+    const t = setTimeout(finish, 12000); // hard safety cap so nobody is ever stuck
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 10000, background: "#060B16",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      opacity: fading ? 0 : 1, transition: "opacity 380ms ease",
+    }}>
+      <video
+        ref={videoRef}
+        poster="/intro-poster.jpg"
+        autoPlay muted={muted} playsInline preload="auto"
+        onEnded={finish}
+        onClick={() => setMuted(m => !m)}
+        style={{ width: "100%", height: "100%", objectFit: "cover", cursor: "pointer" }}
+      >
+        <source src="/intro.webm" type="video/webm" />
+        <source src="/intro.mp4" type="video/mp4" />
+      </video>
+
+      <button onClick={finish} style={{
+        position: "absolute", top: "max(18px, env(safe-area-inset-top))", right: 18,
+        background: "rgba(10,14,26,0.55)", backdropFilter: "blur(6px)",
+        border: "1px solid rgba(255,255,255,0.18)", borderRadius: 999,
+        color: "#fff", padding: "8px 16px", fontSize: 12.5, fontWeight: 700,
+        cursor: "pointer", fontFamily: FONT, letterSpacing: "0.02em",
+      }}>Skip →</button>
+
+      <button onClick={() => setMuted(m => !m)} style={{
+        position: "absolute", bottom: "max(18px, env(safe-area-inset-bottom))", right: 18,
+        width: 38, height: 38, borderRadius: "50%",
+        background: "rgba(10,14,26,0.55)", backdropFilter: "blur(6px)",
+        border: "1px solid rgba(255,255,255,0.18)",
+        color: "#fff", fontSize: 15, cursor: "pointer", fontFamily: FONT,
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>{muted ? "🔇" : "🔊"}</button>
+    </div>
+  );
+}
+
 export default function App() {
   const [activeTab, setActiveTabRaw] = useState(() => {
     try { return localStorage.getItem("bos_activeTab") || "dashboard"; } catch { return "dashboard"; }
   });
   const [role, setRoleRaw] = useState(() => {
     try { return localStorage.getItem("bos_role") || null; } catch { return null; }
+  });
+  const [showIntro, setShowIntro] = useState(() => {
+    try { return !sessionStorage.getItem("bos_intro_seen"); } catch { return true; }
   });
   const setActiveTab = (tab) => {
     setActiveTabRaw(tab);
@@ -7845,6 +7907,9 @@ export default function App() {
 
   // ── LOGIN ──
   if (!role) {
+    if (showIntro) {
+      return <IntroVideo onDone={() => { try { sessionStorage.setItem("bos_intro_seen", "1"); } catch {} setShowIntro(false); }} />;
+    }
     if (isDesktop) {
       return <DesktopLogin installPrompt={installPrompt} handleInstall={handleInstall} setRole={setRole} />;
     }
