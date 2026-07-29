@@ -2561,6 +2561,12 @@ function ExistingCustomerPipeline() {
       : c));
   };
 
+  const deleteCustomer = (c) => {
+    if (!window.confirm(`Delete "${c.name}" from this pipeline permanently?\n\nThis removes their entire remark history too. This can't be undone.`)) return;
+    setCustomers((customers || []).filter(x => x.id !== c.id));
+    setSelected(null);
+  };
+
   const downloadPDF = async () => {
     const { jsPDF } = await import("jspdf");
     const autoTable = (await import("jspdf-autotable")).default;
@@ -2754,6 +2760,8 @@ function ExistingCustomerPipeline() {
             style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 13, fontFamily: FONT, outline: "none", width: "100%", boxSizing: "border-box", resize: "none", marginTop: 10 }} />
           <div style={{ marginTop: 8 }}><Btn label="Save Remark" full onClick={() => addRemark(c.id)} /></div>
         </Card>
+
+        <Btn label="🗑️ Delete Customer" color={T.rose} ghost full onClick={() => deleteCustomer(c)} />
       </div>
     );
   }
