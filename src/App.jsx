@@ -1746,7 +1746,7 @@ function Leads() {
   };
   const addLead = () => {
     if (!newLead.name || !newLead.contact) return;
-    setLeads([{ ...newLead, id:leads.length+1, stage:"New Lead", lastContact:"Today", lastContactAt:Date.now(), createdAt:Date.now(), orderCount:0, priority:"Medium", remarks:[] }, ...leads]);
+    setLeads([{ ...newLead, id: Date.now() + Math.random(), stage:"New Lead", lastContact:"Today", lastContactAt:Date.now(), createdAt:Date.now(), orderCount:0, priority:"Medium", remarks:[] }, ...leads]);
     setShowAdd(false);
     setNewLead({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Priya" });
   };
@@ -2820,7 +2820,7 @@ function Samples() {
   const addSample = () => {
     if (!newSample.customer || !newSample.qty) return;
     const today2 = new Date(); const dateStr = today2.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
-    setSamples([{ ...newSample, id:samples.length+1, qty:parseInt(newSample.qty), unit:"KG", date:dateStr, deliveryCost:parseInt(newSample.deliveryCost)||0, productionCost:parseInt(newSample.qty)*50, status:"Pending", feedback:null, converted:false }, ...samples]);
+    setSamples([{ ...newSample, id: Date.now() + Math.random(), qty:parseInt(newSample.qty), unit:"KG", date:dateStr, deliveryCost:parseInt(newSample.deliveryCost)||0, productionCost:parseInt(newSample.qty)*50, status:"Pending", feedback:null, converted:false }, ...samples]);
     setShowAdd(false);
     setNewSample({ customer:"", qty:"", type:"Dosa Batter", exec:"Arjun P.", deliveryCost:"" });
   };
@@ -2945,7 +2945,7 @@ function FieldSync() {
   const statusColor = { Pending:T.amber, "In Progress":T.sky, Completed:T.emerald };
   const createTask = () => {
     if (!newTask.customer) return;
-    setTasks([{ ...newTask, id:tasks.length+1, status:"Pending", createdBy:"Manual" }, ...tasks]);
+    setTasks([{ ...newTask, id: Date.now() + Math.random(), status:"Pending", createdBy:"Manual" }, ...tasks]);
     setShowCreate(false);
     setNewTask({ customer:"", area:"", address:"", task:"Sample Delivery", product:"Dosa Batter", qty:"", priority:"High", assignedTo:"Arjun P.", notes:"" });
   };
@@ -4957,7 +4957,7 @@ function Expenses() {
 
   const addExpense = () => {
     if (!newExp.category || !newExp.amount) return;
-    setExpenses([{ ...newExp, id:expenses.length+1, amount:parseInt(newExp.amount), date: newExp.date || todayISO() }, ...expenses]);
+    setExpenses([{ ...newExp, id: Date.now() + Math.random(), amount:parseInt(newExp.amount), date: newExp.date || todayISO() }, ...expenses]);
     setShowAdd(false);
     setNewExp({ category:"", amount:"", type:"Marketing", subtype:"Facebook", date: todayISO() });
   };
