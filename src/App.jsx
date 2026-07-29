@@ -32,6 +32,17 @@ const T = {
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
+// Generates a unique id that's always a plain string with no decimal point
+// (e.g. "1753879182345x7k2p9"). Deliberately NOT a raw number like
+// Date.now()+Math.random() — those get sent as JSON floats, and a backend
+// that tries to numeric-coerce ids (int()/isdigit()) can silently mangle a
+// decimal id after the first sync round-trip, breaking every later ===
+// lookup for that record — which is exactly what caused newly-added leads
+// to appear to "vanish" after an update.
+function newId() {
+  return Date.now().toString() + Math.random().toString(36).slice(2, 8);
+}
+
 // ─── AREA NAME NORMALIZATION ────────────────────────────────────────────
 // Telecallers type area names freehand, so the same place ends up spelled
 // several different ways ("KORATTUR", "Korattur", "korattur", "koratur").
@@ -644,7 +655,7 @@ function ProspectFinder() {
   function confirmAdd() {
     if (!filling || !form.name) return;
     const newLead = {
-      id: Date.now() + Math.random(),
+      id: newId(),
       name: form.name,
       contact: filling.phone || "",
       business: form.business,
@@ -1746,7 +1757,7 @@ function Leads() {
   };
   const addLead = () => {
     if (!newLead.name || !newLead.contact) return;
-    setLeads([{ ...newLead, id: Date.now() + Math.random(), stage:"New Lead", lastContact:"Today", lastContactAt:Date.now(), createdAt:Date.now(), orderCount:0, priority:"Medium", remarks:[] }, ...leads]);
+    setLeads([{ ...newLead, id: newId(), stage:"New Lead", lastContact:"Today", lastContactAt:Date.now(), createdAt:Date.now(), orderCount:0, priority:"Medium", remarks:[] }, ...leads]);
     setShowAdd(false);
     setNewLead({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Priya" });
   };
@@ -2820,7 +2831,7 @@ function Samples() {
   const addSample = () => {
     if (!newSample.customer || !newSample.qty) return;
     const today2 = new Date(); const dateStr = today2.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
-    setSamples([{ ...newSample, id: Date.now() + Math.random(), qty:parseInt(newSample.qty), unit:"KG", date:dateStr, deliveryCost:parseInt(newSample.deliveryCost)||0, productionCost:parseInt(newSample.qty)*50, status:"Pending", feedback:null, converted:false }, ...samples]);
+    setSamples([{ ...newSample, id: newId(), qty:parseInt(newSample.qty), unit:"KG", date:dateStr, deliveryCost:parseInt(newSample.deliveryCost)||0, productionCost:parseInt(newSample.qty)*50, status:"Pending", feedback:null, converted:false }, ...samples]);
     setShowAdd(false);
     setNewSample({ customer:"", qty:"", type:"Dosa Batter", exec:"Arjun P.", deliveryCost:"" });
   };
@@ -2945,7 +2956,7 @@ function FieldSync() {
   const statusColor = { Pending:T.amber, "In Progress":T.sky, Completed:T.emerald };
   const createTask = () => {
     if (!newTask.customer) return;
-    setTasks([{ ...newTask, id: Date.now() + Math.random(), status:"Pending", createdBy:"Manual" }, ...tasks]);
+    setTasks([{ ...newTask, id: newId(), status:"Pending", createdBy:"Manual" }, ...tasks]);
     setShowCreate(false);
     setNewTask({ customer:"", area:"", address:"", task:"Sample Delivery", product:"Dosa Batter", qty:"", priority:"High", assignedTo:"Arjun P.", notes:"" });
   };
@@ -3433,7 +3444,7 @@ function DailyOrders({ embedded = false } = {}) {
       if (changed) setLeads(leads.map((l, i) => i === idx ? updated : l));
     } else {
       setLeads([{
-        id: Date.now() + Math.random(),
+        id: newId(),
         name, contact: contact || "", business: name, type: "",
         area: area || "", address: address || "", mapLink: mapLink || "",
         stage: "Active Customer", source: "Daily Orders", telecaller: telecaller || "",
@@ -4957,7 +4968,7 @@ function Expenses() {
 
   const addExpense = () => {
     if (!newExp.category || !newExp.amount) return;
-    setExpenses([{ ...newExp, id: Date.now() + Math.random(), amount:parseInt(newExp.amount), date: newExp.date || todayISO() }, ...expenses]);
+    setExpenses([{ ...newExp, id: newId(), amount:parseInt(newExp.amount), date: newExp.date || todayISO() }, ...expenses]);
     setShowAdd(false);
     setNewExp({ category:"", amount:"", type:"Marketing", subtype:"Facebook", date: todayISO() });
   };
