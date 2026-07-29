@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useSheets, SYNC_ENABLED } from "./useSheets.js";
 import { SRIDHI_LOGO_PNG } from "./lib/logo.js";
+import * as XLSX from "xlsx";
 
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────
 const T = {
@@ -32,165 +33,6 @@ const T = {
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
-// Generates a unique id that's always a plain string with no decimal point
-// (e.g. "1753879182345x7k2p9"). Deliberately NOT a raw number like
-// Date.now()+Math.random() — those get sent as JSON floats, and a backend
-// that tries to numeric-coerce ids (int()/isdigit()) can silently mangle a
-// decimal id after the first sync round-trip, breaking every later ===
-// lookup for that record — which is exactly what caused newly-added leads
-// to appear to "vanish" after an update.
-function newId() {
-  return Date.now().toString() + Math.random().toString(36).slice(2, 8);
-}
-
-// ─── AREA NAME NORMALIZATION ────────────────────────────────────────────
-// Telecallers type area names freehand, so the same place ends up spelled
-// several different ways ("KORATTUR", "Korattur", "korattur", "koratur").
-// These treat all of those as one area for grouping/filtering/reports,
-// while still preserving the original text on each individual record.
-function levenshtein(a, b) {
-  const m = a.length, n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1]
-        ? dp[i - 1][j - 1]
-        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-    }
-  }
-  return dp[m][n];
-}
-// Groups a list of raw area strings into clusters of near-identical spellings
-// (case/whitespace differences, and small typos on longer words), picking
-// the most frequently-used spelling in each cluster as the display name.
-function clusterAreaNames(rawAreas) {
-  const counts = new Map(); // trimmed-lowercase key -> { display: Map(spelling->count), total }
-  rawAreas.forEach(raw => {
-    const val = (raw || "").trim();
-    if (!val) return;
-    const key = val.toLowerCase().replace(/\s+/g, " ");
-    if (!counts.has(key)) counts.set(key, new Map());
-    const spellings = counts.get(key);
-    spellings.set(val, (spellings.get(val) || 0) + 1);
-  });
-  const keys = Array.from(counts.keys());
-  const clusters = []; // [{ keys: [...], total, spellings: Map }]
-  keys.forEach(key => {
-    // Merge into an existing cluster if it's a near-typo of that cluster's
-    // representative key (only for words long enough that 1-2 edits is
-    // clearly a typo, not a genuinely different place name).
-    const match = clusters.find(c => {
-      const maxLen = Math.max(c.repKey.length, key.length);
-      const threshold = maxLen >= 8 ? 2 : maxLen >= 5 ? 1 : 0;
-      return levenshtein(c.repKey, key) <= threshold;
-    });
-    const spellings = counts.get(key);
-    const keyTotal = Array.from(spellings.values()).reduce((a, b) => a + b, 0);
-    if (match) {
-      match.keys.push(key);
-      match.total += keyTotal;
-      spellings.forEach((c, s) => match.spellings.set(s, (match.spellings.get(s) || 0) + c));
-      if (keyTotal > match.repCount) { match.repKey = key; match.repCount = keyTotal; }
-    } else {
-      clusters.push({ repKey: key, repCount: keyTotal, keys: [key], total: keyTotal, spellings: new Map(spellings) });
-    }
-  });
-  return clusters.map(c => {
-    let display = c.repKey, best = -1;
-    c.spellings.forEach((count, spelling) => { if (count > best) { best = count; display = spelling; } });
-    return { display, count: c.total, rawKeys: c.keys };
-  }).sort((a, b) => b.count - a.count);
-}
-// Canonical area name for a single lead/order — used to tag records
-// consistently even though the underlying stored text varies.
-function canonicalArea(raw, clusters) {
-  const key = (raw || "").trim().toLowerCase().replace(/\s+/g, " ");
-  if (!key) return "";
-  const cluster = clusters.find(c => c.rawKeys.includes(key));
-  return cluster ? cluster.display : (raw || "").trim();
-}
-
-// Sridhi Ventures' base location — Korattur, Chennai. Used to show how far
-// a customer's saved map location is from the depot/warehouse.
-const KORATTUR_LATLNG = { lat: 13.1298, lng: 80.2166 };
-function haversineKm(lat1, lng1, lat2, lng2) {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-// Pulls a lat,lng pair out of a Google Maps link, if the link contains one.
-// Short share links (maps.app.goo.gl/...) don't expose coordinates without
-// following a redirect, which isn't possible from the browser — those will
-// return null rather than a guessed/incorrect distance.
-function extractLatLngFromMapLink(url) {
-  if (!url) return null;
-  const patterns = [/@(-?\d+\.\d+),(-?\d+\.\d+)/, /[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/, /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/];
-  for (const re of patterns) {
-    const m = url.match(re);
-    if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
-  }
-  return null;
-}
-function distanceFromKorattur(mapLink) {
-  const coords = extractLatLngFromMapLink(mapLink);
-  if (!coords) return null;
-  return haversineKm(KORATTUR_LATLNG.lat, KORATTUR_LATLNG.lng, coords.lat, coords.lng);
-}
-
-// Approximate coordinates for well-known Chennai localities, used to estimate
-// distance from Korattur when a lead only has an Area name typed in (no
-// pinned map location — which is the vast majority of leads). Straight-line
-// distance, not driving distance — good enough for a rough sense of reach,
-// not turn-by-turn routing.
-const CHENNAI_AREA_COORDS = {
-  "korattur": [13.1298, 80.2166], "ambattur": [13.1143, 80.1548], "padi": [13.1181, 80.1930],
-  "villivakkam": [13.1067, 80.2094], "anna nagar": [13.0850, 80.2101], "perambur": [13.1103, 80.2329],
-  "choolaimedu": [13.0733, 80.2231], "kodambakkam": [13.0500, 80.2241], "nungambakkam": [13.0603, 80.2417],
-  "t nagar": [13.0418, 80.2341], "velachery": [12.9789, 80.2201], "adyar": [13.0067, 80.2570],
-  "thiruvanmiyur": [12.9830, 80.2594], "sholinganallur": [12.9010, 80.2279], "pallikaranai": [12.9345, 80.2141],
-  "tambaram": [12.9246, 80.1000], "chromepet": [12.9516, 80.1462], "guindy": [13.0067, 80.2206],
-  "egmore": [13.0732, 80.2609], "chetpet": [13.0708, 80.2419], "mylapore": [13.0339, 80.2685],
-  "royapettah": [13.0524, 80.2645], "triplicane": [13.0569, 80.2758], "madhavaram": [13.1481, 80.2320],
-  "red hills": [13.1919, 80.1830], "avadi": [13.1147, 80.0970], "poonamallee": [13.0475, 80.1000],
-  "porur": [13.0381, 80.1564], "vadapalani": [13.0503, 80.2121], "saidapet": [13.0212, 80.2229],
-  "alwarpet": [13.0339, 80.2551], "besant nagar": [12.9990, 80.2666], "neelankarai": [12.9260, 80.2543],
-  "injambakkam": [12.9165, 80.2508], "koyambedu": [13.0700, 80.1943], "meenambakkam": [12.9950, 80.1650],
-  "pallavaram": [12.9675, 80.1491], "st thomas mount": [13.0011, 80.1966], "alandur": [12.9975, 80.2010],
-  "kolathur": [13.1213, 80.2222], "perungudi": [12.9635, 80.2422], "thoraipakkam": [12.9420, 80.2372],
-  "navalur": [12.8412, 80.2273], "sholavaram": [13.2109, 80.1567], "washermanpet": [13.1170, 80.2890],
-  "tondiarpet": [13.1231, 80.2880], "walltaxroad": [13.0930, 80.2830], "wall tax road": [13.0930, 80.2830],
-  "george town": [13.0930, 80.2830], "purasawalkam": [13.0788, 80.2534], "kilpauk": [13.0776, 80.2378],
-  "aminjikarai": [13.0704, 80.2224], "virugambakkam": [13.0510, 80.1899], "ashok nagar": [13.0361, 80.2101],
-  "k k nagar": [13.0353, 80.1972], "west mambalam": [13.0357, 80.2213], "mambalam": [13.0357, 80.2213],
-};
-// Best-effort match: exact match first, then checks if any known area name
-// appears as a whole word inside the (often messier) typed text, e.g. an
-// area of "VGP Nagar, Velachery, Chennai" should still match "velachery".
-function findAreaCoords(raw) {
-  const text = (raw || "").toLowerCase().replace(/\s+/g, " ").trim();
-  if (!text) return null;
-  if (CHENNAI_AREA_COORDS[text]) return CHENNAI_AREA_COORDS[text];
-  const keys = Object.keys(CHENNAI_AREA_COORDS).sort((a, b) => b.length - a.length); // longer/more specific first
-  for (const key of keys) {
-    if (new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text)) return CHENNAI_AREA_COORDS[key];
-  }
-  return null;
-}
-// Combined distance lookup: prefers an exact pinned map location; falls back
-// to an area-name estimate when only an Area/Address is available.
-function getDistanceFromKorattur(lead) {
-  const exact = distanceFromKorattur(lead && lead.mapLink);
-  if (exact !== null) return { km: exact, exact: true };
-  const coords = findAreaCoords(lead && lead.area) || findAreaCoords(lead && lead.address);
-  if (!coords) return null;
-  return { km: haversineKm(KORATTUR_LATLNG.lat, KORATTUR_LATLNG.lng, coords[0], coords[1]), exact: false };
-}
-
 // ─── SHEETS SYNC CONFIG ───────────────────────────────────────────────────
 // Set VITE_API_KEY in your .env.local (and Vercel dashboard).
 // Sync auto-enables once VITE_API_KEY is set. (See SETUP.md)
@@ -212,7 +54,6 @@ const PIPELINE_STAGES = [
   { id:"Order Received",         color:T.accent,  count:0 },
   { id:"Repeat Order Follow-up", color:T.indigo,  count:0 },
   { id:"Active Customer",        color:T.emerald, count:0 },
-  { id:"Home Customer",          color:"#C084FC", count:0 },
   { id:"Lost Customer",          color:T.rose,    count:0 },
   { id:"Invalid Number",         color:T.t3,      count:0  },
 ];
@@ -221,6 +62,7 @@ const INITIAL_SAMPLES = [
 ];
 
 const LOST_REASONS = ["Not Delivered on Time", "Quality Not Good", "Outstanding", "Others"];
+const EXISTING_CUSTOMER_STATUSES = ["Calling", "Interested Again", "Not Reachable", "Rejoined", "Not Interested"];
 
 
 const INITIAL_EXPENSES = [
@@ -655,7 +497,7 @@ function ProspectFinder() {
   function confirmAdd() {
     if (!filling || !form.name) return;
     const newLead = {
-      id: newId(),
+      id: Date.now() + Math.random(),
       name: form.name,
       contact: filling.phone || "",
       business: form.business,
@@ -1757,7 +1599,7 @@ function Leads() {
   };
   const addLead = () => {
     if (!newLead.name || !newLead.contact) return;
-    setLeads([{ ...newLead, id: newId(), stage:"New Lead", lastContact:"Today", lastContactAt:Date.now(), createdAt:Date.now(), orderCount:0, priority:"Medium", remarks:[] }, ...leads]);
+    setLeads([{ ...newLead, id:leads.length+1, stage:"New Lead", lastContact:"Today", lastContactAt:Date.now(), createdAt:Date.now(), orderCount:0, priority:"Medium", remarks:[] }, ...leads]);
     setShowAdd(false);
     setNewLead({ name:"", contact:"", business:"", type:"Restaurant", area:"", address:"", source:"Instagram", telecaller:"Priya" });
   };
@@ -2068,7 +1910,7 @@ function Leads() {
       </div>
 
       <div style={{ display:"flex", gap:7, overflowX:"auto", paddingBottom:4 }}>
-        {["All","Needs Follow-up","New Lead","Interested","Sample Requested","Positive Feedback","Negotiation","Order Received","Active Customer","Home Customer","Lost Customer"].map(s => {
+        {["All","Needs Follow-up","New Lead","Interested","Sample Requested","Positive Feedback","Negotiation","Order Received","Active Customer","Lost Customer"].map(s => {
           const active = filterStage===s;
           const col = s==="All" ? T.accent : s==="Needs Follow-up" ? T.rose : getStageColor(s);
           return (
@@ -2179,18 +2021,9 @@ function Pipeline() {
   const [remark, setRemark] = useState("");
   const [showEdit, setShowEdit] = useState(false);
   const [editForm, setEditForm] = useState({});
-  const [typeFilter, setTypeFilter] = useState("All");
-  const [areaFilter, setAreaFilter] = useState("All");
 
   // Filter out blank rows from Google Sheet
-  const allLeadsClean = (allLeads || []).filter(l => l && l.name && l.stage);
-  const leadTypes = ["All", ...Array.from(new Set(allLeadsClean.map(l => l.type).filter(Boolean))).sort()];
-  const areaClusters = clusterAreaNames(allLeadsClean.map(l => l.area));
-  const areaOptions = ["All", ...areaClusters.map(c => c.display)];
-
-  const leads = allLeadsClean
-    .filter(l => typeFilter === "All" || l.type === typeFilter)
-    .filter(l => areaFilter === "All" || canonicalArea(l.area, areaClusters) === areaFilter);
+  const leads = (allLeads || []).filter(l => l && l.name && l.stage);
 
   // Build live stage counts from real leads
   const stageCounts = {};
@@ -2348,65 +2181,6 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
     setTimeout(() => { URL.revokeObjectURL(url); setExporting(false); }, 3000);
   };
 
-  // ── Area-wise Excel export ──────────────────────────────────────────
-  // Groups ALL leads (not just the currently filtered view) by normalized
-  // area, so "KORATTUR" / "Korattur" / "korattur" / "koratur" all land in
-  // one section instead of fragmenting the list.
-  const downloadAreaWiseExcel = () => {
-    setExporting(true);
-    const today = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-    const clusters = clusterAreaNames(allLeadsClean.map(l => l.area));
-    const grouped = clusters.map(c => ({
-      area: c.display,
-      leads: allLeadsClean.filter(l => canonicalArea(l.area, clusters) === c.display),
-    })).filter(g => g.leads.length > 0);
-    const noArea = allLeadsClean.filter(l => !(l.area || "").trim());
-
-    const sectionRows = (area, list) => list.map((l, i) => `
-      <tr>
-        ${i === 0 ? `<td rowspan="${list.length}" style="background:#0EA5E9;color:#fff;font-weight:bold;text-align:center;vertical-align:middle;">${area}<br/><span style="font-weight:normal;font-size:9pt">(${list.length})</span></td>` : ""}
-        <td>${l.name || ""}</td>
-        <td>${l.business || ""}</td>
-        <td>${l.type || ""}</td>
-        <td>${l.contact || ""}</td>
-        <td>${l.stage || ""}</td>
-        <td>${l.telecaller || ""}</td>
-        <td>${l.address || ""}</td>
-      </tr>`).join("");
-
-    const rowsHtml = grouped.map(g => sectionRows(g.area, g.leads)).join("")
-      + (noArea.length ? sectionRows("(No area set)", noArea) : "");
-
-    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-<head><meta charset="UTF-8"/>
-<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>
-<x:Name>Area-wise</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
-</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
-<style>
-  table { border-collapse:collapse; font-family:Calibri,Arial,sans-serif; font-size:11pt; }
-  th { background:#060B16; color:#00C9A7; padding:10px 12px; text-align:left; border:1px solid #060B16; text-transform:uppercase; font-size:9pt; }
-  td { padding:8px 12px; border:1px solid #d9e2f0; vertical-align:top; }
-  tr:nth-child(even) td { background:#f4f8ff; }
-  .title { font-size:20pt; font-weight:bold; color:#00C9A7; }
-  .subtitle { font-size:10pt; color:#7B9DC4; }
-</style></head>
-<body>
-<table>
-  <tr><td colspan="8" class="title">⚡ Sridhi Ventures — Leads by Area</td></tr>
-  <tr><td colspan="8" class="subtitle">Exported ${today} · ${allLeadsClean.length} total leads across ${grouped.length} area(s) · spelling variants merged automatically</td></tr>
-  <tr><td colspan="8">&nbsp;</td></tr>
-  <tr><th>Area</th><th>Name</th><th>Business</th><th>Type</th><th>Contact</th><th>Stage</th><th>Telecaller</th><th>Address</th></tr>
-  ${rowsHtml || `<tr><td colspan="8" style="text-align:center;color:#999">No leads yet</td></tr>`}
-</table>
-</body></html>`;
-
-    const blob = new Blob(["\uFEFF" + html], { type: "application/vnd.ms-excel;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "sridhi-leads-by-area-" + new Date().toISOString().slice(0, 10) + ".xls";
-    a.click();
-    setTimeout(() => { URL.revokeObjectURL(a.href); setExporting(false); }, 1000);
-  };
 
   const updateStageP = (id, stage) => setAllLeads(allLeads.map(l => l.id===id ? {...l, stage, lastContact:"Today"} : l));
   const addRemarkP = (id) => {
@@ -2433,7 +2207,7 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
               <Label>Edit Lead</Label>
               <button onClick={() => setShowEdit(false)} style={{ background:"none", border:"none", color:T.t3, fontSize:18, cursor:"pointer" }}>✕</button>
             </div>
-            {[["Name","name","text"],["Business","business","text"],["Contact","contact","tel"],["Area","area","text"],["Address","address","text"],["Location (Google Maps link)","mapLink","text"]].map(([label,key,type]) => (
+            {[["Name","name","text"],["Business","business","text"],["Contact","contact","tel"],["Area","area","text"],["Address","address","text"]].map(([label,key,type]) => (
               <div key={key} style={{ marginBottom:10 }}>
                 <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:4 }}>{label.toUpperCase()}</div>
                 <input type={type} value={editForm[key]||""} onChange={e => setEditForm({...editForm,[key]:e.target.value})}
@@ -2473,20 +2247,6 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
                   <span style={{ fontSize:12, fontWeight:600, color:T.t1 }}>{v}</span>
                 </div>
               ) : null)}
-              {lead.mapLink && (
-                <div style={{ display:"flex", padding:"8px 0", borderBottom:`1px solid ${T.border}`, alignItems:"center" }}>
-                  <span style={{ fontSize:11, color:T.t3, width:100, flexShrink:0, fontWeight:600 }}>Location</span>
-                  <a href={lead.mapLink} target="_blank" rel="noreferrer" style={{ fontSize:12, fontWeight:600, color:T.accent }}>📍 View map</a>
-                </div>
-              )}
-              {(() => { const d = getDistanceFromKorattur(lead); return d ? (
-                <div style={{ display:"flex", padding:"8px 0", borderBottom:`1px solid ${T.border}`, alignItems:"center" }}>
-                  <span style={{ fontSize:11, color:T.t3, width:100, flexShrink:0, fontWeight:600 }}>Distance</span>
-                  <span style={{ fontSize:12, fontWeight:700, color:T.amber }}>
-                    {d.km.toFixed(1)} km from Korattur {d.exact ? "" : <span style={{ color:T.t3, fontWeight:500 }}>(estimated from area)</span>}
-                  </span>
-                </div>
-              ) : null; })()}
             </div>
             <div style={{ display:"flex", gap:8, marginTop:14 }}>
               <button onClick={() => { const p=(lead.contact||"").replace(/[^0-9]/g,""); if(p) window.location.href="tel:+91"+p; }}
@@ -2541,33 +2301,8 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
       <Card accent={T.accent}>
-        <Label sub={`${total} leads matching current filters`}>Pipeline Overview</Label>
+        <Label sub={`${total} total leads across all stages`}>Pipeline Overview</Label>
         <PipelineStrip stages={stages} />
-      </Card>
-      <Card>
-        <Label sub="View just Home customers, or narrow to one area (typo/case variants like KORATTUR / Korattur / koratur are grouped together automatically)">Filter Pipeline</Label>
-        <div style={{ display:"flex", gap:10, marginTop:8, flexWrap:"wrap" }}>
-          <div style={{ flex:1, minWidth:140 }}>
-            <div style={{ fontSize:10.5, color:T.t3, fontWeight:700, marginBottom:4, textTransform:"uppercase" }}>Customer Type</div>
-            <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
-              style={{ background:T.surface, border:`1px solid ${typeFilter==="Home"?T.accent:T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
-              {leadTypes.map(t => <option key={t} value={t}>{t === "All" ? "All Types" : t}</option>)}
-            </select>
-          </div>
-          <div style={{ flex:1, minWidth:140 }}>
-            <div style={{ fontSize:10.5, color:T.t3, fontWeight:700, marginBottom:4, textTransform:"uppercase" }}>Area</div>
-            <select value={areaFilter} onChange={e => setAreaFilter(e.target.value)}
-              style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
-              {areaOptions.map(a => <option key={a} value={a}>{a === "All" ? "All Areas" : a}</option>)}
-            </select>
-          </div>
-        </div>
-        {typeFilter !== "All" && (
-          <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:6 }}>
-            <Chip label={`${typeFilter} Customer Pipeline`} color={T.accent} />
-            <button onClick={() => setTypeFilter("All")} style={{ background:"none", border:"none", color:T.t3, fontSize:11, cursor:"pointer", fontFamily:FONT, textDecoration:"underline" }}>Clear</button>
-          </div>
-        )}
       </Card>
       <Card>
         <Label sub="Downloads real pipeline data">Export Pipeline</Label>
@@ -2585,28 +2320,11 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
             {exporting ? "⏳ Preparing..." : "📑 PDF"}
           </button>
         </div>
-        <div style={{ marginTop:10 }}>
-          <button onClick={downloadAreaWiseExcel} disabled={exporting}
-            style={{ width:"100%", background:T.surface, border:`1px solid ${T.border}`, borderRadius:14,
-              color:T.t1, padding:"13px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT,
-              display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
-            {exporting ? "⏳ Preparing..." : "📍 Download Area-wise (Excel)"}
-          </button>
-        </div>
       </Card>
       {stages.map(stage => {
         const pct = total > 0 ? ((stage.count/total)*100).toFixed(1) : "0.0";
         const isOpen = expanded===stage.id;
         const stageLeads = leads.filter(l => l.stage===stage.id);
-        if (stage.id === "Home Customer") {
-          stageLeads.sort((a, b) => {
-            const da = getDistanceFromKorattur(a), db = getDistanceFromKorattur(b);
-            if (da && db) return da.km - db.km;
-            if (da) return -1;   // known distance sorts before unknown
-            if (db) return 1;
-            return 0;
-          });
-        }
         return (
           <div key={stage.id} style={{
             background: isOpen ? stage.color+"0D" : T.card,
@@ -2643,11 +2361,6 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
                     <div>
                       <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{l.name}</div>
                       <div style={{ fontSize:10, color:T.t3, marginTop:2 }}>{l.area} · {l.telecaller}</div>
-                      {(() => { const d = getDistanceFromKorattur(l); return d ? (
-                        <div style={{ fontSize:10.5, color:T.amber, marginTop:2, fontWeight:700 }}>
-                          📍 {d.km.toFixed(1)} km from Korattur{!d.exact ? " (est.)" : ""}
-                        </div>
-                      ) : null; })()}
                       {l.contact && (
                         <div style={{ fontSize:11, color:T.accent, marginTop:2, fontWeight:600 }}>📞 {l.contact}</div>
                       )}
@@ -2795,6 +2508,205 @@ function LostCustomers() {
   );
 }
 
+// ─── EXISTING CUSTOMER PIPELINE ───────────────────────────────────────────
+// A separate pipeline from the Leads CRM. Telecallers manually add existing
+// customers who've dropped off here to call back and log remarks — entries
+// never come from, or feed into, the Leads CRM. Whichever customer was most
+// recently updated (a new remark or status change) always sorts to the top.
+function ExistingCustomerPipeline() {
+  const [customers, setCustomers] = useSheetSynced("existingCustomers", "existingCustomers", []);
+  const [selected, setSelected] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newRemark, setNewRemark] = useState("");
+  const [form, setForm] = useState({ name: "", contact: "", area: "", address: "", reason: LOST_REASONS[0] });
+
+  const sorted = [...(customers || [])].sort((a, b) => (b.lastRemarkAt || b.createdAt || 0) - (a.lastRemarkAt || a.createdAt || 0));
+
+  const addCustomer = () => {
+    if (!form.name.trim()) return;
+    const now = Date.now();
+    setCustomers([{
+      id: now,
+      name: form.name.trim(),
+      contact: form.contact.trim(),
+      area: form.area.trim(),
+      address: form.address.trim(),
+      reason: form.reason,
+      status: EXISTING_CUSTOMER_STATUSES[0],
+      remarks: [],
+      lastRemarkAt: now,
+      createdAt: now,
+    }, ...(customers || [])]);
+    setForm({ name: "", contact: "", area: "", address: "", reason: LOST_REASONS[0] });
+    setShowAdd(false);
+  };
+
+  const addRemark = (id) => {
+    if (!newRemark.trim()) return;
+    const stamp = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+    const withStamp = `[${stamp}] ${newRemark.trim()}`;
+    setCustomers((customers || []).map(c => c.id === id
+      ? { ...c, remarks: [...(c.remarks || []), withStamp], lastRemarkAt: Date.now() }
+      : c));
+    setNewRemark("");
+  };
+
+  const setStatus = (id, status) => {
+    setCustomers((customers || []).map(c => c.id === id ? { ...c, status, lastRemarkAt: Date.now() } : c));
+  };
+
+  const downloadPDF = async () => {
+    const { jsPDF } = await import("jspdf");
+    const autoTable = (await import("jspdf-autotable")).default;
+    const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
+    const pageW = doc.internal.pageSize.getWidth();
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(15);
+    doc.setTextColor(23, 148, 74);
+    doc.text("SRIDHI VENTURES — Existing Customer Follow-up Report", 32, 32);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(90, 90, 90);
+    doc.text(new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }), pageW - 32, 32, { align: "right" });
+    autoTable(doc, {
+      startY: 52,
+      head: [["Customer", "Contact", "Area", "Reason Dropped", "Status", "Latest Remark", "Last Updated"]],
+      body: sorted.map(c => [
+        c.name, c.contact || "—", c.area || "—", c.reason || "—", c.status || "—",
+        (c.remarks && c.remarks.length) ? c.remarks[c.remarks.length - 1] : "—",
+        c.lastRemarkAt ? new Date(c.lastRemarkAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—",
+      ]),
+      theme: "grid",
+      styles: { font: "helvetica", fontSize: 8.5, cellPadding: 6 },
+      headStyles: { fillColor: [8, 40, 25], textColor: 255, fontStyle: "bold" },
+      alternateRowStyles: { fillColor: [247, 248, 247] },
+    });
+    doc.save(`Existing-Customer-Report_${new Date().toISOString().slice(0, 10)}.pdf`);
+  };
+
+  const downloadExcel = () => {
+    const rows = sorted.map(c => ({
+      "Customer": c.name,
+      "Contact": c.contact || "",
+      "Area": c.area || "",
+      "Address": c.address || "",
+      "Reason Dropped": c.reason || "",
+      "Status": c.status || "",
+      "Latest Remark": (c.remarks && c.remarks.length) ? c.remarks[c.remarks.length - 1] : "",
+      "All Remarks": (c.remarks || []).join(" | "),
+      "Last Updated": c.lastRemarkAt ? new Date(c.lastRemarkAt).toLocaleString("en-IN") : "",
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Existing Customers");
+    XLSX.writeFile(wb, `Existing-Customer-Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  if (selected) {
+    const c = (customers || []).find(x => x.id === selected.id) || selected;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingBottom: 80 }}>
+        <button onClick={() => setSelected(null)}
+          style={{ background: "none", border: "none", color: T.accent, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT, textAlign: "left", padding: "4px 0" }}>
+          ← Back to Existing Customers
+        </button>
+
+        <Card accent={T.indigo}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: T.t1 }}>{c.name}</div>
+          <div style={{ fontSize: 11, color: T.t3 }}>{c.area}{c.reason ? ` · ${c.reason}` : ""}</div>
+          <div style={{ marginTop: 12 }}>
+            {[["Contact", c.contact], ["Address", c.address]].map(([k, v]) => v ? (
+              <div key={k} style={{ display: "flex", padding: "8px 0", borderBottom: `1px solid ${T.border}` }}>
+                <span style={{ fontSize: 11, color: T.t3, width: 90, flexShrink: 0, fontWeight: 600 }}>{k}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: T.t1 }}>{v}</span>
+              </div>
+            ) : null)}
+          </div>
+          {c.contact && (
+            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+              <button onClick={() => { const p = (c.contact || "").replace(/[^0-9]/g, ""); if (p) window.location.href = "tel:+91" + p; }}
+                style={{ flex: 1, background: T.emerald + "22", border: `1px solid ${T.emerald}44`, borderRadius: 10, color: T.emerald, padding: "10px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>📞 Call</button>
+              <button onClick={() => { const p = (c.contact || "").replace(/[^0-9]/g, ""); window.open("https://wa.me/91" + p, "_blank"); }}
+                style={{ flex: 1, background: "#25D36622", border: "1px solid #25D36644", borderRadius: 10, color: "#25D366", padding: "10px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>💬 WhatsApp</button>
+            </div>
+          )}
+        </Card>
+
+        <Card>
+          <Label sub="Update where this customer stands">Status</Label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {EXISTING_CUSTOMER_STATUSES.map(s => (
+              <button key={s} onClick={() => setStatus(c.id, s)}
+                style={{
+                  background: c.status === s ? T.indigo + "22" : T.surface,
+                  border: `1px solid ${c.status === s ? T.indigo : T.border}`,
+                  borderRadius: 10, padding: "9px 13px", fontSize: 12, fontWeight: 700,
+                  color: c.status === s ? T.indigo : T.t2, cursor: "pointer", fontFamily: FONT,
+                }}>{s}</button>
+            ))}
+          </div>
+        </Card>
+
+        <Card>
+          <Label sub={`${(c.remarks || []).length} entries`}>Remarks</Label>
+          {(c.remarks || []).length === 0 && <div style={{ fontSize: 12, color: T.t3, marginBottom: 12 }}>No remarks yet.</div>}
+          {(c.remarks || []).slice().reverse().map((r, i) => (
+            <div key={i} style={{ fontSize: 12, color: T.t2, padding: "8px 0", borderBottom: i < c.remarks.length - 1 ? `1px solid ${T.border}` : "none" }}>{r}</div>
+          ))}
+          <textarea value={newRemark} onChange={e => setNewRemark(e.target.value)} rows={3}
+            placeholder="What happened on this call?"
+            style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 13, fontFamily: FONT, outline: "none", width: "100%", boxSizing: "border-box", resize: "none", marginTop: 10 }} />
+          <div style={{ marginTop: 8 }}><Btn label="Save Remark" full onClick={() => addRemark(c.id)} /></div>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <Card accent={T.indigo}>
+        <Label sub={`${sorted.length} customer${sorted.length === 1 ? "" : "s"} · most recently updated first`}>Existing Customer Follow-up</Label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Btn label="+ Add Customer" onClick={() => setShowAdd(true)} />
+          <Btn label="📄 PDF Report" ghost onClick={downloadPDF} />
+          <Btn label="📊 Excel Report" ghost onClick={downloadExcel} />
+        </div>
+      </Card>
+
+      {sorted.length === 0 && (
+        <div style={{ textAlign: "center", color: T.t3, fontSize: 13, padding: 40 }}>No existing customers added yet. Tap "+ Add Customer" to start.</div>
+      )}
+
+      {sorted.map(c => (
+        <div key={c.id} onClick={() => setSelected(c)}
+          style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 14, padding: 14, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.t1 }}>{c.name}</div>
+            <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>{c.area || "—"}</div>
+            {c.contact && <div style={{ fontSize: 11, color: T.accent, marginTop: 2, fontWeight: 600 }}>📞 {c.contact}</div>}
+            {c.remarks && c.remarks.length > 0 && (
+              <div style={{ fontSize: 11, color: T.t2, marginTop: 4 }}>💬 {c.remarks[c.remarks.length - 1].slice(0, 60)}</div>
+            )}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+            <Chip label={c.status || "New"} color={T.indigo} />
+            <span style={{ fontSize: 10, color: T.t3 }}>{formatLastContact(c.lastRemarkAt)}</span>
+          </div>
+        </div>
+      ))}
+
+      <Sheet open={showAdd} onClose={() => setShowAdd(false)} title="Add Existing Customer">
+        <Field label="Customer / Hotel Name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Sri Balaji Mess" />
+        <Field label="Contact No" value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder="98765 43210" />
+        <Field label="Area" value={form.area} onChange={e => setForm({ ...form, area: e.target.value })} placeholder="e.g. Velachery" />
+        <Field label="Address" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="Optional" />
+        <Dropdown label="Reason they stopped" value={form.reason} onChange={e => setForm({ ...form, reason: e.target.value })} options={LOST_REASONS} />
+        <Btn label="Add Customer" full onClick={addCustomer} disabled={!form.name.trim()} />
+      </Sheet>
+    </div>
+  );
+}
+
 // ─── SAMPLES ──────────────────────────────────────────────────────────────
 function Samples() {
   const [samples, setSamples, samplesSyncStatus] = useSheetSynced("samples", "samples", INITIAL_SAMPLES);
@@ -2831,7 +2743,7 @@ function Samples() {
   const addSample = () => {
     if (!newSample.customer || !newSample.qty) return;
     const today2 = new Date(); const dateStr = today2.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
-    setSamples([{ ...newSample, id: newId(), qty:parseInt(newSample.qty), unit:"KG", date:dateStr, deliveryCost:parseInt(newSample.deliveryCost)||0, productionCost:parseInt(newSample.qty)*50, status:"Pending", feedback:null, converted:false }, ...samples]);
+    setSamples([{ ...newSample, id:samples.length+1, qty:parseInt(newSample.qty), unit:"KG", date:dateStr, deliveryCost:parseInt(newSample.deliveryCost)||0, productionCost:parseInt(newSample.qty)*50, status:"Pending", feedback:null, converted:false }, ...samples]);
     setShowAdd(false);
     setNewSample({ customer:"", qty:"", type:"Dosa Batter", exec:"Arjun P.", deliveryCost:"" });
   };
@@ -2956,7 +2868,7 @@ function FieldSync() {
   const statusColor = { Pending:T.amber, "In Progress":T.sky, Completed:T.emerald };
   const createTask = () => {
     if (!newTask.customer) return;
-    setTasks([{ ...newTask, id: newId(), status:"Pending", createdBy:"Manual" }, ...tasks]);
+    setTasks([{ ...newTask, id:tasks.length+1, status:"Pending", createdBy:"Manual" }, ...tasks]);
     setShowCreate(false);
     setNewTask({ customer:"", area:"", address:"", task:"Sample Delivery", product:"Dosa Batter", qty:"", priority:"High", assignedTo:"Arjun P.", notes:"" });
   };
@@ -3444,7 +3356,7 @@ function DailyOrders({ embedded = false } = {}) {
       if (changed) setLeads(leads.map((l, i) => i === idx ? updated : l));
     } else {
       setLeads([{
-        id: newId(),
+        id: Date.now() + Math.random(),
         name, contact: contact || "", business: name, type: "",
         area: area || "", address: address || "", mapLink: mapLink || "",
         stage: "Active Customer", source: "Daily Orders", telecaller: telecaller || "",
@@ -4968,7 +4880,7 @@ function Expenses() {
 
   const addExpense = () => {
     if (!newExp.category || !newExp.amount) return;
-    setExpenses([{ ...newExp, id: newId(), amount:parseInt(newExp.amount), date: newExp.date || todayISO() }, ...expenses]);
+    setExpenses([{ ...newExp, id:expenses.length+1, amount:parseInt(newExp.amount), date: newExp.date || todayISO() }, ...expenses]);
     setShowAdd(false);
     setNewExp({ category:"", amount:"", type:"Marketing", subtype:"Facebook", date: todayISO() });
   };
@@ -5964,6 +5876,7 @@ const MORE_MENU = [
   { id:"samples",   label:"Samples",       icon:"🧪" },
   { id:"repeat",    label:"Repeat Orders", icon:"🔁" },
   { id:"lostcustomers", label:"Lost Customers", icon:"🚫" },
+  { id:"existingcustomers", label:"Existing Customers", icon:"🔄" },
   { id:"expenses",  label:"Expenses",      icon:"💸" },
   { id:"marketing", label:"Marketing",     icon:"📢" },
   { id:"reports",   label:"Reports",       icon:"📈" },
@@ -6034,6 +5947,7 @@ function DIcon({ id, size = 18, color = "currentColor", strokeWidth = 1.8 }) {
     case "pipeline": return <svg {...p}><path d="M3 4h18l-7 9v6l-4 2v-8L3 4z"/></svg>;
     case "orders": return <svg {...p}><path d="M6 8V6a3 3 0 0 1 6 0v2"/><rect x="3" y="8" width="12" height="13" rx="2"/><path d="M14 8h4l3 4v9h-4"/><circle cx="7" cy="21" r="1.4"/><circle cx="17" cy="21" r="1.4"/></svg>;
     case "lostuser": return <svg {...p}><circle cx="9" cy="7" r="4"/><path d="M1 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><line x1="17" y1="8" x2="22" y2="13"/><line x1="22" y1="8" x2="17" y2="13"/></svg>;
+    case "existing": return <svg {...p}><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>;
     case "dispatch": return <svg {...p}><rect x="1" y="6" width="14" height="11" rx="1.5"/><path d="M15 10h4l3 3v4h-7z"/><circle cx="6" cy="19.5" r="1.6"/><circle cx="17.5" cy="19.5" r="1.6"/></svg>;
     case "samples": return <svg {...p}><path d="M10 2v6.2L4.5 18a2 2 0 0 0 1.7 3h11.6a2 2 0 0 0 1.7-3L14 8.2V2"/><path d="M8.5 2h7"/><path d="M7 15h10"/></svg>;
     case "phone": return <svg {...p}><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.7a2 2 0 0 1-.4 2.1L8 9.9a16 16 0 0 0 6 6l1.4-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.5 2.7.6a2 2 0 0 1 1.8 2.1z"/></svg>;
@@ -6069,6 +5983,7 @@ const DESKTOP_NAV = [
   { id: "pipeline",  label: "Pipeline",     icon: "pipeline" },
   { id: "repeat",    label: "Orders",       icon: "orders" },
   { id: "lostcustomers", label: "Lost Customers", icon: "lostuser" },
+  { id: "existingcustomers", label: "Existing Customers", icon: "existing" },
   { id: "dailyorders", label: "Daily Orders", icon: "cart" },
   { id: "fieldsync", label: "Dispatch",     icon: "dispatch" },
   { id: "samples",   label: "Samples",      icon: "samples" },
@@ -7875,6 +7790,7 @@ export default function App() {
       case "samples":   return <Samples />;
       case "repeat":    return <RepeatOrders />;
       case "lostcustomers": return <LostCustomers />;
+      case "existingcustomers": return <ExistingCustomerPipeline />;
       case "dailyorders": return <DailyOrders {...moduleProps} />;
       case "expenses":  return <Expenses />;
       case "marketing": return <Marketing />;

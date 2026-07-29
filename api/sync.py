@@ -26,6 +26,7 @@ TAB_CONFIG = {
     "repeatCustomers": {"tab": "RepeatCustomers",  "headers": ["id","name","area","contact","product","qty","frequency","lastOrder","nextDue","status","revenue"]},
     "hrLeads": {"tab": "HRLeads", "headers": ["contact"]},
     "dailyOrders": {"tab": "DailyOrders", "headers": ["id","date","customer","area","contact","address","mapLink","deliveryTime","orderType","product","items","kgs","amount","telecaller","status","cancelReason","cancelRemarks","sampleType","amountMode","manualAmount","createdAt"]},
+    "existingCustomers": {"tab": "ExistingCustomers", "headers": ["id","name","contact","area","address","reason","status","remarks","lastRemarkAt","createdAt","telecaller"]},
 }
 
 _cache = {}
@@ -197,12 +198,31 @@ def _coerce(tab_key, row):
                     row["items"] = []
             elif not isinstance(raw_items, list):
                 row["items"] = []
+    elif tab_key == "existingCustomers":
+        # Same pattern as leads: remarks is a "||"-joined string on the sheet
+        # but a list of strings in the app, newest entry last.
+        row["remarks"] = [r for r in row.get("remarks","").split(" || ") if r] if row.get("remarks") else []
+        for f in ("lastRemarkAt", "createdAt"):
+            if row.get(f, "") not in (None, ""):
+                try: row[f] = int(float(row[f]))
+                except: pass
+            else:
+                row[f] = None
     return row
 
 def _decoerce_leads(lead):
     import time as _time
     out = dict(lead)
     # Assign a unique id if missing
+    if not out.get("id"):
+        out["id"] = str(int(_time.time() * 1000)) + "_" + str(abs(hash(out.get("contact","") + out.get("name",""))))[:6]
+    remarks = out.get("remarks", [])
+    out["remarks"] = " || ".join(remarks) if isinstance(remarks, list) else (remarks or "")
+    return out
+
+def _decoerce_existing_customer(row):
+    import time as _time
+    out = dict(row)
     if not out.get("id"):
         out["id"] = str(int(_time.time() * 1000)) + "_" + str(abs(hash(out.get("contact","") + out.get("name",""))))[:6]
     remarks = out.get("remarks", [])
@@ -275,6 +295,8 @@ class handler(BaseHTTPRequestHandler):
                         cfg = TAB_CONFIG[tab]
                         if tab == "leads":
                             records = [_decoerce_leads(r) for r in records]
+                        elif tab == "existingCustomers":
+                            records = [_decoerce_existing_customer(r) for r in records]
                         token = get_token()
                         sheet_id = os.environ["GOOGLE_SHEET_ID"]
                         actual_tabs = get_sheet_tabs(sheet_id, token)
@@ -320,6 +342,8 @@ class handler(BaseHTTPRequestHandler):
         cfg = TAB_CONFIG[tab]
         if tab == "leads":
             records = [_decoerce_leads(r) for r in records]
+        elif tab == "existingCustomers":
+            records = [_decoerce_existing_customer(r) for r in records]
         try:
             token = get_token()
             actual_tabs = get_sheet_tabs(os.environ["GOOGLE_SHEET_ID"], token)
