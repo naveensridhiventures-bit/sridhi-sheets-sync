@@ -241,8 +241,14 @@ def fetch_all_tabs():
     for key, cfg in TAB_CONFIG.items():
         # Find matching tab (case-insensitive)
         matched = next((t for t in actual_tabs if t.strip().lower() == cfg["tab"].lower()), cfg["tab"])
-        rows = read_tab(matched, token)
-        result[key] = [_coerce(key, r) for r in rows]
+        try:
+            rows = read_tab(matched, token)
+            result[key] = [_coerce(key, r) for r in rows]
+        except Exception:
+            # A single missing/misnamed tab (e.g. one that hasn't been created
+            # in the spreadsheet yet) must not take down every other tab's
+            # sync — fall back to empty for this tab only and keep going.
+            result[key] = []
     _cache["ALL"] = {"ts": time.time(), "data": result}
     return result
 
