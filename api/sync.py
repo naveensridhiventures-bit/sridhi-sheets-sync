@@ -19,6 +19,14 @@ except Exception as _e:
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
+def _norm_tab_name(s):
+    # Matches tab names ignoring case AND whitespace, so a sheet tab someone
+    # typed as "Existing Customers" still matches the "ExistingCustomers"
+    # config key instead of silently falling through to a tab that doesn't
+    # exist (which is what happened here — reads/writes targeted a
+    # non-existent tab, so nothing ever actually reached the sheet).
+    return "".join(str(s).split()).lower()
+
 TAB_CONFIG = {
     "leads":           {"tab": "Leads",           "headers": ["id","name","contact","business","type","area","address","mapLink","stage","source","telecaller","lastContact","lastContactAt","createdAt","orderCount","callOutcome","priority","remarks","kgQty","lostReason","lostReasonNote"]},
     "samples":         {"tab": "Samples",          "headers": ["id","customer","leadId","qty","unit","type","date","exec","deliveryCost","productionCost","status","feedback","converted"]},
@@ -240,7 +248,7 @@ def fetch_all_tabs():
     result = {}
     for key, cfg in TAB_CONFIG.items():
         # Find matching tab (case-insensitive)
-        matched = next((t for t in actual_tabs if t.strip().lower() == cfg["tab"].lower()), cfg["tab"])
+        matched = next((t for t in actual_tabs if _norm_tab_name(t) == _norm_tab_name(cfg["tab"])), cfg["tab"])
         try:
             rows = read_tab(matched, token)
             result[key] = [_coerce(key, r) for r in rows]
@@ -306,7 +314,7 @@ class handler(BaseHTTPRequestHandler):
                         token = get_token()
                         sheet_id = os.environ["GOOGLE_SHEET_ID"]
                         actual_tabs = get_sheet_tabs(sheet_id, token)
-                        matched = next((t for t in actual_tabs if t.strip().lower() == cfg["tab"].lower()), cfg["tab"])
+                        matched = next((t for t in actual_tabs if _norm_tab_name(t) == _norm_tab_name(cfg["tab"])), cfg["tab"])
                         existing = read_tab(matched, token)
                         merged = merge_records(existing, records, tab)
                         merged = _apply_deletes(merged, deleted_ids, tab)
@@ -353,7 +361,7 @@ class handler(BaseHTTPRequestHandler):
         try:
             token = get_token()
             actual_tabs = get_sheet_tabs(os.environ["GOOGLE_SHEET_ID"], token)
-            matched = next((t for t in actual_tabs if t.strip().lower() == cfg["tab"].lower()), cfg["tab"])
+            matched = next((t for t in actual_tabs if _norm_tab_name(t) == _norm_tab_name(cfg["tab"])), cfg["tab"])
             # Re-read fresh (not the 60s cache) right before merging+writing —
             # keeps the race window to milliseconds instead of minutes, and the
             # merge itself means even a same-instant collision can't drop rows.
