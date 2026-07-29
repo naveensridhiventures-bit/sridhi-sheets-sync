@@ -53,7 +53,11 @@ def get_sheet_tabs(sheet_id, token):
     return [s["properties"]["title"] for s in data.get("sheets", [])]
 
 def sheets_get(sheet_id, tab_name, token):
-    encoded = urllib.parse.quote(tab_name + "!A1:Z500", safe="")
+    # No trailing row number — an open-ended column range (A:Z) reads every
+    # row Google Sheets actually has data in, however large the tab grows.
+    # The previous hardcoded A1:Z500 silently hid (and on the next write,
+    # effectively dropped) anything added past row 500.
+    encoded = urllib.parse.quote(tab_name + "!A:Z", safe="")
     url = "https://sheets.googleapis.com/v4/spreadsheets/{}/values/{}".format(sheet_id, encoded)
     req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
     with urllib.request.urlopen(req, timeout=15) as resp:
@@ -157,7 +161,7 @@ def _coerce(tab_key, row):
         row["contact"] = _normalize_phone(row.get("contact",""))
         return row
     if tab_key == "leads":
-        row["id"] = str(row.get("id", ""))
+        row["id"] = int(row["id"]) if str(row.get("id","")).isdigit() else row.get("id","")
         row["remarks"] = [r for r in row.get("remarks","").split(" || ") if r] if row.get("remarks") else []
         for f in ("lastContactAt", "createdAt", "orderCount", "kgQty"):
             if row.get(f, "") not in (None, ""):
