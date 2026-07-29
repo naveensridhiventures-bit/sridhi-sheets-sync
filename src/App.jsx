@@ -2566,16 +2566,93 @@ function ExistingCustomerPipeline() {
     const autoTable = (await import("jspdf-autotable")).default;
     const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
     const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 32;
+
+    const NAVY = [8, 40, 25], TEAL = [23, 148, 74], TEAL_TINT = [229, 248, 238];
+    const GRID = [214, 220, 214], INK = [26, 32, 46], SUBTLE = [110, 118, 138];
+    const STATUS_COLORS = {
+      "Calling": [76, 95, 224], "Interested": [16, 150, 100], "Rejoined": [23, 148, 74],
+      "Own Making": [180, 110, 5], "Not Reachable": [110, 118, 138], "Not Interested": [200, 45, 60],
+    };
+    const colorFor = (s) => STATUS_COLORS[s] || [110, 118, 138];
+
+    const header = () => {
+      const headerH = 70;
+      doc.setFillColor(...NAVY);
+      doc.rect(0, 0, pageW, headerH, "F");
+      doc.setFillColor(...TEAL);
+      doc.rect(0, headerH - 2, pageW, 2, "F");
+
+      const logoSize = 34, badgePad = 5, badgeSize = logoSize + badgePad * 2;
+      const badgeX = margin, badgeY = (headerH - badgeSize) / 2 - 1;
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(badgeX, badgeY, badgeSize, badgeSize, 8, 8, "F");
+      try { doc.addImage(SRIDHI_LOGO_PNG, "PNG", badgeX + badgePad, badgeY + badgePad, logoSize, logoSize); } catch (e) { /* logo optional */ }
+
+      const textX = badgeX + badgeSize + 14;
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(15);
+      doc.text("SRIDHI VENTURES — Existing Customer Follow-up", textX, 29);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor(200, 214, 205);
+      doc.text("Dropped customers being re-approached — status & remarks history", textX, 44);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.setTextColor(...TEAL.map(c => Math.min(255, c + 70)));
+      doc.text(new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }), pageW - margin, 28, { align: "right" });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(200, 214, 205);
+      doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`, pageW - margin, 42, { align: "right" });
+    };
+
+    const footer = () => {
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setDrawColor(...GRID);
+        doc.line(margin, pageH - 26, pageW - margin, pageH - 26);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7.5);
+        doc.setTextColor(...SUBTLE);
+        doc.text("Sridhi Ventures · Existing Customer Report", margin, pageH - 13);
+        doc.text(`Page ${i} of ${pageCount}`, pageW - margin, pageH - 13, { align: "right" });
+      }
+    };
+
+    header();
+
+    // Summary strip — a quick headline count plus one chip per status, so
+    // management sees the shape of the pipeline before reading the table.
+    const y0 = 90;
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(15);
-    doc.setTextColor(23, 148, 74);
-    doc.text("SRIDHI VENTURES — Existing Customer Follow-up Report", 32, 32);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.setTextColor(90, 90, 90);
-    doc.text(new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }), pageW - 32, 32, { align: "right" });
+    doc.setFontSize(10.5);
+    doc.setTextColor(...NAVY);
+    doc.text(`${sorted.length} CUSTOMER${sorted.length === 1 ? "" : "S"} IN FOLLOW-UP`, margin, y0);
+    let chipX = margin;
+    const chipY = y0 + 12;
+    EXISTING_CUSTOMER_STATUSES.forEach(s => {
+      const count = sorted.filter(c => (c.status || EXISTING_CUSTOMER_STATUSES[0]) === s).length;
+      if (!count) return;
+      const label = `${s}  ${count}`;
+      const w = doc.getTextWidth(label) + 20;
+      const color = colorFor(s);
+      doc.setDrawColor(...color);
+      doc.setFillColor(...color.map(c => Math.min(255, c + (255 - c) * 0.88)));
+      doc.roundedRect(chipX, chipY, w, 20, 6, 6, "FD");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor(...color);
+      doc.text(label, chipX + 10, chipY + 14);
+      chipX += w + 8;
+    });
+
     autoTable(doc, {
-      startY: 52,
+      startY: chipY + 34,
+      margin: { top: 90, bottom: 40 },
       head: [["Customer", "Contact", "Area", "Reason Dropped", "Status", "Latest Remark", "Last Updated"]],
       body: sorted.map(c => [
         c.name, c.contact || "—", c.area || "—", c.reason || "—", c.status || "—",
@@ -2583,10 +2660,23 @@ function ExistingCustomerPipeline() {
         c.lastRemarkAt ? new Date(c.lastRemarkAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—",
       ]),
       theme: "grid",
-      styles: { font: "helvetica", fontSize: 8.5, cellPadding: 6 },
-      headStyles: { fillColor: [8, 40, 25], textColor: 255, fontStyle: "bold" },
-      alternateRowStyles: { fillColor: [247, 248, 247] },
+      styles: { font: "helvetica", fontSize: 8.5, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "middle" },
+      headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 },
+      alternateRowStyles: { fillColor: [248, 250, 248] },
+      columnStyles: { 0: { fontStyle: "bold" }, 4: { fontStyle: "bold", halign: "center" } },
+      didParseCell: (data) => {
+        // Color-code the Status column per status, so a manager can scan
+        // progress at a glance instead of reading every row.
+        if (data.section === "body" && data.column.index === 4) {
+          const color = colorFor(data.cell.raw);
+          data.cell.styles.textColor = color;
+          data.cell.styles.fillColor = color.map(c => Math.min(255, c + (255 - c) * 0.9));
+        }
+      },
+      didDrawPage: () => header(),
     });
+
+    footer();
     doc.save(`Existing-Customer-Report_${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
@@ -4440,7 +4530,7 @@ function DailyOrders({ embedded = false } = {}) {
         if (o.address && o.address.trim()) return o.address.split(",")[0].trim();
         return "—";
       };
-      const buildRows = (list) => {
+      const buildRows = (list, startY) => {
         const dataRows = list.map((o, idx) => {
           const items = orderLineItems(o);
           const kgByProduct = productCols.map(name => {
@@ -4449,8 +4539,20 @@ function DailyOrders({ embedded = false } = {}) {
           });
           return [String(idx + 1), o.customer, shortLocation(o), ...kgByProduct, o.contact || ""];
         });
-        const targetRows = Math.max(dataRows.length + 6, 12);
-        const blankRows = Array.from({ length: targetRows - dataRows.length }, (_, i) => [String(dataRows.length + i + 1), "", "", ...productCols.map(() => ""), ""]);
+        // How many blank rows actually fit without spilling onto another
+        // page — measured empirically at this font/padding: ~20pt per row,
+        // plus a fixed allowance for the (3-line-wrapped) header and the
+        // totals footer row. A fixed "+6" here previously ignored how much
+        // room the header/footer actually take, so a full 12-row order list
+        // would silently push one blank row past the page bottom and cascade
+        // into extra pages for everything after it.
+        const ROW_H = 20;
+        const HEADER_FOOTER_ALLOWANCE = 90;
+        const available = pageH - startY - 40 - HEADER_FOOTER_ALLOWANCE;
+        const maxRowsThatFit = Math.max(dataRows.length, Math.floor(available / ROW_H));
+        const desiredRows = Math.max(dataRows.length + 6, 12);
+        const targetRows = Math.min(desiredRows, maxRowsThatFit);
+        const blankRows = Array.from({ length: Math.max(0, targetRows - dataRows.length) }, (_, i) => [String(dataRows.length + i + 1), "", "", ...productCols.map(() => ""), ""]);
         return [...dataRows, ...blankRows];
       };
 
@@ -4494,7 +4596,7 @@ function DailyOrders({ embedded = false } = {}) {
           margin: { left: x, right: pageW - x - halfW, bottom: 40, top: y0 },
           tableWidth: halfW,
           head: [sectionCols.map(c => c.label)],
-          body: buildRows(list),
+          body: buildRows(list, startY),
           foot: [totalsRow(list)],
           theme: "grid",
           styles: { font: "helvetica", fontSize: 8, cellPadding: 5, lineColor: GRID, lineWidth: 0.7, textColor: INK, valign: "middle", minCellHeight: 16 },
