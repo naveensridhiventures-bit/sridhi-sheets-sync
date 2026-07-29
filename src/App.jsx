@@ -62,7 +62,7 @@ const INITIAL_SAMPLES = [
 ];
 
 const LOST_REASONS = ["Not Delivered on Time", "Quality Not Good", "Outstanding", "Others"];
-const EXISTING_CUSTOMER_STATUSES = ["Calling", "Interested Again", "Not Reachable", "Rejoined", "Not Interested"];
+const EXISTING_CUSTOMER_STATUSES = ["Calling", "Interested", "Rejoined", "Own Making", "Not Reachable", "Not Interested"];
 
 
 const INITIAL_EXPENSES = [
@@ -2543,8 +2543,9 @@ function ExistingCustomerPipeline() {
 
   const addRemark = (id) => {
     if (!newRemark.trim()) return;
-    const stamp = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
-    const withStamp = `[${stamp}] ${newRemark.trim()}`;
+    const now = new Date();
+    const stamp = now.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+    const withStamp = "[" + stamp + " · Team] " + newRemark.trim();
     setCustomers((customers || []).map(c => c.id === id
       ? { ...c, remarks: [...(c.remarks || []), withStamp], lastRemarkAt: Date.now() }
       : c));
@@ -2552,7 +2553,12 @@ function ExistingCustomerPipeline() {
   };
 
   const setStatus = (id, status) => {
-    setCustomers((customers || []).map(c => c.id === id ? { ...c, status, lastRemarkAt: Date.now() } : c));
+    const now = new Date();
+    const stamp = now.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+    const autoRemark = "[" + stamp + " · System] Status changed to \"" + status + "\"";
+    setCustomers((customers || []).map(c => c.id === id
+      ? { ...c, status, remarks: [...(c.remarks || []), autoRemark], lastRemarkAt: Date.now() }
+      : c));
   };
 
   const downloadPDF = async () => {
