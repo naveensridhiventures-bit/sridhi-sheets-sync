@@ -3526,12 +3526,13 @@ function DailyOrders({ embedded = false } = {}) {
 
     const rangeByDate = {};
     rangeActive.forEach(o => {
-      if (!rangeByDate[o.date]) rangeByDate[o.date] = { newCount: 0, regularCount: 0, sampleCount: 0, kgs: 0, revenue: 0 };
+      if (!rangeByDate[o.date]) rangeByDate[o.date] = { newCount: 0, regularCount: 0, sampleCount: 0, newKg: 0, regularKg: 0, sampleKg: 0, kgs: 0, revenue: 0 };
       const b = rangeByDate[o.date];
-      if (o.orderType === "New Order") b.newCount += 1;
-      else if (o.orderType === "Regular Order") b.regularCount += 1;
-      else b.sampleCount += 1;
-      b.kgs += parseFloat(o.kgs) || 0;
+      const kg = parseFloat(o.kgs) || 0;
+      if (o.orderType === "New Order") { b.newCount += 1; b.newKg += kg; }
+      else if (o.orderType === "Regular Order") { b.regularCount += 1; b.regularKg += kg; }
+      else { b.sampleCount += 1; b.sampleKg += kg; }
+      b.kgs += kg;
       b.revenue += parseFloat(o.amount) || 0;
     });
 
@@ -3558,6 +3559,8 @@ function DailyOrders({ embedded = false } = {}) {
       totalRegular: rangeActive.filter(o => o.orderType === "Regular Order").length,
       totalSample: rangeActive.filter(o => o.orderType === "Sample").length,
       totalNewKg: rangeActive.filter(o => o.orderType === "New Order").reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
+      totalRegularKg: rangeActive.filter(o => o.orderType === "Regular Order").reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
+      totalSampleKg: rangeActive.filter(o => o.orderType === "Sample").reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
       totalKg: rangeActive.reduce((a, o) => a + (parseFloat(o.kgs) || 0), 0),
       totalRevenue: rangeActive.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0),
     };
@@ -3616,7 +3619,7 @@ function DailyOrders({ embedded = false } = {}) {
       import("jspdf"),
       import("jspdf-autotable"),
     ]);
-    const { rangeOrders, rangeCancelled, rangeByDate, rangeByProduct, sampleSummary, totalNew, totalRegular, totalSample, totalNewKg, totalKg, totalRevenue } = getReportData();
+    const { rangeOrders, rangeCancelled, rangeByDate, rangeByProduct, sampleSummary, totalNew, totalRegular, totalSample, totalNewKg, totalRegularKg, totalSampleKg, totalKg, totalRevenue } = getReportData();
 
     // Brand palette — drawn from the Sridhi Ventures logo (deep forest green
     // header with the signature emerald accent), rather than generic navy/teal.
@@ -3857,19 +3860,38 @@ function DailyOrders({ embedded = false } = {}) {
     // ── Daily summary table ──────────────────────────────────────────────
     sectionTitle("Daily Summary — New vs Regular vs Sample");
     const summaryBody = Object.entries(rangeByDate).sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([date, s]) => [formatDateReadable(date), String(s.newCount), String(s.regularCount), String(s.sampleCount), Math.round(s.kgs).toLocaleString("en-IN"), `Rs ${Math.round(s.revenue).toLocaleString("en-IN")}`]);
+      .map(([date, s]) => [
+        formatDateReadable(date),
+        String(s.newCount), `${Math.round(s.newKg).toLocaleString("en-IN")} KG`,
+        String(s.regularCount), `${Math.round(s.regularKg).toLocaleString("en-IN")} KG`,
+        String(s.sampleCount),
+        Math.round(s.kgs).toLocaleString("en-IN"), `Rs ${Math.round(s.revenue).toLocaleString("en-IN")}`,
+      ]);
     autoTable(doc, {
       startY: y,
       margin: { left: margin, right: margin, bottom: 50 },
-      head: [["Date", "New", "Regular", "Sample", "Total KG", "Revenue"]],
-      body: summaryBody.length ? summaryBody : [["—", "—", "—", "—", "—", "—"]],
-      foot: [["TOTAL", String(totalNew), String(totalRegular), String(totalSample), Math.round(totalKg).toLocaleString("en-IN"), `Rs ${Math.round(totalRevenue).toLocaleString("en-IN")}`]],
+      head: [["Date", "New", "New KG", "Regular", "Regular KG", "Sample", "Total KG", "Revenue"]],
+      body: summaryBody.length ? summaryBody : [["—", "—", "—", "—", "—", "—", "—", "—"]],
+      foot: [["TOTAL",
+        String(totalNew), `${Math.round(totalNewKg).toLocaleString("en-IN")} KG`,
+        String(totalRegular), `${Math.round(totalRegularKg).toLocaleString("en-IN")} KG`,
+        String(totalSample),
+        Math.round(totalKg).toLocaleString("en-IN"), `Rs ${Math.round(totalRevenue).toLocaleString("en-IN")}`,
+      ]],
       theme: "grid",
       styles: { font: "helvetica", fontSize: 9, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK },
       headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 },
       footStyles: { fillColor: TEAL_TINT, textColor: INK, fontStyle: "bold", fontSize: 9 },
       alternateRowStyles: { fillColor: [249, 250, 252] },
-      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } },
+      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" }, 7: { halign: "right" } },
+      didParseCell: (data) => {
+        // New/New KG in teal, Regular/Regular KG in indigo — same color logic
+        // used for order-type elsewhere in this report, so New vs Regular is
+        // easy to tell apart at a glance down the whole table.
+        if (data.section !== "body") return;
+        if (data.column.index === 1 || data.column.index === 2) data.cell.styles.textColor = TEAL;
+        if (data.column.index === 3 || data.column.index === 4) data.cell.styles.textColor = INDIGO;
+      },
     });
     y = doc.lastAutoTable.finalY + 30;
 
