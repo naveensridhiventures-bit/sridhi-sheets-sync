@@ -65,6 +65,24 @@ const LOST_REASONS = ["Not Delivered on Time", "Quality Not Good", "Outstanding"
 const EXISTING_CUSTOMER_STATUSES = ["Calling", "Interested", "Rejoined", "Own Making", "Not Reachable", "Not Interested"];
 const TELECALLERS = ["Thulasi", "Ramya", "Sabi (Intern)", "Naveen HR"];
 
+// Quick-pick remark tags for the Existing Customer call log. Each carries a
+// sentiment so calls can be rolled up into a Positive / Negative / Neutral
+// analysis per telecaller without anyone having to read every remark by hand.
+const REMARK_TAGS = [
+  { label: "Interested",        sentiment: "positive" },
+  { label: "Interested Later",  sentiment: "positive" },
+  { label: "Sample Requested",  sentiment: "positive" },
+  { label: "Rejoined",          sentiment: "positive" },
+  { label: "Call Back Later",   sentiment: "neutral"  },
+  { label: "Shop Closed",       sentiment: "neutral"  },
+  { label: "Switch Off",        sentiment: "negative" },
+  { label: "Network Error",     sentiment: "negative" },
+  { label: "Not Reachable",     sentiment: "negative" },
+  { label: "Not Interested",    sentiment: "negative" },
+  { label: "Wrong Number",      sentiment: "negative" },
+];
+const SENTIMENT_COLOR = { positive: T.emerald, negative: T.rose, neutral: T.amber };
+
 
 const INITIAL_EXPENSES = [
 ];
@@ -2519,12 +2537,15 @@ function LostCustomers() {
 function remarkText(r) { return typeof r === "string" ? r : (r && r.text) || ""; }
 function remarkTelecallerOf(r) { return typeof r === "object" && r ? r.telecaller : null; }
 function remarkAt(r) { return typeof r === "object" && r ? r.at : null; }
+function remarkSentimentOf(r) { return (typeof r === "object" && r && r.sentiment) || "neutral"; }
+function remarkTagOf(r) { return (typeof r === "object" && r && r.tag) || null; }
 
 function ExistingCustomerPipeline() {
   const [customers, setCustomers] = useSheetSynced("existingCustomers", "existingCustomers", []);
   const [selected, setSelected] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [newRemark, setNewRemark] = useState("");
+  const [remarkTag, setRemarkTag] = useState(null);
   const [remarkTelecaller, setRemarkTelecaller] = useState(TELECALLERS[0]);
   const [remarkDate, setRemarkDate] = useState(todayISO());
   const [form, setForm] = useState({ name: "", contact: "", area: "", address: "", reason: LOST_REASONS[0], telecaller: TELECALLERS[0], date: todayISO() });
@@ -2537,6 +2558,27 @@ function ExistingCustomerPipeline() {
   const [generatingTcReport, setGeneratingTcReport] = useState(false);
 
   const sorted = [...(customers || [])].sort((a, b) => (b.lastRemarkAt || b.createdAt || 0) - (a.lastRemarkAt || a.createdAt || 0));
+
+  // Live Positive / Negative / Neutral tally for the selected telecaller +
+  // date range, so the numbers are visible in-app before anyone downloads
+  // the PDF. Mirrors exactly what downloadTelecallerReport computes.
+  const reportStats = useMemo(() => {
+    let positive = 0, negative = 0, neutral = 0;
+    (customers || []).forEach(c => {
+      (c.remarks || []).forEach(r => {
+        const tc = remarkTelecallerOf(r);
+        const at = remarkAt(r);
+        if (tc !== reportTelecaller || !at) return;
+        const dateStr = localISO(at);
+        if (dateStr < reportFrom || dateStr > reportTo) return;
+        const s = remarkSentimentOf(r);
+        if (s === "positive") positive++;
+        else if (s === "negative") negative++;
+        else neutral++;
+      });
+    });
+    return { positive, negative, neutral, total: positive + negative + neutral };
+  }, [customers, reportTelecaller, reportFrom, reportTo]);
 
   // Combines a picked date (YYYY-MM-DD) with the current time-of-day, so a
   // backfilled entry sorts sensibly and still shows a real time in reports.
@@ -2598,16 +2640,19 @@ function ExistingCustomerPipeline() {
   };
 
   const addRemark = (id) => {
-    if (!newRemark.trim()) return;
+    const tagLabel = remarkTag ? remarkTag.label : "";
+    const noteText = newRemark.trim() || tagLabel;
+    if (!noteText) return;
     if (!remarkTelecaller) { alert("Please select a telecaller."); return; }
     const at = dateWithNow(remarkDate || todayISO());
     const stamp = new Date(at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + new Date(at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
-    const withStamp = "[" + stamp + " · " + remarkTelecaller + "] " + newRemark.trim();
-    const entry = { text: withStamp, note: newRemark.trim(), telecaller: remarkTelecaller, at };
+    const withStamp = "[" + stamp + " · " + remarkTelecaller + (tagLabel ? " · " + tagLabel : "") + "] " + noteText;
+    const entry = { text: withStamp, note: noteText, telecaller: remarkTelecaller, at, tag: tagLabel || null, sentiment: remarkTag ? remarkTag.sentiment : "neutral" };
     setCustomers((customers || []).map(c => c.id === id
       ? { ...c, remarks: [...(c.remarks || []), entry], lastRemarkAt: at }
       : c));
     setNewRemark("");
+    setRemarkTag(null);
     setRemarkDate(todayISO());
   };
 
@@ -2835,7 +2880,7 @@ function ExistingCustomerPipeline() {
           if (tc !== reportTelecaller || !at) return;
           const dateStr = localISO(at);
           if (dateStr < reportFrom || dateStr > reportTo) return;
-          entries.push({ at, dateStr, customer: c.name, area: c.area || "—", note: (typeof r === "object" && r.note) ? r.note : remarkText(r) });
+          entries.push({ at, dateStr, customer: c.name, area: c.area || "—", note: (typeof r === "object" && r.note) ? r.note : remarkText(r), sentiment: remarkSentimentOf(r), tag: remarkTagOf(r) });
         });
       });
       entries.sort((a, b) => a.at - b.at);
@@ -2912,6 +2957,56 @@ function ExistingCustomerPipeline() {
       });
       y += 40;
 
+      // Response Analysis — Positive / Negative / Neutral scorecard plus a
+      // proportional bar, so the page reads at a glance before the
+      // call-by-call detail below.
+      const POS = [34, 217, 138], NEG = [251, 113, 133], NEU = [251, 191, 36];
+      const posCount = entries.filter(e => e.sentiment === "positive").length;
+      const negCount = entries.filter(e => e.sentiment === "negative").length;
+      const neuCount = entries.filter(e => e.sentiment === "neutral").length;
+      const totalResp = posCount + negCount + neuCount;
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10.5);
+      doc.setTextColor(...NAVY);
+      doc.text("RESPONSE ANALYSIS", margin, y);
+      y += 10;
+
+      const statBoxes = [["Positive", posCount, POS], ["Negative", negCount, NEG], ["Neutral", neuCount, NEU]];
+      const boxW = (pageW - margin * 2 - 16) / 3;
+      statBoxes.forEach(([label, count, color], i) => {
+        const bx = margin + i * (boxW + 8);
+        doc.setFillColor(...color.map(c => Math.min(255, c + (255 - c) * 0.88)));
+        doc.setDrawColor(...color);
+        doc.roundedRect(bx, y, boxW, 44, 8, 8, "FD");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(19);
+        doc.setTextColor(...color);
+        doc.text(String(count), bx + 12, y + 27);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        const pct = totalResp ? Math.round((count / totalResp) * 100) : 0;
+        doc.text(`${label.toUpperCase()} · ${pct}%`, bx + 12, y + 38);
+      });
+      y += 56;
+
+      if (totalResp) {
+        const barX = margin, barY = y, barW = pageW - margin * 2, barH = 12;
+        let bx2 = barX;
+        [[posCount, POS], [neuCount, NEU], [negCount, NEG]].forEach(([count, color]) => {
+          if (!count) return;
+          const w = (count / totalResp) * barW;
+          doc.setFillColor(...color);
+          doc.rect(bx2, barY, w, barH, "F");
+          bx2 += w;
+        });
+        doc.setDrawColor(...GRID);
+        doc.roundedRect(barX, barY, barW, barH, 3, 3, "S");
+        y += barH + 22;
+      } else {
+        y += 8;
+      }
+
       if (!entries.length) {
         doc.setFont("helvetica", "normal");
         doc.setFontSize(11);
@@ -2920,28 +3015,41 @@ function ExistingCustomerPipeline() {
       } else {
         // Group rows by date with a bold date separator row, most recent day last
         // (chronological, so it reads like a diary of the period).
+        const TAG_SENTIMENT = {};
+        REMARK_TAGS.forEach(t => { TAG_SENTIMENT[t.label] = t.sentiment; });
+        const SENTIMENT_RGB = { positive: POS, negative: NEG, neutral: NEU };
         const byDate = {};
         entries.forEach(e => { (byDate[e.dateStr] = byDate[e.dateStr] || []).push(e); });
         const body = [];
         Object.keys(byDate).sort().forEach(d => {
-          body.push([{ content: formatDateReadable(d) + `  (${byDate[d].length} call${byDate[d].length === 1 ? "" : "s"})`, colSpan: 4, styles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 } }]);
+          body.push([{ content: formatDateReadable(d) + `  (${byDate[d].length} call${byDate[d].length === 1 ? "" : "s"})`, colSpan: 5, styles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 } }]);
           byDate[d].forEach(e => {
             body.push([
               new Date(e.at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
-              e.customer, e.area, e.note || "—",
+              e.customer, e.area, e.note || "—", e.tag || "—",
             ]);
           });
         });
         autoTable(doc, {
           startY: y,
           margin: { top: 94, bottom: 40 },
-          head: [["Time", "Customer", "Area", "Call Notes"]],
+          head: [["Time", "Customer", "Area", "Call Notes", "Response"]],
           body,
           theme: "grid",
           styles: { font: "helvetica", fontSize: 8.5, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "middle" },
           headStyles: { fillColor: TEAL, textColor: 255, fontStyle: "bold", fontSize: 9 },
           alternateRowStyles: { fillColor: [248, 250, 248] },
-          columnStyles: { 0: { cellWidth: 55, fontStyle: "bold", textColor: TEAL }, 1: { fontStyle: "bold", cellWidth: 110 }, 2: { cellWidth: 90 } },
+          columnStyles: { 0: { cellWidth: 55, fontStyle: "bold", textColor: TEAL }, 1: { fontStyle: "bold", cellWidth: 100 }, 2: { cellWidth: 80 }, 4: { cellWidth: 80, fontStyle: "bold", halign: "center" } },
+          didParseCell: (data) => {
+            // Color-code the Response column by sentiment, so a manager can
+            // scan wins vs losses down the page without reading every note.
+            if (data.section === "body" && data.column.index === 4) {
+              const sentiment = TAG_SENTIMENT[data.cell.raw] || null;
+              const color = sentiment ? SENTIMENT_RGB[sentiment] : SUBTLE;
+              data.cell.styles.textColor = color;
+              if (sentiment) data.cell.styles.fillColor = color.map(c => Math.min(255, c + (255 - c) * 0.88));
+            }
+          },
           didDrawPage: () => header(),
         });
       }
@@ -3010,14 +3118,35 @@ function ExistingCustomerPipeline() {
           <Label sub={`${(c.remarks || []).length} entries`}>Remarks</Label>
           {(c.remarks || []).length === 0 && <div style={{ fontSize: 12, color: T.t3, marginBottom: 12 }}>No remarks yet.</div>}
           {(c.remarks || []).slice().reverse().map((r, i) => (
-            <div key={i} style={{ fontSize: 12, color: T.t2, padding: "8px 0", borderBottom: i < c.remarks.length - 1 ? `1px solid ${T.border}` : "none" }}>{remarkText(r)}</div>
+            <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0", borderBottom: i < c.remarks.length - 1 ? `1px solid ${T.border}` : "none" }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, marginTop: 5, flexShrink: 0, background: SENTIMENT_COLOR[remarkSentimentOf(r)] }} />
+              <span style={{ fontSize: 12, color: T.t2 }}>{remarkText(r)}</span>
+            </div>
           ))}
           <Dropdown label="Telecaller (required)" value={remarkTelecaller} onChange={e => setRemarkTelecaller(e.target.value)} options={TELECALLERS} />
           <Field label="Call Date" type="date" value={remarkDate} onChange={e => setRemarkDate(e.target.value)} />
+          <div style={{ fontSize: 11, color: T.t2, marginTop: 10, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Quick Tag (optional)</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {REMARK_TAGS.map(tag => {
+              const active = remarkTag && remarkTag.label === tag.label;
+              const color = SENTIMENT_COLOR[tag.sentiment];
+              return (
+                <button key={tag.label} onClick={() => setRemarkTag(active ? null : tag)}
+                  style={{
+                    background: active ? color + "22" : T.surface,
+                    border: `1px solid ${active ? color : T.border}`,
+                    borderRadius: 20, padding: "6px 12px", fontSize: 11, fontWeight: 700,
+                    color: active ? color : T.t2, cursor: "pointer", fontFamily: FONT,
+                  }}>
+                  {tag.label}
+                </button>
+              );
+            })}
+          </div>
           <textarea value={newRemark} onChange={e => setNewRemark(e.target.value)} rows={3}
-            placeholder="What happened on this call?"
+            placeholder="Add extra detail (optional if a tag is picked)…"
             style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 13, fontFamily: FONT, outline: "none", width: "100%", boxSizing: "border-box", resize: "none", marginTop: 10 }} />
-          <div style={{ marginTop: 8 }}><Btn label="Save Remark" full onClick={() => addRemark(c.id)} /></div>
+          <div style={{ marginTop: 8 }}><Btn label="Save Remark" full onClick={() => addRemark(c.id)} disabled={!newRemark.trim() && !remarkTag} /></div>
         </Card>
 
         <Btn label="🗑️ Delete Customer" color={T.rose} ghost full onClick={() => deleteCustomer(c)} />
@@ -3077,6 +3206,17 @@ function ExistingCustomerPipeline() {
             </div>
           </div>
         )}
+
+        <div style={{ fontSize: 11, color: T.t2, marginBottom: 8, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Response Analysis</div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          {[["Positive", reportStats.positive, T.emerald], ["Negative", reportStats.negative, T.rose], ["Neutral", reportStats.neutral, T.amber]].map(([label, count, color]) => (
+            <div key={label} style={{ flex: 1, background: color + "14", border: `1px solid ${color}44`, borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
+              <div style={{ fontSize: 20, fontWeight: 800, color }}>{count}</div>
+              <div style={{ fontSize: 10, color, fontWeight: 700, marginTop: 2, textTransform: "uppercase", letterSpacing: "0.03em" }}>{label}</div>
+            </div>
+          ))}
+        </div>
+
         <Btn label={generatingTcReport ? "Generating…" : "🧾 Download Call Report (PDF)"} full color={T.amber} onClick={downloadTelecallerReport} />
       </Card>
 
