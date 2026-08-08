@@ -2528,6 +2528,8 @@ function ExistingCustomerPipeline() {
   const [remarkTelecaller, setRemarkTelecaller] = useState(TELECALLERS[0]);
   const [remarkDate, setRemarkDate] = useState(todayISO());
   const [form, setForm] = useState({ name: "", contact: "", area: "", address: "", reason: LOST_REASONS[0], telecaller: TELECALLERS[0], date: todayISO() });
+  const [showEdit, setShowEdit] = useState(false);
+  const [editForm, setEditForm] = useState({ name: "", contact: "", area: "", address: "", reason: LOST_REASONS[0] });
   const [reportTelecaller, setReportTelecaller] = useState(TELECALLERS[0]);
   const [reportPreset, setReportPreset] = useState("Today");
   const [reportFrom, setReportFrom] = useState(todayISO());
@@ -2565,6 +2567,34 @@ function ExistingCustomerPipeline() {
     }, ...(customers || [])]);
     setForm({ name: "", contact: "", area: "", address: "", reason: LOST_REASONS[0], telecaller: TELECALLERS[0], date: todayISO() });
     setShowAdd(false);
+  };
+
+  // Lets a telecaller correct details entered earlier (spelling, wrong area,
+  // fixed-up English, etc.) without deleting and re-adding the customer.
+  // Writes straight back into the synced customers list, so the change
+  // hits the database and every future PDF/Excel export immediately.
+  const openEdit = (c) => {
+    setEditForm({ name: c.name || "", contact: c.contact || "", area: c.area || "", address: c.address || "", reason: c.reason || LOST_REASONS[0] });
+    setShowEdit(true);
+  };
+
+  const saveEdit = () => {
+    if (!editForm.name.trim()) return;
+    const now = new Date();
+    const stamp = now.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+    const autoRemark = "[" + stamp + " · System] Details edited";
+    setCustomers((customers || []).map(c => c.id === selected.id
+      ? {
+          ...c,
+          name: editForm.name.trim(),
+          contact: editForm.contact.trim(),
+          area: editForm.area.trim(),
+          address: editForm.address.trim(),
+          reason: editForm.reason,
+          remarks: [...(c.remarks || []), autoRemark],
+        }
+      : c));
+    setShowEdit(false);
   };
 
   const addRemark = (id) => {
@@ -2933,8 +2963,16 @@ function ExistingCustomerPipeline() {
         </button>
 
         <Card accent={T.indigo}>
-          <div style={{ fontSize: 18, fontWeight: 800, color: T.t1 }}>{c.name}</div>
-          <div style={{ fontSize: 11, color: T.t3 }}>{c.area}{c.reason ? ` · ${c.reason}` : ""}</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: T.t1 }}>{c.name}</div>
+              <div style={{ fontSize: 11, color: T.t3 }}>{c.area}{c.reason ? ` · ${c.reason}` : ""}</div>
+            </div>
+            <button onClick={() => openEdit(c)}
+              style={{ background: T.indigo + "18", border: `1px solid ${T.indigo}44`, borderRadius: 10, color: T.indigo, padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: FONT, flexShrink: 0 }}>
+              ✎ Edit
+            </button>
+          </div>
           <div style={{ marginTop: 12 }}>
             {[["Contact", c.contact], ["Address", c.address]].map(([k, v]) => v ? (
               <div key={k} style={{ display: "flex", padding: "8px 0", borderBottom: `1px solid ${T.border}` }}>
@@ -2983,6 +3021,15 @@ function ExistingCustomerPipeline() {
         </Card>
 
         <Btn label="🗑️ Delete Customer" color={T.rose} ghost full onClick={() => deleteCustomer(c)} />
+
+        <Sheet open={showEdit} onClose={() => setShowEdit(false)} title="Edit Customer Details">
+          <Field label="Customer / Hotel Name" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} placeholder="e.g. Sri Balaji Mess" />
+          <Field label="Contact No" value={editForm.contact} onChange={e => setEditForm({ ...editForm, contact: e.target.value })} placeholder="98765 43210" />
+          <Field label="Area" value={editForm.area} onChange={e => setEditForm({ ...editForm, area: e.target.value })} placeholder="e.g. Velachery" />
+          <Field label="Address" value={editForm.address} onChange={e => setEditForm({ ...editForm, address: e.target.value })} placeholder="Optional" />
+          <Dropdown label="Reason they stopped" value={editForm.reason} onChange={e => setEditForm({ ...editForm, reason: e.target.value })} options={LOST_REASONS} />
+          <Btn label="Save Changes" full onClick={saveEdit} disabled={!editForm.name.trim()} />
+        </Sheet>
       </div>
     );
   }
