@@ -2526,7 +2526,8 @@ function ExistingCustomerPipeline() {
   const [showAdd, setShowAdd] = useState(false);
   const [newRemark, setNewRemark] = useState("");
   const [remarkTelecaller, setRemarkTelecaller] = useState(TELECALLERS[0]);
-  const [form, setForm] = useState({ name: "", contact: "", area: "", address: "", reason: LOST_REASONS[0], telecaller: TELECALLERS[0] });
+  const [remarkDate, setRemarkDate] = useState(todayISO());
+  const [form, setForm] = useState({ name: "", contact: "", area: "", address: "", reason: LOST_REASONS[0], telecaller: TELECALLERS[0], date: todayISO() });
   const [reportTelecaller, setReportTelecaller] = useState(TELECALLERS[0]);
   const [reportPreset, setReportPreset] = useState("Today");
   const [reportFrom, setReportFrom] = useState(todayISO());
@@ -2535,9 +2536,18 @@ function ExistingCustomerPipeline() {
 
   const sorted = [...(customers || [])].sort((a, b) => (b.lastRemarkAt || b.createdAt || 0) - (a.lastRemarkAt || a.createdAt || 0));
 
+  // Combines a picked date (YYYY-MM-DD) with the current time-of-day, so a
+  // backfilled entry sorts sensibly and still shows a real time in reports.
+  const dateWithNow = (dateStr) => {
+    const now = new Date();
+    const d = new Date(dateStr + "T00:00:00");
+    d.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+    return d.getTime();
+  };
+
   const addCustomer = () => {
-    if (!form.name.trim() || !form.telecaller) return;
-    const now = Date.now();
+    if (!form.name.trim() || !form.telecaller || !form.date) return;
+    const now = dateWithNow(form.date);
     const stamp = new Date(now).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + new Date(now).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
     const firstEntry = { text: `[${stamp} · ${form.telecaller}] Added to follow-up list`, note: "Added to follow-up list", telecaller: form.telecaller, at: now };
     setCustomers([{
@@ -2552,20 +2562,21 @@ function ExistingCustomerPipeline() {
       lastRemarkAt: now,
       createdAt: now,
     }, ...(customers || [])]);
-    setForm({ name: "", contact: "", area: "", address: "", reason: LOST_REASONS[0], telecaller: TELECALLERS[0] });
+    setForm({ name: "", contact: "", area: "", address: "", reason: LOST_REASONS[0], telecaller: TELECALLERS[0], date: todayISO() });
     setShowAdd(false);
   };
 
   const addRemark = (id) => {
-    if (!newRemark.trim() || !remarkTelecaller) return;
-    const now = new Date();
-    const stamp = now.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+    if (!newRemark.trim() || !remarkTelecaller || !remarkDate) return;
+    const at = dateWithNow(remarkDate);
+    const stamp = new Date(at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + new Date(at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
     const withStamp = "[" + stamp + " · " + remarkTelecaller + "] " + newRemark.trim();
-    const entry = { text: withStamp, note: newRemark.trim(), telecaller: remarkTelecaller, at: Date.now() };
+    const entry = { text: withStamp, note: newRemark.trim(), telecaller: remarkTelecaller, at };
     setCustomers((customers || []).map(c => c.id === id
-      ? { ...c, remarks: [...(c.remarks || []), entry], lastRemarkAt: Date.now() }
+      ? { ...c, remarks: [...(c.remarks || []), entry], lastRemarkAt: at }
       : c));
     setNewRemark("");
+    setRemarkDate(todayISO());
   };
 
   const setStatus = (id, status) => {
@@ -2930,6 +2941,7 @@ function ExistingCustomerPipeline() {
             <div key={i} style={{ fontSize: 12, color: T.t2, padding: "8px 0", borderBottom: i < c.remarks.length - 1 ? `1px solid ${T.border}` : "none" }}>{remarkText(r)}</div>
           ))}
           <Dropdown label="Telecaller (required)" value={remarkTelecaller} onChange={e => setRemarkTelecaller(e.target.value)} options={TELECALLERS} />
+          <Field label="Call Date" type="date" value={remarkDate} onChange={e => setRemarkDate(e.target.value)} />
           <textarea value={newRemark} onChange={e => setNewRemark(e.target.value)} rows={3}
             placeholder="What happened on this call?"
             style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 13, fontFamily: FONT, outline: "none", width: "100%", boxSizing: "border-box", resize: "none", marginTop: 10 }} />
@@ -3016,6 +3028,7 @@ function ExistingCustomerPipeline() {
         <Field label="Address" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="Optional" />
         <Dropdown label="Reason they stopped" value={form.reason} onChange={e => setForm({ ...form, reason: e.target.value })} options={LOST_REASONS} />
         <Dropdown label="Telecaller (required)" value={form.telecaller} onChange={e => setForm({ ...form, telecaller: e.target.value })} options={TELECALLERS} />
+        <Field label="Date" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
         <Btn label="Add Customer" full onClick={addCustomer} disabled={!form.name.trim()} />
       </Sheet>
     </div>
