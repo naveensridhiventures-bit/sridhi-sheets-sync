@@ -207,9 +207,20 @@ def _coerce(tab_key, row):
             elif not isinstance(raw_items, list):
                 row["items"] = []
     elif tab_key == "existingCustomers":
-        # Same pattern as leads: remarks is a "||"-joined string on the sheet
-        # but a list of strings in the app, newest entry last.
-        row["remarks"] = [r for r in row.get("remarks","").split(" || ") if r] if row.get("remarks") else []
+        # Each remark is either a legacy plain string, or a newer structured
+        # entry (JSON-encoded, carrying telecaller attribution) — the whole
+        # list is still stored as one "||"-joined sheet cell either way.
+        def _deserialize_remark(s):
+            s = s.strip()
+            if s.startswith("{") and s.endswith("}"):
+                try:
+                    obj = json.loads(s)
+                    if isinstance(obj, dict):
+                        return obj
+                except Exception:
+                    pass
+            return s
+        row["remarks"] = [_deserialize_remark(r) for r in row.get("remarks","").split(" || ") if r] if row.get("remarks") else []
         for f in ("lastRemarkAt", "createdAt"):
             if row.get(f, "") not in (None, ""):
                 try: row[f] = int(float(row[f]))
@@ -234,7 +245,12 @@ def _decoerce_existing_customer(row):
     if not out.get("id"):
         out["id"] = str(int(_time.time() * 1000)) + "_" + str(abs(hash(out.get("contact","") + out.get("name",""))))[:6]
     remarks = out.get("remarks", [])
-    out["remarks"] = " || ".join(remarks) if isinstance(remarks, list) else (remarks or "")
+    def _serialize_remark(r):
+        # New-format remarks are structured (carry telecaller attribution);
+        # encode as compact JSON so it round-trips. Legacy remarks are plain
+        # strings and pass through unchanged.
+        return json.dumps(r, ensure_ascii=False) if isinstance(r, dict) else str(r)
+    out["remarks"] = " || ".join(_serialize_remark(r) for r in remarks) if isinstance(remarks, list) else (remarks or "")
     return out
 
 def fetch_all_tabs():

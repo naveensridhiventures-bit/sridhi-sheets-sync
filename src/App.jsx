@@ -63,6 +63,7 @@ const INITIAL_SAMPLES = [
 
 const LOST_REASONS = ["Not Delivered on Time", "Quality Not Good", "Outstanding", "Others"];
 const EXISTING_CUSTOMER_STATUSES = ["Calling", "Interested", "Rejoined", "Own Making", "Not Reachable", "Not Interested"];
+const TELECALLERS = ["Thulasi", "Ramya", "Sabi (Intern)"];
 
 
 const INITIAL_EXPENSES = [
@@ -559,7 +560,7 @@ function ProspectFinder() {
             <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>ASSIGN TELECALLER</div>
             <select value={form.telecaller} onChange={e => setForm({...form, telecaller:e.target.value})}
               style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
-              {["Thulasi","Ramya"].map(t => <option key={t}>{t}</option>)}
+              {TELECALLERS.map(t => <option key={t}>{t}</option>)}
             </select>
           </div>
           <div>
@@ -1271,7 +1272,7 @@ function HRLeads() {
             <select value={form.telecaller} onChange={e => setForm({...form, telecaller:e.target.value})}
               style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1,
                 padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
-              {["Thulasi","Ramya"].map(t => <option key={t}>{t}</option>)}
+              {TELECALLERS.map(t => <option key={t}>{t}</option>)}
             </select>
           </div>
         </div>
@@ -1752,7 +1753,7 @@ function Leads() {
               <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:5 }}>ASSIGN TELECALLER</div>
               <select value={editForm.telecaller||""} onChange={e => setEditForm({...editForm,telecaller:e.target.value})}
                 style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
-                {["Thulasi","Ramya"].map(t => <option key={t}>{t}</option>)}
+                {TELECALLERS.map(t => <option key={t}>{t}</option>)}
               </select>
             </div>
             <div style={{ marginBottom:14 }}>
@@ -2000,7 +2001,7 @@ function Leads() {
         <Field label="Address" value={newLead.address} onChange={e => setNewLead({...newLead,address:e.target.value})} />
         <Dropdown label="Business Type" value={newLead.type} onChange={e => setNewLead({...newLead,type:e.target.value})} options={["Home","Restaurant","Mess","Hotel","Bakery","Cloud Kitchen","Distributor","Retailer"]} />
         <Dropdown label="Lead Source" value={newLead.source} onChange={e => setNewLead({...newLead,source:e.target.value})} options={["Instagram","Facebook","WhatsApp","Google","Referral","Field Sales","Telecalling"]} />
-        <Dropdown label="Assigned Telecaller" value={newLead.telecaller} onChange={e => setNewLead({...newLead,telecaller:e.target.value})} options={["Thulasi","Ramya"]} />
+        <Dropdown label="Assigned Telecaller" value={newLead.telecaller} onChange={e => setNewLead({...newLead,telecaller:e.target.value})} options={TELECALLERS} />
         <div style={{ display:"flex", gap:10, marginTop:4 }}>
           <Btn label="Cancel" color={T.t2} ghost full onClick={() => setShowAdd(false)} />
           <Btn label="Add Lead" full onClick={addLead} />
@@ -2218,7 +2219,7 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
               <div style={{ fontSize:11, color:T.t3, fontWeight:600, marginBottom:4 }}>TELECALLER</div>
               <select value={editForm.telecaller||""} onChange={e => setEditForm({...editForm,telecaller:e.target.value})}
                 style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"9px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box" }}>
-                {["Thulasi","Ramya"].map(t => <option key={t}>{t}</option>)}
+                {TELECALLERS.map(t => <option key={t}>{t}</option>)}
               </select>
             </div>
             <button onClick={() => { setAllLeads(allLeads.map(l => l.id===lead.id ? {...l,...editForm} : l)); setShowEdit(false); }}
@@ -2513,41 +2514,56 @@ function LostCustomers() {
 // customers who've dropped off here to call back and log remarks — entries
 // never come from, or feed into, the Leads CRM. Whichever customer was most
 // recently updated (a new remark or status change) always sorts to the top.
+// A remark can be an old-format plain string, or the newer structured object
+// { text, note, telecaller, at } — this reads either format safely.
+function remarkText(r) { return typeof r === "string" ? r : (r && r.text) || ""; }
+function remarkTelecallerOf(r) { return typeof r === "object" && r ? r.telecaller : null; }
+function remarkAt(r) { return typeof r === "object" && r ? r.at : null; }
+
 function ExistingCustomerPipeline() {
   const [customers, setCustomers] = useSheetSynced("existingCustomers", "existingCustomers", []);
   const [selected, setSelected] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [newRemark, setNewRemark] = useState("");
-  const [form, setForm] = useState({ name: "", contact: "", area: "", address: "", reason: LOST_REASONS[0] });
+  const [remarkTelecaller, setRemarkTelecaller] = useState(TELECALLERS[0]);
+  const [form, setForm] = useState({ name: "", contact: "", area: "", address: "", reason: LOST_REASONS[0], telecaller: TELECALLERS[0] });
+  const [reportTelecaller, setReportTelecaller] = useState(TELECALLERS[0]);
+  const [reportPreset, setReportPreset] = useState("Today");
+  const [reportFrom, setReportFrom] = useState(todayISO());
+  const [reportTo, setReportTo] = useState(todayISO());
+  const [generatingTcReport, setGeneratingTcReport] = useState(false);
 
   const sorted = [...(customers || [])].sort((a, b) => (b.lastRemarkAt || b.createdAt || 0) - (a.lastRemarkAt || a.createdAt || 0));
 
   const addCustomer = () => {
-    if (!form.name.trim()) return;
+    if (!form.name.trim() || !form.telecaller) return;
     const now = Date.now();
+    const stamp = new Date(now).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + new Date(now).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+    const firstEntry = { text: `[${stamp} · ${form.telecaller}] Added to follow-up list`, note: "Added to follow-up list", telecaller: form.telecaller, at: now };
     setCustomers([{
-      id: now,
+      id: newId(),
       name: form.name.trim(),
       contact: form.contact.trim(),
       area: form.area.trim(),
       address: form.address.trim(),
       reason: form.reason,
       status: EXISTING_CUSTOMER_STATUSES[0],
-      remarks: [],
+      remarks: [firstEntry],
       lastRemarkAt: now,
       createdAt: now,
     }, ...(customers || [])]);
-    setForm({ name: "", contact: "", area: "", address: "", reason: LOST_REASONS[0] });
+    setForm({ name: "", contact: "", area: "", address: "", reason: LOST_REASONS[0], telecaller: TELECALLERS[0] });
     setShowAdd(false);
   };
 
   const addRemark = (id) => {
-    if (!newRemark.trim()) return;
+    if (!newRemark.trim() || !remarkTelecaller) return;
     const now = new Date();
     const stamp = now.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
-    const withStamp = "[" + stamp + " · Team] " + newRemark.trim();
+    const withStamp = "[" + stamp + " · " + remarkTelecaller + "] " + newRemark.trim();
+    const entry = { text: withStamp, note: newRemark.trim(), telecaller: remarkTelecaller, at: Date.now() };
     setCustomers((customers || []).map(c => c.id === id
-      ? { ...c, remarks: [...(c.remarks || []), withStamp], lastRemarkAt: Date.now() }
+      ? { ...c, remarks: [...(c.remarks || []), entry], lastRemarkAt: Date.now() }
       : c));
     setNewRemark("");
   };
@@ -2662,7 +2678,7 @@ function ExistingCustomerPipeline() {
       head: [["Customer", "Contact", "Area", "Reason Dropped", "Status", "Latest Remark", "Last Updated"]],
       body: sorted.map(c => [
         c.name, c.contact || "—", c.area || "—", c.reason || "—", c.status || "—",
-        (c.remarks && c.remarks.length) ? c.remarks[c.remarks.length - 1] : "—",
+        (c.remarks && c.remarks.length) ? remarkText(c.remarks[c.remarks.length - 1]) : "—",
         c.lastRemarkAt ? new Date(c.lastRemarkAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—",
       ]),
       theme: "grid",
@@ -2694,14 +2710,172 @@ function ExistingCustomerPipeline() {
       "Address": c.address || "",
       "Reason Dropped": c.reason || "",
       "Status": c.status || "",
-      "Latest Remark": (c.remarks && c.remarks.length) ? c.remarks[c.remarks.length - 1] : "",
-      "All Remarks": (c.remarks || []).join(" | "),
+      "Latest Remark": (c.remarks && c.remarks.length) ? remarkText(c.remarks[c.remarks.length - 1]) : "",
+      "All Remarks": (c.remarks || []).map(remarkText).join(" | "),
       "Last Updated": c.lastRemarkAt ? new Date(c.lastRemarkAt).toLocaleString("en-IN") : "",
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Existing Customers");
     XLSX.writeFile(wb, `Existing-Customer-Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  // Applies the Today / This Week / This Month preset to reportFrom/reportTo.
+  const applyReportPreset = (preset) => {
+    setReportPreset(preset);
+    const now = new Date();
+    if (preset === "Today") {
+      setReportFrom(todayISO()); setReportTo(todayISO());
+    } else if (preset === "This Week") {
+      const day = now.getDay() || 7; // Monday-start week
+      const monday = new Date(now); monday.setDate(now.getDate() - day + 1);
+      setReportFrom(monday.toISOString().slice(0, 10)); setReportTo(todayISO());
+    } else if (preset === "This Month") {
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      setReportFrom(first.toISOString().slice(0, 10)); setReportTo(todayISO());
+    }
+    // "Custom" leaves reportFrom/reportTo as whatever the user picks manually.
+  };
+
+  // ── Telecaller Call Report ──────────────────────────────────────────
+  // Pulls every remark made by the selected telecaller, across ALL existing
+  // customers, within the chosen date range — a clean call log to send to
+  // management. Only remarks saved after telecaller-attribution was added
+  // (structured objects, not old plain-string remarks) can be attributed;
+  // legacy entries are silently excluded since there's no reliable way to
+  // know who made them.
+  const downloadTelecallerReport = async () => {
+    if (generatingTcReport) return;
+    setGeneratingTcReport(true);
+    try {
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+        import("jspdf"), import("jspdf-autotable"),
+      ]);
+
+      const entries = [];
+      (customers || []).forEach(c => {
+        (c.remarks || []).forEach(r => {
+          const tc = remarkTelecallerOf(r);
+          const at = remarkAt(r);
+          if (tc !== reportTelecaller || !at) return;
+          const dateStr = new Date(at).toISOString().slice(0, 10);
+          if (dateStr < reportFrom || dateStr > reportTo) return;
+          entries.push({ at, dateStr, customer: c.name, area: c.area || "—", note: (typeof r === "object" && r.note) ? r.note : remarkText(r) });
+        });
+      });
+      entries.sort((a, b) => a.at - b.at);
+
+      const NAVY = [8, 40, 25], TEAL = [23, 148, 74], TEAL_TINT = [229, 248, 238];
+      const GRID = [214, 220, 214], INK = [26, 32, 46], SUBTLE = [110, 118, 138];
+      const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 32;
+
+      const header = () => {
+        const headerH = 74;
+        doc.setFillColor(...NAVY);
+        doc.rect(0, 0, pageW, headerH, "F");
+        doc.setFillColor(...TEAL);
+        doc.rect(0, headerH - 2, pageW, 2, "F");
+        const logoSize = 34, badgePad = 5, badgeSize = logoSize + badgePad * 2;
+        const badgeX = margin, badgeY = (headerH - badgeSize) / 2 - 1;
+        doc.setFillColor(255, 255, 255);
+        doc.roundedRect(badgeX, badgeY, badgeSize, badgeSize, 8, 8, "F");
+        try { doc.addImage(SRIDHI_LOGO_PNG, "PNG", badgeX + badgePad, badgeY + badgePad, logoSize, logoSize); } catch (e) {}
+        const textX = badgeX + badgeSize + 14;
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(15);
+        doc.text(`Telecaller Call Report — ${reportTelecaller}`, textX, 30);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(200, 214, 205);
+        const rangeLabel = reportFrom === reportTo ? formatDateReadable(reportFrom) : `${formatDateReadable(reportFrom)}  –  ${formatDateReadable(reportTo)}`;
+        doc.text(`${reportPreset} · ${rangeLabel}`, textX, 46);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(200, 214, 205);
+        doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`, pageW - margin, 30, { align: "right" });
+      };
+      const footer = () => {
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+          doc.setPage(i);
+          doc.setDrawColor(...GRID);
+          doc.line(margin, pageH - 26, pageW - margin, pageH - 26);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(7.5);
+          doc.setTextColor(...SUBTLE);
+          doc.text("Sridhi Ventures · Telecaller Call Report", margin, pageH - 13);
+          doc.text(`Page ${i} of ${pageCount}`, pageW - margin, pageH - 13, { align: "right" });
+        }
+      };
+
+      header();
+      let y = 94;
+
+      // Summary strip
+      const customersTouched = new Set(entries.map(e => e.customer)).size;
+      const daysActive = new Set(entries.map(e => e.dateStr)).size;
+      const chips = [
+        [`${entries.length} Call${entries.length === 1 ? "" : "s"}`, TEAL, TEAL_TINT],
+        [`${customersTouched} Customer${customersTouched === 1 ? "" : "s"} Touched`, [79, 70, 229], [235, 234, 253]],
+        [`${daysActive} Active Day${daysActive === 1 ? "" : "s"}`, [180, 110, 5], [254, 246, 224]],
+      ];
+      let cx = margin;
+      chips.forEach(([label, color, tint]) => {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9.5);
+        const w = doc.getTextWidth(label) + 22;
+        doc.setFillColor(...tint);
+        doc.setDrawColor(...color);
+        doc.roundedRect(cx, y, w, 24, 12, 12, "FD");
+        doc.setTextColor(...color);
+        doc.text(label, cx + 11, y + 16);
+        cx += w + 8;
+      });
+      y += 40;
+
+      if (!entries.length) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(11);
+        doc.setTextColor(...SUBTLE);
+        doc.text(`No calls logged by ${reportTelecaller} in this period.`, margin, y + 10);
+      } else {
+        // Group rows by date with a bold date separator row, most recent day last
+        // (chronological, so it reads like a diary of the period).
+        const byDate = {};
+        entries.forEach(e => { (byDate[e.dateStr] = byDate[e.dateStr] || []).push(e); });
+        const body = [];
+        Object.keys(byDate).sort().forEach(d => {
+          body.push([{ content: formatDateReadable(d) + `  (${byDate[d].length} call${byDate[d].length === 1 ? "" : "s"})`, colSpan: 4, styles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 } }]);
+          byDate[d].forEach(e => {
+            body.push([
+              new Date(e.at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+              e.customer, e.area, e.note || "—",
+            ]);
+          });
+        });
+        autoTable(doc, {
+          startY: y,
+          margin: { top: 94, bottom: 40 },
+          head: [["Time", "Customer", "Area", "Call Notes"]],
+          body,
+          theme: "grid",
+          styles: { font: "helvetica", fontSize: 8.5, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "middle" },
+          headStyles: { fillColor: TEAL, textColor: 255, fontStyle: "bold", fontSize: 9 },
+          alternateRowStyles: { fillColor: [248, 250, 248] },
+          columnStyles: { 0: { cellWidth: 55, fontStyle: "bold", textColor: TEAL }, 1: { fontStyle: "bold", cellWidth: 110 }, 2: { cellWidth: 90 } },
+          didDrawPage: () => header(),
+        });
+      }
+
+      footer();
+      doc.save(`Telecaller-Call-Report_${reportTelecaller.replace(/[^a-zA-Z0-9]/g, "")}_${reportFrom}_to_${reportTo}.pdf`);
+    } finally {
+      setGeneratingTcReport(false);
+    }
   };
 
   if (selected) {
@@ -2753,8 +2927,9 @@ function ExistingCustomerPipeline() {
           <Label sub={`${(c.remarks || []).length} entries`}>Remarks</Label>
           {(c.remarks || []).length === 0 && <div style={{ fontSize: 12, color: T.t3, marginBottom: 12 }}>No remarks yet.</div>}
           {(c.remarks || []).slice().reverse().map((r, i) => (
-            <div key={i} style={{ fontSize: 12, color: T.t2, padding: "8px 0", borderBottom: i < c.remarks.length - 1 ? `1px solid ${T.border}` : "none" }}>{r}</div>
+            <div key={i} style={{ fontSize: 12, color: T.t2, padding: "8px 0", borderBottom: i < c.remarks.length - 1 ? `1px solid ${T.border}` : "none" }}>{remarkText(r)}</div>
           ))}
+          <Dropdown label="Telecaller (required)" value={remarkTelecaller} onChange={e => setRemarkTelecaller(e.target.value)} options={TELECALLERS} />
           <textarea value={newRemark} onChange={e => setNewRemark(e.target.value)} rows={3}
             placeholder="What happened on this call?"
             style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 13, fontFamily: FONT, outline: "none", width: "100%", boxSizing: "border-box", resize: "none", marginTop: 10 }} />
@@ -2777,6 +2952,41 @@ function ExistingCustomerPipeline() {
         </div>
       </Card>
 
+      <Card accent={T.amber}>
+        <Label sub="Every call is now logged with the telecaller's name — download their daily, weekly, monthly, or custom-range call report to send to management">Telecaller Call Report</Label>
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Telecaller</div>
+          <select value={reportTelecaller} onChange={e => setReportTelecaller(e.target.value)}
+            style={{ ...inputStyle, marginBottom: 12 }}>
+            {TELECALLERS.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+          {["Today", "This Week", "This Month", "Custom"].map(p => (
+            <button key={p} onClick={() => applyReportPreset(p)} style={{
+              background: reportPreset === p ? T.amber : "transparent",
+              color: reportPreset === p ? "#1A1200" : T.t2,
+              border: `1px solid ${reportPreset === p ? T.amber : T.border}`,
+              borderRadius: 10, padding: "8px 13px", fontSize: 12, fontWeight: 700,
+              cursor: "pointer", fontFamily: FONT,
+            }}>{p}</button>
+          ))}
+        </div>
+        {reportPreset === "Custom" && (
+          <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10.5, color: T.t3, marginBottom: 4, fontWeight: 600 }}>FROM</div>
+              <input type="date" value={reportFrom} onChange={e => setReportFrom(e.target.value)} style={inputStyle} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10.5, color: T.t3, marginBottom: 4, fontWeight: 600 }}>TO</div>
+              <input type="date" value={reportTo} onChange={e => setReportTo(e.target.value)} style={inputStyle} />
+            </div>
+          </div>
+        )}
+        <Btn label={generatingTcReport ? "Generating…" : "🧾 Download Call Report (PDF)"} full color={T.amber} onClick={downloadTelecallerReport} />
+      </Card>
+
       {sorted.length === 0 && (
         <div style={{ textAlign: "center", color: T.t3, fontSize: 13, padding: 40 }}>No existing customers added yet. Tap "+ Add Customer" to start.</div>
       )}
@@ -2789,7 +2999,7 @@ function ExistingCustomerPipeline() {
             <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>{c.area || "—"}</div>
             {c.contact && <div style={{ fontSize: 11, color: T.accent, marginTop: 2, fontWeight: 600 }}>📞 {c.contact}</div>}
             {c.remarks && c.remarks.length > 0 && (
-              <div style={{ fontSize: 11, color: T.t2, marginTop: 4 }}>💬 {c.remarks[c.remarks.length - 1].slice(0, 60)}</div>
+              <div style={{ fontSize: 11, color: T.t2, marginTop: 4 }}>💬 {remarkText(c.remarks[c.remarks.length - 1]).slice(0, 60)}</div>
             )}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
@@ -2805,6 +3015,7 @@ function ExistingCustomerPipeline() {
         <Field label="Area" value={form.area} onChange={e => setForm({ ...form, area: e.target.value })} placeholder="e.g. Velachery" />
         <Field label="Address" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="Optional" />
         <Dropdown label="Reason they stopped" value={form.reason} onChange={e => setForm({ ...form, reason: e.target.value })} options={LOST_REASONS} />
+        <Dropdown label="Telecaller (required)" value={form.telecaller} onChange={e => setForm({ ...form, telecaller: e.target.value })} options={TELECALLERS} />
         <Btn label="Add Customer" full onClick={addCustomer} disabled={!form.name.trim()} />
       </Sheet>
     </div>
