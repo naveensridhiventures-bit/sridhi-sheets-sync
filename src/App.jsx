@@ -63,7 +63,7 @@ const INITIAL_SAMPLES = [
 
 const LOST_REASONS = ["Not Delivered on Time", "Quality Not Good", "Outstanding", "Others"];
 const EXISTING_CUSTOMER_STATUSES = ["Calling", "Interested", "Rejoined", "Own Making", "Not Reachable", "Not Interested"];
-const TELECALLERS = ["Thulasi", "Ramya", "Sabi (Intern)"];
+const TELECALLERS = ["Thulasi", "Ramya", "Sabi (Intern)", "Naveen HR"];
 
 
 const INITIAL_EXPENSES = [
@@ -2552,7 +2552,7 @@ function ExistingCustomerPipeline() {
     const stamp = new Date(now).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + new Date(now).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
     const firstEntry = { text: `[${stamp} · ${form.telecaller}] Added to follow-up list`, note: "Added to follow-up list", telecaller: form.telecaller, at: now };
     setCustomers([{
-      id: newId(),
+      id: Date.now() + Math.random(),
       name: form.name.trim(),
       contact: form.contact.trim(),
       area: form.area.trim(),
@@ -2611,6 +2611,25 @@ function ExistingCustomerPipeline() {
       "Own Making": [180, 110, 5], "Not Reachable": [110, 118, 138], "Not Interested": [200, 45, 60],
     };
     const colorFor = (s) => STATUS_COLORS[s] || [110, 118, 138];
+
+    // Distinct highlight color per telecaller, so the report reads at a
+    // glance who owns each customer. Falls back to a neutral tone for
+    // anyone not in the fixed palette.
+    const TELECALLER_COLORS = {
+      "Thulasi": [76, 95, 224], "Ramya": [23, 148, 74],
+      "Sabi (Intern)": [180, 110, 5], "Naveen HR": [190, 40, 130],
+    };
+    const telecallerColorFor = (t) => TELECALLER_COLORS[t] || [90, 98, 120];
+    // Who's currently handling this customer — the most recent remark's
+    // telecaller, falling back to whoever first added them.
+    const telecallerFor = (c) => {
+      const remarks = c.remarks || [];
+      for (let i = remarks.length - 1; i >= 0; i--) {
+        const t = remarkTelecallerOf(remarks[i]);
+        if (t) return t;
+      }
+      return "—";
+    };
 
     const header = () => {
       const headerH = 70;
@@ -2688,9 +2707,9 @@ function ExistingCustomerPipeline() {
     autoTable(doc, {
       startY: chipY + 34,
       margin: { top: 90, bottom: 40 },
-      head: [["Customer", "Contact", "Area", "Reason Dropped", "Status", "Latest Remark", "Last Updated"]],
+      head: [["Customer", "Telecaller", "Contact", "Area", "Reason Dropped", "Status", "Latest Remark", "Last Updated"]],
       body: sorted.map(c => [
-        c.name, c.contact || "—", c.area || "—", c.reason || "—", c.status || "—",
+        c.name, telecallerFor(c), c.contact || "—", c.area || "—", c.reason || "—", c.status || "—",
         (c.remarks && c.remarks.length) ? remarkText(c.remarks[c.remarks.length - 1]) : "—",
         c.lastRemarkAt ? new Date(c.lastRemarkAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—",
       ]),
@@ -2698,11 +2717,16 @@ function ExistingCustomerPipeline() {
       styles: { font: "helvetica", fontSize: 8.5, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "middle" },
       headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 },
       alternateRowStyles: { fillColor: [248, 250, 248] },
-      columnStyles: { 0: { fontStyle: "bold" }, 4: { fontStyle: "bold", halign: "center" } },
+      columnStyles: { 0: { fontStyle: "bold" }, 1: { fontStyle: "bold", halign: "center" }, 5: { fontStyle: "bold", halign: "center" } },
       didParseCell: (data) => {
-        // Color-code the Status column per status, so a manager can scan
-        // progress at a glance instead of reading every row.
-        if (data.section === "body" && data.column.index === 4) {
+        // Color-code the Telecaller column per person, and Status per
+        // status, so a manager can scan ownership and progress at a glance.
+        if (data.section === "body" && data.column.index === 1) {
+          const color = telecallerColorFor(data.cell.raw);
+          data.cell.styles.textColor = color;
+          data.cell.styles.fillColor = color.map(c => Math.min(255, c + (255 - c) * 0.88));
+        }
+        if (data.section === "body" && data.column.index === 5) {
           const color = colorFor(data.cell.raw);
           data.cell.styles.textColor = color;
           data.cell.styles.fillColor = color.map(c => Math.min(255, c + (255 - c) * 0.9));
@@ -2718,6 +2742,14 @@ function ExistingCustomerPipeline() {
   const downloadExcel = () => {
     const rows = sorted.map(c => ({
       "Customer": c.name,
+      "Telecaller": (() => {
+        const remarks = c.remarks || [];
+        for (let i = remarks.length - 1; i >= 0; i--) {
+          const t = remarkTelecallerOf(remarks[i]);
+          if (t) return t;
+        }
+        return "";
+      })(),
       "Contact": c.contact || "",
       "Area": c.area || "",
       "Address": c.address || "",
