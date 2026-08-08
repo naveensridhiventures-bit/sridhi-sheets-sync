@@ -170,7 +170,7 @@ def _coerce(tab_key, row):
         row["contact"] = _normalize_phone(row.get("contact",""))
         return row
     if tab_key == "leads":
-        row["id"] = int(row["id"]) if str(row.get("id","")).isdigit() else row.get("id","")
+        row["id"] = str(row.get("id", ""))
         row["remarks"] = [r for r in row.get("remarks","").split(" || ") if r] if row.get("remarks") else []
         for f in ("lastContactAt", "createdAt", "orderCount", "kgQty"):
             if row.get(f, "") not in (None, ""):

@@ -2546,8 +2546,9 @@ function ExistingCustomerPipeline() {
   };
 
   const addCustomer = () => {
-    if (!form.name.trim() || !form.telecaller || !form.date) return;
-    const now = dateWithNow(form.date);
+    if (!form.name.trim()) return;
+    if (!form.telecaller) { alert("Please select a telecaller."); return; }
+    const now = dateWithNow(form.date || todayISO());
     const stamp = new Date(now).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + new Date(now).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
     const firstEntry = { text: `[${stamp} · ${form.telecaller}] Added to follow-up list`, note: "Added to follow-up list", telecaller: form.telecaller, at: now };
     setCustomers([{
@@ -2567,8 +2568,9 @@ function ExistingCustomerPipeline() {
   };
 
   const addRemark = (id) => {
-    if (!newRemark.trim() || !remarkTelecaller || !remarkDate) return;
-    const at = dateWithNow(remarkDate);
+    if (!newRemark.trim()) return;
+    if (!remarkTelecaller) { alert("Please select a telecaller."); return; }
+    const at = dateWithNow(remarkDate || todayISO());
     const stamp = new Date(at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + new Date(at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
     const withStamp = "[" + stamp + " · " + remarkTelecaller + "] " + newRemark.trim();
     const entry = { text: withStamp, note: newRemark.trim(), telecaller: remarkTelecaller, at };
@@ -2740,10 +2742,10 @@ function ExistingCustomerPipeline() {
     } else if (preset === "This Week") {
       const day = now.getDay() || 7; // Monday-start week
       const monday = new Date(now); monday.setDate(now.getDate() - day + 1);
-      setReportFrom(monday.toISOString().slice(0, 10)); setReportTo(todayISO());
+      setReportFrom(localISO(monday)); setReportTo(todayISO());
     } else if (preset === "This Month") {
       const first = new Date(now.getFullYear(), now.getMonth(), 1);
-      setReportFrom(first.toISOString().slice(0, 10)); setReportTo(todayISO());
+      setReportFrom(localISO(first)); setReportTo(todayISO());
     }
     // "Custom" leaves reportFrom/reportTo as whatever the user picks manually.
   };
@@ -2769,7 +2771,7 @@ function ExistingCustomerPipeline() {
           const tc = remarkTelecallerOf(r);
           const at = remarkAt(r);
           if (tc !== reportTelecaller || !at) return;
-          const dateStr = new Date(at).toISOString().slice(0, 10);
+          const dateStr = localISO(at);
           if (dateStr < reportFrom || dateStr > reportTo) return;
           entries.push({ at, dateStr, customer: c.name, area: c.area || "—", note: (typeof r === "object" && r.note) ? r.note : remarkText(r) });
         });
@@ -3421,6 +3423,15 @@ const INITIAL_DAILY_ORDERS = [];
 
 function todayISO() {
   const d = new Date();
+  const tz = d.getTimezoneOffset() * 60000;
+  return new Date(d - tz).toISOString().slice(0, 10);
+}
+// Same local-timezone correction as todayISO(), but for any Date/timestamp —
+// plain toISOString() is UTC, which silently shifts anything before ~5:30am
+// IST onto the previous calendar day. Used anywhere we need "what date did
+// this actually happen on, in the user's own timezone."
+function localISO(dateOrTs) {
+  const d = new Date(dateOrTs);
   const tz = d.getTimezoneOffset() * 60000;
   return new Date(d - tz).toISOString().slice(0, 10);
 }
