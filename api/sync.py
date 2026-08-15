@@ -35,6 +35,7 @@ TAB_CONFIG = {
     "hrLeads": {"tab": "HRLeads", "headers": ["contact"]},
     "dailyOrders": {"tab": "DailyOrders", "headers": ["id","date","customer","area","contact","address","mapLink","deliveryTime","orderType","product","items","kgs","amount","telecaller","status","cancelReason","cancelRemarks","sampleType","amountMode","manualAmount","createdAt"]},
     "existingCustomers": {"tab": "ExistingCustomers", "headers": ["id","name","contact","area","address","reason","status","remarks","lastRemarkAt","createdAt","telecaller"]},
+    "telecallerActivity": {"tab": "TelecallerActivity", "headers": ["id","date","telecaller","type","customer","area","kg","amount","qty","unit","notes","createdAt"]},
 }
 
 _cache = {}
@@ -178,6 +179,13 @@ def _coerce(tab_key, row):
                 except: pass
             else:
                 row[f] = None if f in ("lastContactAt", "createdAt") else 0
+    elif tab_key == "telecallerActivity":
+        for f in ("kg","amount","qty","createdAt"):
+            if row.get(f, "") not in (None, ""):
+                try: row[f] = float(row[f]) if "." in str(row[f]) else int(row[f])
+                except: pass
+            else:
+                row[f] = 0
     elif tab_key in ("samples","expenses","repeatCustomers","dailyOrders"):
         for f in ("id","qty","deliveryCost","productionCost","amount","revenue","leadId","kgs","createdAt"):
             if f in row:

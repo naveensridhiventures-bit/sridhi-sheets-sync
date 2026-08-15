@@ -24,7 +24,7 @@ Result: **first load ~3–4× faster**, repeat visits instant from cache.
 ## Part 1 — Google Sheet (unchanged from v2)
 
 1. Create a Google Sheet named **Sridhi Ventures BOS Data**.
-2. Create tabs: `Leads`, `Samples`, `Expenses`, `RepeatCustomers`, `DailyOrders`.
+2. Create tabs: `Leads`, `Samples`, `Expenses`, `RepeatCustomers`, `DailyOrders`, `TelecallerActivity`.
 3. Add the header row in each tab (see below).
 4. Copy the **Sheet ID** from the URL (`/d/<THIS PART>/edit`).
 
@@ -61,6 +61,19 @@ id  date  customer  area  orderType  kgs  amount  telecaller  status  cancelReas
   `Other`, with optional free-text detail in `cancelRemarks`.
 - Telecallers can revisit any past date from the app's date picker on the
   **Daily Orders** screen to add, edit, or cancel entries for that day.
+
+**TelecallerActivity** *(daily effectiveness log — Interested / Order / Sample, one row per entry)*
+```
+id  date  telecaller  type  customer  area  kg  amount  qty  unit  notes  createdAt
+```
+- `type` is one of `interested`, `order`, or `sample`.
+- `interested` rows use `area` and `notes`; `order` rows use `kg` and
+  `amount` (auto-calculated in the app as `kg × 35`, editable); `sample`
+  rows use `qty`, `unit`, and `notes`. Unused columns are left blank.
+- Telecallers log entries from the **Telecaller Activity** screen (mobile:
+  under "More"; desktop: sidebar). Management pulls a Team Overview + a
+  per-telecaller detail PDF from the same screen, filterable by day, week,
+  month, or a custom range.
 
 ---
 
