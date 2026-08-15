@@ -63,7 +63,7 @@ const INITIAL_SAMPLES = [
 
 const LOST_REASONS = ["Not Delivered on Time", "Quality Not Good", "Outstanding", "Others"];
 const EXISTING_CUSTOMER_STATUSES = ["Calling", "Interested", "Rejoined", "Own Making", "Not Reachable", "Not Interested"];
-const TELECALLERS = ["Thulasi", "Ramya", "Sabi (Intern)", "Naveen HR"];
+const TELECALLERS = ["Thulasi", "Ramya", "Sabi (Intern)", "Azgar (Intern)", "Naveen HR"];
 
 // Quick-pick remark tags for the Existing Customer call log. Each carries a
 // sentiment so calls can be rolled up into a Positive / Negative / Neutral
