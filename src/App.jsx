@@ -4392,6 +4392,11 @@ function DailyOrders({ embedded = false } = {}) {
       setOrders([{
         id: Date.now(), ...formRest, ...sampleFields, items, kgs, amount, product,
         status: "Active", cancelReason: "", cancelRemarks: "",
+        // Payment follow-up: every order starts life unpaid unless it's a
+        // ₹0 free sample, which has nothing to collect. Telecallers mark it
+        // Paid as money comes in; anything still Pending shows up in the
+        // Payment Followup list below and in the Outstanding report.
+        paymentStatus: amount > 0 ? "Pending" : "N/A", paidAt: null, paymentRemarks: [],
         createdAt: Date.now(),
       }, ...orders]);
     }
@@ -4411,6 +4416,168 @@ function DailyOrders({ embedded = false } = {}) {
   const deleteOrder = (o) => {
     if (!window.confirm(`Delete this order permanently?\n\n${o.customer} — ${o.kgs} KG — ₹${o.amount}\n\nThis can't be undone. Use this only if the entry was a mistake.`)) return;
     setOrders(orders.filter(x => x.id !== o.id));
+  };
+
+  // ── Payment Followup ────────────────────────────────────────────────
+  // Every priced order tracks Paid / Pending. Telecallers flip it as
+  // payment comes in, and log a quick follow-up note (with their name and
+  // the date) against anything still pending — that trail is what makes
+  // the Outstanding Payment report useful instead of just a bare list.
+  const togglePayment = (o) => {
+    setOrders(orders.map(x => x.id === o.id
+      ? { ...x, paymentStatus: x.paymentStatus === "Paid" ? "Pending" : "Paid", paidAt: x.paymentStatus === "Paid" ? null : Date.now() }
+      : x));
+  };
+  const [paymentNoteOpenId, setPaymentNoteOpenId] = useState(null);
+  const [paymentNoteText, setPaymentNoteText] = useState("");
+  const [paymentNoteTelecaller, setPaymentNoteTelecaller] = useState(TELECALLERS[0]);
+  const addPaymentRemark = (id) => {
+    if (!paymentNoteText.trim()) return;
+    const at = Date.now();
+    const stamp = new Date(at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + new Date(at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+    const entry = { text: `[${stamp} · ${paymentNoteTelecaller}] ${paymentNoteText.trim()}`, note: paymentNoteText.trim(), telecaller: paymentNoteTelecaller, at };
+    setOrders(orders.map(o => o.id === id ? { ...o, paymentRemarks: [...(o.paymentRemarks || []), entry] } : o));
+    setPaymentNoteText(""); setPaymentNoteOpenId(null);
+  };
+  const daysPendingOf = (o) => Math.max(0, Math.round((new Date(todayISO()) - new Date(o.date)) / 86400000));
+  const outstandingOrders = active
+    .filter(o => (o.paymentStatus || (o.amount > 0 ? "Pending" : "N/A")) === "Pending")
+    .sort((a, b) => a.date.localeCompare(b.date)); // oldest pending first — the most urgent
+  const outstandingTotal = outstandingOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  const [generatingOutstandingPDF, setGeneratingOutstandingPDF] = useState(false);
+
+  // A separate, always-attractive PDF built just for chasing payments —
+  // sorted oldest-first, colour-coded by how many days it's been pending,
+  // with the latest follow-up remark right next to the amount.
+  const downloadOutstandingReport = async () => {
+    if (generatingOutstandingPDF) return;
+    setGeneratingOutstandingPDF(true);
+    try {
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+        import("jspdf"), import("jspdf-autotable"),
+      ]);
+      const NAVY = [8, 40, 25], TEAL = [23, 148, 74], TEAL_TINT = [229, 248, 238];
+      const GREEN = [23, 148, 74], AMBER = [180, 110, 5], ROSE = [190, 24, 72];
+      const INK = [26, 32, 46], SUBTLE = [110, 118, 138], GRID = [228, 231, 238];
+      const agingColor = (d) => d <= 3 ? GREEN : d <= 7 ? AMBER : ROSE;
+
+      const doc = new jsPDF({ unit: "pt", format: "a4" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 40;
+
+      const header = () => {
+        const headerH = 92;
+        doc.setFillColor(...NAVY);
+        doc.rect(0, 0, pageW, headerH, "F");
+        doc.setFillColor(...TEAL);
+        doc.rect(0, headerH - 3, pageW, 3, "F");
+        const logoSize = 46, badgePad = 7, badgeSize = logoSize + badgePad * 2;
+        const badgeX = margin, badgeY = (headerH - badgeSize) / 2 - 2;
+        doc.setFillColor(255, 255, 255);
+        doc.roundedRect(badgeX, badgeY, badgeSize, badgeSize, 10, 10, "F");
+        try { doc.addImage(SRIDHI_LOGO_PNG, "PNG", badgeX + badgePad, badgeY + badgePad, logoSize, logoSize); } catch (e) {}
+        const textX = badgeX + badgeSize + 16;
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(17);
+        doc.text("SRIDHI VENTURES", textX, 34);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(...TEAL.map(c => Math.min(255, c + 70)));
+        doc.text("OUTSTANDING PAYMENT REPORT — PENDING FOLLOW-UP", textX, 51);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(200, 214, 205);
+        doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}`, textX, 68);
+      };
+      const footer = () => {
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+          doc.setPage(i);
+          doc.setDrawColor(...GRID);
+          doc.setLineWidth(0.6);
+          doc.line(margin, pageH - 34, pageW - margin, pageH - 34);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8);
+          doc.setTextColor(...SUBTLE);
+          doc.text("Sridhi Ventures · Business Operating System", margin, pageH - 20);
+          doc.text(`Page ${i} of ${pageCount}`, pageW - margin, pageH - 20, { align: "right" });
+        }
+      };
+
+      header();
+      let y = 118;
+
+      // Summary scorecards
+      const count = outstandingOrders.length;
+      const oldest = count ? Math.max(...outstandingOrders.map(daysPendingOf)) : 0;
+      const boxes = [
+        ["Pending Orders", String(count), TEAL],
+        ["Outstanding ₹", `Rs ${Math.round(outstandingTotal).toLocaleString("en-IN")}`, AMBER],
+        ["Oldest Pending", `${oldest} day${oldest === 1 ? "" : "s"}`, ROSE],
+      ];
+      const boxW = (pageW - margin * 2 - 16) / 3;
+      boxes.forEach(([label, value, color], i) => {
+        const bx = margin + i * (boxW + 8);
+        doc.setFillColor(...color.map(c => Math.min(255, c + (255 - c) * 0.88)));
+        doc.setDrawColor(...color);
+        doc.roundedRect(bx, y, boxW, 46, 8, 8, "FD");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(15);
+        doc.setTextColor(...color);
+        doc.text(value, bx + 12, y + 26);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.text(label.toUpperCase(), bx + 12, y + 39);
+      });
+      y += 62;
+
+      if (!outstandingOrders.length) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(11);
+        doc.setTextColor(...SUBTLE);
+        doc.text("Nothing outstanding — every priced order has been marked Paid. 🎉", margin, y + 10);
+      } else {
+        const body = outstandingOrders.map(o => {
+          const d = daysPendingOf(o);
+          const latest = (o.paymentRemarks && o.paymentRemarks.length) ? o.paymentRemarks[o.paymentRemarks.length - 1] : null;
+          return [
+            formatDateReadable(o.date), o.customer, o.contact || "—",
+            `Rs ${Math.round(o.amount || 0).toLocaleString("en-IN")}`,
+            `${d} day${d === 1 ? "" : "s"}`,
+            latest ? `${latest.note} (${latest.telecaller})` : "No follow-up logged yet",
+          ];
+        });
+        autoTable(doc, {
+          startY: y,
+          margin: { top: 118, bottom: 40 },
+          head: [["Order Date", "Customer", "Contact", "Amount", "Pending", "Latest Follow-up"]],
+          body,
+          theme: "grid",
+          styles: { font: "helvetica", fontSize: 8.5, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "middle" },
+          headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 },
+          alternateRowStyles: { fillColor: [248, 250, 248] },
+          columnStyles: { 1: { fontStyle: "bold" }, 3: { fontStyle: "bold", halign: "right" }, 4: { fontStyle: "bold", halign: "center" } },
+          didParseCell: (data) => {
+            // Colour the Pending-days column by age, so the oldest, most
+            // urgent follow-ups jump out red without reading every row.
+            if (data.section === "body" && data.column.index === 4) {
+              const row = outstandingOrders[data.row.index];
+              const color = agingColor(daysPendingOf(row));
+              data.cell.styles.textColor = color;
+              data.cell.styles.fillColor = color.map(c => Math.min(255, c + (255 - c) * 0.88));
+            }
+          },
+          didDrawPage: () => header(),
+        });
+      }
+
+      footer();
+      doc.save(`Outstanding-Payment-Report_${todayISO()}.pdf`);
+    } finally {
+      setGeneratingOutstandingPDF(false);
+    }
   };
 
   const presetLabel = () => ({
@@ -5633,6 +5800,64 @@ function DailyOrders({ embedded = false } = {}) {
         fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FONT,
       }}>+ Log Order (₹{RATE_PER_KG}/KG)</button>
 
+      <Card accent={T.rose}>
+        <Label sub="Every priced order starts Pending — mark it Paid as money comes in. Anything still pending shows here, oldest first, so nothing gets forgotten">Payment Followup</Label>
+        <div style={{ display: "flex", gap: 8, marginTop: 10, marginBottom: 14 }}>
+          <div style={{ flex: 1, background: T.rose + "14", border: `1px solid ${T.rose}44`, borderRadius: 12, padding: "10px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: T.rose }}>{outstandingOrders.length}</div>
+            <div style={{ fontSize: 10, color: T.rose, fontWeight: 700, marginTop: 2, textTransform: "uppercase" }}>Pending Orders</div>
+          </div>
+          <div style={{ flex: 1, background: T.amber + "14", border: `1px solid ${T.amber}44`, borderRadius: 12, padding: "10px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: T.amber }}>₹{Math.round(outstandingTotal).toLocaleString("en-IN")}</div>
+            <div style={{ fontSize: 10, color: T.amber, fontWeight: 700, marginTop: 2, textTransform: "uppercase" }}>Outstanding</div>
+          </div>
+        </div>
+
+        {outstandingOrders.length === 0 && (
+          <div style={{ textAlign: "center", padding: "18px 12px", color: T.t3, fontSize: 12 }}>Nothing pending — every priced order is marked Paid. 🎉</div>
+        )}
+
+        {outstandingOrders.map(o => {
+          const d = daysPendingOf(o);
+          const agingColor = d <= 3 ? T.emerald : d <= 7 ? T.amber : T.rose;
+          const latest = (o.paymentRemarks && o.paymentRemarks.length) ? o.paymentRemarks[o.paymentRemarks.length - 1] : null;
+          return (
+            <div key={o.id} style={{ padding: "12px 0", borderBottom: `1px solid ${T.border}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: T.t1 }}>{o.customer}</div>
+                  <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>{formatDateReadable(o.date)}{o.contact ? ` · ${o.contact}` : ""}</div>
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: T.emerald }}>₹{Math.round(o.amount || 0).toLocaleString("en-IN")}</div>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: agingColor, marginTop: 2 }}>{d} day{d === 1 ? "" : "s"} pending</div>
+                </div>
+              </div>
+              {latest && (
+                <div style={{ fontSize: 11, color: T.t2, marginTop: 6 }}>💬 {latest.note} <span style={{ color: T.t3 }}>— {latest.telecaller}</span></div>
+              )}
+              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <Btn label="✅ Mark Paid" color={T.emerald} ghost small onClick={() => togglePayment(o)} />
+                <Btn label={paymentNoteOpenId === o.id ? "Cancel" : "+ Follow-up Note"} color={T.rose} ghost small onClick={() => { setPaymentNoteOpenId(paymentNoteOpenId === o.id ? null : o.id); setPaymentNoteText(""); }} />
+              </div>
+              {paymentNoteOpenId === o.id && (
+                <div style={{ marginTop: 8, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: 10 }}>
+                  <Dropdown label="Telecaller" value={paymentNoteTelecaller} onChange={e => setPaymentNoteTelecaller(e.target.value)} options={TELECALLERS} />
+                  <textarea value={paymentNoteText} onChange={e => setPaymentNoteText(e.target.value)} rows={2}
+                    placeholder="e.g. Shop closed today, will collect tomorrow…"
+                    style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, color: T.t1, padding: "8px 10px", fontSize: 12, fontFamily: FONT, outline: "none", width: "100%", boxSizing: "border-box", resize: "none", marginTop: 8 }} />
+                  <div style={{ marginTop: 8 }}><Btn label="Save Note" full small color={T.rose} onClick={() => addPaymentRemark(o.id)} /></div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        <div style={{ marginTop: 14 }}>
+          <Btn label={generatingOutstandingPDF ? "Generating…" : "📄 Download Outstanding Payment Report (PDF)"} full color={T.rose} onClick={downloadOutstandingReport} />
+        </div>
+      </Card>
+
       <Card>
         <Label sub="A branded, print-ready report — KPI summary, daily breakdown, order log and cancellations">Download Report</Label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10, marginBottom: 14 }}>
@@ -5755,12 +5980,18 @@ function DailyOrders({ embedded = false } = {}) {
                   ))}
                   <Chip label={`₹${(o.amount || 0).toLocaleString("en-IN")}`} color={T.emerald} />
                   {cancelled && <Chip label={`Cancelled · ${o.cancelReason || "—"}`} color={T.rose} />}
+                  {!cancelled && (o.paymentStatus === "Paid"
+                    ? <Chip label="✅ Paid" color={T.emerald} />
+                    : (o.amount || 0) > 0 && <Chip label={`⚠ Pending · ${daysPendingOf(o)}d`} color={T.rose} />)}
                 </div>
                 {cancelled && o.cancelRemarks && (
                   <div style={{ fontSize: 11, color: T.t3, marginTop: 6 }}>Note: {o.cancelRemarks}</div>
                 )}
                 <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
                   <Btn label="Edit" color={T.sky} ghost small onClick={() => openEdit(o)} />
+                  {!cancelled && (o.amount || 0) > 0 && (
+                    <Btn label={o.paymentStatus === "Paid" ? "↩️ Mark Pending" : "✅ Mark Paid"} color={o.paymentStatus === "Paid" ? T.t2 : T.emerald} ghost small onClick={() => togglePayment(o)} />
+                  )}
                   {!cancelled
                     ? <Btn label="Customer Stopped / Cancel" color={T.rose} ghost small onClick={() => openCancel(o)} />
                     : <Btn label="Reactivate" color={T.emerald} ghost small onClick={() => reactivate(o)} />}
