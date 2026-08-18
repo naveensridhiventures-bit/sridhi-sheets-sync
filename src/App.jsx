@@ -4162,7 +4162,7 @@ function DailyOrders({ embedded = false } = {}) {
         doc.setFont("helvetica", "normal");
         doc.setFontSize(11);
         doc.setTextColor(...SUBTLE);
-        doc.text("Nothing outstanding — every priced order has been marked Paid. 🎉", margin, y + 10);
+        doc.text("Nothing outstanding — every priced order has been marked Paid.", margin, y + 10);
       } else {
         const body = outstandingOrders.map(o => {
           const d = daysPendingOf(o);
@@ -6100,7 +6100,7 @@ function OutstandingLedger() {
         doc.setFont("helvetica", "normal");
         doc.setFontSize(11);
         doc.setTextColor(...SUBTLE);
-        doc.text("Nobody has an outstanding balance right now. 🎉", margin, y + 10);
+        doc.text("Nobody has an outstanding balance right now.", margin, y + 10);
       } else {
         const body = owing.map(c => {
           const last = c.entries.slice().sort((a, b) => a.date.localeCompare(b.date));
