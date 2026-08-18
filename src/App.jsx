@@ -7419,6 +7419,7 @@ function DIcon({ id, size = 18, color = "currentColor", strokeWidth = 1.8 }) {
     case "marketing": return <svg {...p}><path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M16 8a5 5 0 0 1 0 8"/><path d="M19 5a9 9 0 0 1 0 14"/></svg>;
     case "compass": return <svg {...p}><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>;
     case "clipboard": return <svg {...p}><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3"/><path d="M9 12h6"/><path d="M9 16h6"/><path d="M9 8h1"/></svg>;
+    case "ledger": return <svg {...p}><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8"/><path d="M8 11h5"/><path d="M8 15h8"/><path d="M8 19h4"/></svg>;
     default: return null;
   }
 }
@@ -7431,6 +7432,7 @@ const DESKTOP_NAV = [
   { id: "repeat",    label: "Orders",       icon: "orders" },
   { id: "lostcustomers", label: "Lost Customers", icon: "lostuser" },
   { id: "existingcustomers", label: "Existing Customers", icon: "existing" },
+  { id: "outstanding", label: "Outstanding", icon: "ledger" },
   { id: "dailyorders", label: "Daily Orders", icon: "cart" },
   { id: "fieldsync", label: "Dispatch",     icon: "dispatch" },
   { id: "samples",   label: "Samples",      icon: "samples" },
