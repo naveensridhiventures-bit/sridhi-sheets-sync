@@ -3735,6 +3735,20 @@ function computeCustomerPatterns(orders, asOfDate) {
 }
 
 // ── CSV report export helpers ──────────────────────────────────────────────
+// ── Outstanding Ledger (Tally-style customer account) ──────────────────────
+// A running Debit/Credit ledger per customer, independent of any single
+// order — this is the source of truth for "how much does this customer
+// currently owe", fed both by manual entries and by automatic Debit/Credit
+// entries that Daily Orders writes when an order is logged or marked Paid.
+function ledgerEntriesFor(ledger, name) {
+  const key = (name || "").trim().toLowerCase();
+  if (!key) return [];
+  return (ledger || []).filter(e => (e.customer || "").trim().toLowerCase() === key);
+}
+function ledgerBalanceOf(ledger, name) {
+  return ledgerEntriesFor(ledger, name).reduce((a, e) => a + (e.type === "Debit" ? (parseFloat(e.amount) || 0) : -(parseFloat(e.amount) || 0)), 0);
+}
+
 function csvEscape(v) {
   const s = v === null || v === undefined ? "" : String(v);
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -3751,6 +3765,7 @@ function downloadCSV(filename, content) {
 
 function DailyOrders({ embedded = false } = {}) {
   const [orders, setOrders, ordersSyncStatus] = useSheetSynced("dailyOrders", "dailyOrders", INITIAL_DAILY_ORDERS);
+  const [ledger, setLedger] = useSheetSynced("outstandingLedger", "outstandingLedger", []);
   const [leads, setLeads] = useSheetSynced("leads", "leads", []);
   const [repeatCustomers] = useSheetSynced("repeatCustomers", "repeatCustomers", []);
   const [showForm, setShowForm] = useState(false);
@@ -3942,9 +3957,27 @@ function DailyOrders({ embedded = false } = {}) {
       : { sampleType: "", amountMode: "", manualAmount: "" };
     if (editingId) {
       setOrders(orders.map(o => o.id === editingId ? { ...o, ...formRest, ...sampleFields, items, kgs, amount, product } : o));
+      // Keep the ledger's auto Debit entry for this order in sync with any
+      // date/amount change made here — add one if it's missing (older order
+      // pre-dating the ledger), update it if it exists, or remove it if the
+      // order no longer has anything to charge.
+      const existingAuto = ledger.find(e => e.source === "order" && e.orderId === editingId);
+      if (amount <= 0) {
+        if (existingAuto) setLedger(ledger.filter(e => !(e.source === "order" && e.orderId === editingId)));
+      } else if (existingAuto) {
+        setLedger(ledger.map(e => (e.source === "order" && e.orderId === editingId)
+          ? { ...e, customer: form.customer.trim(), date: form.date, amount, note: `Order — ${product}` }
+          : e));
+      } else {
+        setLedger([{
+          id: Date.now() + Math.random(), customer: form.customer.trim(), date: form.date,
+          type: "Debit", amount, note: `Order — ${product}`, source: "order", orderId: editingId, createdAt: Date.now(),
+        }, ...ledger]);
+      }
     } else {
+      const orderId = Date.now();
       setOrders([{
-        id: Date.now(), ...formRest, ...sampleFields, items, kgs, amount, product,
+        id: orderId, ...formRest, ...sampleFields, items, kgs, amount, product,
         status: "Active", cancelReason: "", cancelRemarks: "",
         // Payment follow-up: every order starts life unpaid unless it's a
         // ₹0 free sample, which has nothing to collect. Telecallers mark it
@@ -3953,6 +3986,15 @@ function DailyOrders({ embedded = false } = {}) {
         paymentStatus: amount > 0 ? "Pending" : "N/A", paidAt: null, paymentRemarks: [],
         createdAt: Date.now(),
       }, ...orders]);
+      // Every priced order writes a matching Debit to the customer's
+      // Outstanding ledger — this is what "existing outstanding" and the
+      // High Risk warning are based on when logging their *next* order.
+      if (amount > 0) {
+        setLedger([{
+          id: Date.now() + Math.random(), customer: form.customer.trim(), date: form.date,
+          type: "Debit", amount, note: `Order — ${product}`, source: "order", orderId, createdAt: Date.now(),
+        }, ...ledger]);
+      }
     }
     syncCustomerToCRM(form.customer, form.area, form.contact, form.address, form.mapLink, form.telecaller);
     setShowForm(false); setEditingId(null); setForm(emptyOrderForm(filterDate));
@@ -3978,9 +4020,21 @@ function DailyOrders({ embedded = false } = {}) {
   // the date) against anything still pending — that trail is what makes
   // the Outstanding Payment report useful instead of just a bare list.
   const togglePayment = (o) => {
+    const marking = o.paymentStatus !== "Paid"; // true = about to mark Paid
     setOrders(orders.map(x => x.id === o.id
-      ? { ...x, paymentStatus: x.paymentStatus === "Paid" ? "Pending" : "Paid", paidAt: x.paymentStatus === "Paid" ? null : Date.now() }
+      ? { ...x, paymentStatus: marking ? "Paid" : "Pending", paidAt: marking ? Date.now() : null }
       : x));
+    // Tally this straight into the Outstanding ledger: marking Paid writes
+    // a Credit that squares off this order's Debit; un-marking removes it.
+    if (marking) {
+      setLedger([{
+        id: Date.now() + Math.random(), customer: o.customer, date: todayISO(),
+        type: "Credit", amount: o.amount || 0, note: "Payment received (Daily Orders)",
+        source: "orderPaid", orderId: o.id, createdAt: Date.now(),
+      }, ...ledger]);
+    } else {
+      setLedger(ledger.filter(e => !(e.source === "orderPaid" && e.orderId === o.id)));
+    }
   };
   const [paymentNoteOpenId, setPaymentNoteOpenId] = useState(null);
   const [paymentNoteText, setPaymentNoteText] = useState("");
@@ -3999,24 +4053,16 @@ function DailyOrders({ embedded = false } = {}) {
     .sort((a, b) => a.date.localeCompare(b.date)); // oldest pending first — the most urgent
   const outstandingTotal = outstandingOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
 
-  // Total pending balance per customer (across every one of their pending
-  // orders) — this is what powers the "existing outstanding" warning shown
-  // while logging a new order, so a telecaller can decide whether to
-  // deliver before the customer racks up more unpaid orders.
+  // The customer's real outstanding balance now comes from the Outstanding
+  // ledger (Tally-style Debit/Credit account) rather than just this order
+  // list — so manual adjustments made in the Outstanding tab are reflected
+  // here too, wherever a balance or High Risk warning is shown.
   const OUTSTANDING_RISK_LIMIT = 2500;
-  const customerOutstandingMap = {};
-  outstandingOrders.forEach(o => {
-    const key = (o.customer || "").trim().toLowerCase();
-    customerOutstandingMap[key] = (customerOutstandingMap[key] || 0) + (parseFloat(o.amount) || 0);
-  });
-  const highRiskCustomerKeys = new Set(Object.keys(customerOutstandingMap).filter(k => customerOutstandingMap[k] > OUTSTANDING_RISK_LIMIT));
-  const customerOutstandingOf = (name, excludeOrderId) => {
-    const key = (name || "").trim().toLowerCase();
-    if (!key) return 0;
-    return outstandingOrders
-      .filter(o => (o.customer || "").trim().toLowerCase() === key && o.id !== excludeOrderId)
-      .reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
-  };
+  const customerOutstandingOf = (name) => ledgerBalanceOf(ledger, name);
+  const highRiskCustomerKeys = new Set(
+    Array.from(new Set(outstandingOrders.map(o => (o.customer || "").trim().toLowerCase())))
+      .filter(key => ledgerBalanceOf(ledger, key) > OUTSTANDING_RISK_LIMIT)
+  );
   const [generatingOutstandingPDF, setGeneratingOutstandingPDF] = useState(false);
 
   // A separate, always-attractive PDF built just for chasing payments —
@@ -5415,7 +5461,7 @@ function DailyOrders({ embedded = false } = {}) {
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: T.t1 }}>{o.customer}</div>
-                    {customerOutstandingMap[(o.customer || "").trim().toLowerCase()] > OUTSTANDING_RISK_LIMIT && (
+                    {customerOutstandingOf(o.customer) > OUTSTANDING_RISK_LIMIT && (
                       <Chip label="🚨 HIGH RISK" color={T.rose} small />
                     )}
                   </div>
@@ -5556,7 +5602,7 @@ function DailyOrders({ embedded = false } = {}) {
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                       <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{o.customer}</div>
-                      {customerOutstandingMap[(o.customer || "").trim().toLowerCase()] > OUTSTANDING_RISK_LIMIT && (
+                      {customerOutstandingOf(o.customer) > OUTSTANDING_RISK_LIMIT && (
                         <Chip label="🚨 HIGH RISK" color={T.rose} small />
                       )}
                     </div>
@@ -5653,7 +5699,7 @@ function DailyOrders({ embedded = false } = {}) {
           <Field label="New Customer Name *" value={form.customer} onChange={e => setForm({ ...form, customer: e.target.value })} placeholder="e.g. Ganesh Stores" />
         )}
         {(() => {
-          const existingOutstanding = customerOutstandingOf(form.customer, editingId);
+          const existingOutstanding = customerOutstandingOf(form.customer);
           if (!form.customer.trim() || existingOutstanding <= 0) return null;
           const isHighRisk = existingOutstanding > OUTSTANDING_RISK_LIMIT;
           const color = isHighRisk ? T.rose : T.amber;
@@ -5759,6 +5805,514 @@ function DailyOrders({ embedded = false } = {}) {
 }
 
 // ─── EXPENSES ─────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// ─── OUTSTANDING LEDGER — Tally-style customer accounts ────────────────────
+// A dedicated tab for manually maintaining each customer's running balance,
+// independent of any single order. Daily Orders auto-writes a Debit when a
+// priced order is logged and a Credit when it's marked Paid, but this tab
+// is where balances actually get corrected, bulk-updated, or entered for
+// customers whose pending amount predates the app.
+// ══════════════════════════════════════════════════════════════════════════
+const LEDGER_NEW_CUSTOMER = "+ Add New Customer";
+const OUTSTANDING_RISK_LIMIT = 2500;
+
+function emptyLedgerRow(date) {
+  return { customer: "", date: date || todayISO(), type: "Debit", amount: "", note: "" };
+}
+
+function OutstandingLedger() {
+  const [ledger, setLedger, ledgerSyncStatus] = useSheetSynced("outstandingLedger", "outstandingLedger", []);
+  const [leads] = useSheetSynced("leads", "leads", []);
+  const [orders] = useSheetSynced("dailyOrders", "dailyOrders", []);
+
+  const [selected, setSelected] = useState(null); // customer name, or null for overview
+  const [showAdd, setShowAdd] = useState(false);
+  const [addForm, setAddForm] = useState(emptyLedgerRow());
+  const [addCustomerPick, setAddCustomerPick] = useState(LEDGER_NEW_CUSTOMER);
+  const [showBulk, setShowBulk] = useState(false);
+  const [bulkRows, setBulkRows] = useState([emptyLedgerRow(), emptyLedgerRow()]);
+  const [generatingStatementPDF, setGeneratingStatementPDF] = useState(false);
+  const [generatingSummaryPDF, setGeneratingSummaryPDF] = useState(false);
+
+  // Every name we've ever seen, from Leads, Daily Orders and the ledger
+  // itself — so the customer picker autocompletes instead of relying on
+  // exact re-typing.
+  const knownNames = (() => {
+    const map = new Map();
+    [...leads, ...orders].forEach(x => { const n = (x.name || x.customer || "").trim(); if (n) map.set(n.toLowerCase(), n); });
+    ledger.forEach(e => { const n = (e.customer || "").trim(); if (n && !map.has(n.toLowerCase())) map.set(n.toLowerCase(), n); });
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+  })();
+  const customerOptions = [LEDGER_NEW_CUSTOMER, ...knownNames];
+
+  const balances = knownNames
+    .map(name => ({ name, balance: ledgerBalanceOf(ledger, name), entries: ledgerEntriesFor(ledger, name) }))
+    .filter(c => c.entries.length > 0)
+    .sort((a, b) => b.balance - a.balance);
+  const totalOutstanding = balances.filter(c => c.balance > 0).reduce((a, c) => a + c.balance, 0);
+  const pendingCount = balances.filter(c => c.balance > 0).length;
+  const highRiskCount = balances.filter(c => c.balance > OUTSTANDING_RISK_LIMIT).length;
+
+  const pickAddCustomer = (value) => {
+    setAddCustomerPick(value);
+    setAddForm(f => ({ ...f, customer: value === LEDGER_NEW_CUSTOMER ? "" : value }));
+  };
+
+  const saveAddEntry = () => {
+    if (!addForm.customer.trim() || !addForm.date || !(parseFloat(addForm.amount) > 0)) return;
+    setLedger([{
+      id: Date.now() + Math.random(), customer: addForm.customer.trim(), date: addForm.date,
+      type: addForm.type, amount: parseFloat(addForm.amount) || 0,
+      note: addForm.note.trim() || (addForm.type === "Debit" ? "Outstanding balance" : "Payment received"),
+      source: "manual", createdAt: Date.now(),
+    }, ...ledger]);
+    setShowAdd(false);
+    setAddForm(emptyLedgerRow());
+    setAddCustomerPick(LEDGER_NEW_CUSTOMER);
+  };
+
+  const openAddFor = (name) => {
+    setAddForm({ ...emptyLedgerRow(), customer: name || "" });
+    setAddCustomerPick(name || LEDGER_NEW_CUSTOMER);
+    setShowAdd(true);
+  };
+
+  const deleteEntry = (id) => {
+    if (!window.confirm("Delete this ledger entry? This can't be undone.")) return;
+    setLedger(ledger.filter(e => e.id !== id));
+  };
+
+  // ── Bulk update — add many customers' outstanding entries in one sitting
+  const updateBulkRow = (idx, patch) => setBulkRows(rows => rows.map((r, i) => i === idx ? { ...r, ...patch } : r));
+  const addBulkRow = () => setBulkRows(rows => [...rows, emptyLedgerRow()]);
+  const removeBulkRow = (idx) => setBulkRows(rows => rows.filter((_, i) => i !== idx));
+  const saveBulkRows = () => {
+    const valid = bulkRows.filter(r => r.customer.trim() && r.date && parseFloat(r.amount) > 0);
+    if (!valid.length) return;
+    const entries = valid.map(r => ({
+      id: Date.now() + Math.random(), customer: r.customer.trim(), date: r.date,
+      type: r.type, amount: parseFloat(r.amount) || 0,
+      note: r.note.trim() || (r.type === "Debit" ? "Outstanding balance" : "Payment received"),
+      source: "manual", createdAt: Date.now(),
+    }));
+    setLedger([...entries, ...ledger]);
+    setShowBulk(false);
+    setBulkRows([emptyLedgerRow(), emptyLedgerRow()]);
+  };
+
+  // ── PDF: single customer statement, Tally-style ─────────────────────────
+  const downloadCustomerStatement = async (name) => {
+    if (generatingStatementPDF) return;
+    setGeneratingStatementPDF(true);
+    try {
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+      const NAVY = [8, 40, 25], TEAL = [23, 148, 74];
+      const ROSE = [190, 24, 72], GREEN = [23, 148, 74];
+      const INK = [26, 32, 46], SUBTLE = [110, 118, 138], GRID = [228, 231, 238];
+
+      const stmt = ledgerEntriesFor(ledger, name).slice().sort((a, b) => (a.date === b.date ? (a.createdAt || 0) - (b.createdAt || 0) : a.date.localeCompare(b.date)));
+      let running = 0;
+      const rows = stmt.map(e => { running += (e.type === "Debit" ? 1 : -1) * (parseFloat(e.amount) || 0); return { ...e, running }; });
+      const closingBalance = running;
+
+      const doc = new jsPDF({ unit: "pt", format: "a4" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 40;
+
+      const header = () => {
+        const headerH = 92;
+        doc.setFillColor(...NAVY);
+        doc.rect(0, 0, pageW, headerH, "F");
+        doc.setFillColor(...TEAL);
+        doc.rect(0, headerH - 3, pageW, 3, "F");
+        const logoSize = 46, badgePad = 7, badgeSize = logoSize + badgePad * 2;
+        const badgeX = margin, badgeY = (headerH - badgeSize) / 2 - 2;
+        doc.setFillColor(255, 255, 255);
+        doc.roundedRect(badgeX, badgeY, badgeSize, badgeSize, 10, 10, "F");
+        try { doc.addImage(SRIDHI_LOGO_PNG, "PNG", badgeX + badgePad, badgeY + badgePad, logoSize, logoSize); } catch (e) {}
+        const textX = badgeX + badgeSize + 16;
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(17);
+        doc.text("SRIDHI VENTURES", textX, 34);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(...TEAL.map(c => Math.min(255, c + 70)));
+        doc.text(`CUSTOMER LEDGER — ${name.toUpperCase()}`, textX, 51);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(200, 214, 205);
+        doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}`, textX, 68);
+      };
+      const footer = () => {
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+          doc.setPage(i);
+          doc.setDrawColor(...GRID);
+          doc.setLineWidth(0.6);
+          doc.line(margin, pageH - 34, pageW - margin, pageH - 34);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8);
+          doc.setTextColor(...SUBTLE);
+          doc.text("Sridhi Ventures · Business Operating System", margin, pageH - 20);
+          doc.text(`Page ${i} of ${pageCount}`, pageW - margin, pageH - 20, { align: "right" });
+        }
+      };
+
+      header();
+      let y = 118;
+
+      // Closing balance banner — the headline number, Tally statement style
+      const isHighRisk = closingBalance > OUTSTANDING_RISK_LIMIT;
+      const bannerColor = closingBalance <= 0 ? GREEN : (isHighRisk ? ROSE : [180, 110, 5]);
+      doc.setFillColor(...bannerColor.map(c => Math.min(255, c + (255 - c) * 0.9)));
+      doc.setDrawColor(...bannerColor);
+      doc.setLineWidth(1);
+      doc.roundedRect(margin, y, pageW - margin * 2, 46, 8, 8, "FD");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(...bannerColor);
+      doc.text((closingBalance <= 0 ? "NO OUTSTANDING BALANCE" : isHighRisk ? "HIGH RISK — CLOSING BALANCE" : "CLOSING BALANCE").toUpperCase(), margin + 16, y + 19);
+      doc.setFontSize(20);
+      doc.text(`Rs ${Math.round(Math.abs(closingBalance)).toLocaleString("en-IN")}`, margin + 16, y + 38);
+      if (closingBalance < 0) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.text("(customer is in advance / credit)", margin + 190, y + 38);
+      }
+      y += 62;
+
+      if (!rows.length) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(11);
+        doc.setTextColor(...SUBTLE);
+        doc.text("No ledger entries yet for this customer.", margin, y + 10);
+      } else {
+        const body = rows.map(r => [
+          formatDateReadable(r.date), r.note || (r.type === "Debit" ? "Outstanding" : "Payment"),
+          r.type === "Debit" ? `Rs ${Math.round(r.amount).toLocaleString("en-IN")}` : "—",
+          r.type === "Credit" ? `Rs ${Math.round(r.amount).toLocaleString("en-IN")}` : "—",
+          `Rs ${Math.round(r.running).toLocaleString("en-IN")}`,
+        ]);
+        autoTable(doc, {
+          startY: y,
+          margin: { top: 118, bottom: 40 },
+          head: [["Date", "Particulars", "Debit", "Credit", "Balance"]],
+          body,
+          theme: "grid",
+          styles: { font: "helvetica", fontSize: 8.5, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "middle" },
+          headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 },
+          alternateRowStyles: { fillColor: [248, 250, 248] },
+          columnStyles: { 0: { cellWidth: 70 }, 2: { halign: "right", textColor: ROSE, fontStyle: "bold" }, 3: { halign: "right", textColor: GREEN, fontStyle: "bold" }, 4: { halign: "right", fontStyle: "bold" } },
+          didDrawPage: () => header(),
+        });
+      }
+
+      footer();
+      doc.save(`Ledger-${name.replace(/[^a-z0-9]+/gi, "-")}_${todayISO()}.pdf`);
+    } finally {
+      setGeneratingStatementPDF(false);
+    }
+  };
+
+  // ── PDF: overview of every customer with a balance ──────────────────────
+  const downloadOutstandingSummary = async () => {
+    if (generatingSummaryPDF) return;
+    setGeneratingSummaryPDF(true);
+    try {
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+      const NAVY = [8, 40, 25], TEAL = [23, 148, 74];
+      const ROSE = [190, 24, 72], GREEN = [23, 148, 74], AMBER = [180, 110, 5];
+      const INK = [26, 32, 46], SUBTLE = [110, 118, 138], GRID = [228, 231, 238];
+
+      const doc = new jsPDF({ unit: "pt", format: "a4" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 40;
+
+      const header = () => {
+        const headerH = 92;
+        doc.setFillColor(...NAVY);
+        doc.rect(0, 0, pageW, headerH, "F");
+        doc.setFillColor(...TEAL);
+        doc.rect(0, headerH - 3, pageW, 3, "F");
+        const logoSize = 46, badgePad = 7, badgeSize = logoSize + badgePad * 2;
+        const badgeX = margin, badgeY = (headerH - badgeSize) / 2 - 2;
+        doc.setFillColor(255, 255, 255);
+        doc.roundedRect(badgeX, badgeY, badgeSize, badgeSize, 10, 10, "F");
+        try { doc.addImage(SRIDHI_LOGO_PNG, "PNG", badgeX + badgePad, badgeY + badgePad, logoSize, logoSize); } catch (e) {}
+        const textX = badgeX + badgeSize + 16;
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(17);
+        doc.text("SRIDHI VENTURES", textX, 34);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(...TEAL.map(c => Math.min(255, c + 70)));
+        doc.text("OUTSTANDING SUMMARY — ALL CUSTOMERS", textX, 51);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(200, 214, 205);
+        doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}`, textX, 68);
+      };
+      const footer = () => {
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+          doc.setPage(i);
+          doc.setDrawColor(...GRID);
+          doc.setLineWidth(0.6);
+          doc.line(margin, pageH - 34, pageW - margin, pageH - 34);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8);
+          doc.setTextColor(...SUBTLE);
+          doc.text("Sridhi Ventures · Business Operating System", margin, pageH - 20);
+          doc.text(`Page ${i} of ${pageCount}`, pageW - margin, pageH - 20, { align: "right" });
+        }
+      };
+
+      header();
+      let y = 118;
+
+      const owing = balances.filter(c => c.balance > 0);
+      const boxes = [
+        ["Customers Owing", String(owing.length), TEAL],
+        ["Total Outstanding", `Rs ${Math.round(totalOutstanding).toLocaleString("en-IN")}`, AMBER],
+        ["High Risk (> Rs 2500)", String(highRiskCount), ROSE],
+      ];
+      const boxW = (pageW - margin * 2 - 16) / 3;
+      boxes.forEach(([label, value, color], i) => {
+        const bx = margin + i * (boxW + 8);
+        doc.setFillColor(...color.map(c => Math.min(255, c + (255 - c) * 0.88)));
+        doc.setDrawColor(...color);
+        doc.roundedRect(bx, y, boxW, 46, 8, 8, "FD");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(15);
+        doc.setTextColor(...color);
+        doc.text(value, bx + 12, y + 26);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.text(label.toUpperCase(), bx + 12, y + 39);
+      });
+      y += 62;
+
+      if (!owing.length) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(11);
+        doc.setTextColor(...SUBTLE);
+        doc.text("Nobody has an outstanding balance right now. 🎉", margin, y + 10);
+      } else {
+        const body = owing.map(c => {
+          const last = c.entries.slice().sort((a, b) => a.date.localeCompare(b.date));
+          const oldestDebit = last.find(e => e.type === "Debit");
+          return [
+            c.name, oldestDebit ? formatDateReadable(oldestDebit.date) : "—",
+            `Rs ${Math.round(c.balance).toLocaleString("en-IN")}`,
+            c.balance > OUTSTANDING_RISK_LIMIT ? "HIGH RISK" : "Normal",
+          ];
+        });
+        autoTable(doc, {
+          startY: y,
+          margin: { top: 118, bottom: 40 },
+          head: [["Customer", "Oldest Pending Since", "Balance", "Risk"]],
+          body,
+          theme: "grid",
+          styles: { font: "helvetica", fontSize: 9, cellPadding: 7, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "middle" },
+          headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9.5 },
+          alternateRowStyles: { fillColor: [248, 250, 248] },
+          columnStyles: { 0: { fontStyle: "bold" }, 2: { halign: "right", fontStyle: "bold" }, 3: { halign: "center", fontStyle: "bold" } },
+          didParseCell: (data) => {
+            if (data.section === "body" && data.column.index === 3) {
+              const color = data.cell.raw === "HIGH RISK" ? ROSE : GREEN;
+              data.cell.styles.textColor = color;
+              data.cell.styles.fillColor = color.map(c => Math.min(255, c + (255 - c) * 0.9));
+            }
+          },
+          didDrawPage: () => header(),
+        });
+      }
+
+      footer();
+      doc.save(`Outstanding-Summary_${todayISO()}.pdf`);
+    } finally {
+      setGeneratingSummaryPDF(false);
+    }
+  };
+
+  const ledgerRowFields = (row, onChange) => (
+    <>
+      <Dropdown label="Customer" value={knownNames.includes(row.customer) ? row.customer : LEDGER_NEW_CUSTOMER}
+        onChange={e => onChange({ customer: e.target.value === LEDGER_NEW_CUSTOMER ? "" : e.target.value })}
+        options={[LEDGER_NEW_CUSTOMER, ...knownNames]} />
+      {!knownNames.includes(row.customer) && (
+        <Field label="Customer Name" value={row.customer} onChange={e => onChange({ customer: e.target.value })} placeholder="e.g. Oscar" />
+      )}
+      <Field label="Date" type="date" value={row.date} onChange={e => onChange({ date: e.target.value })} />
+      <Dropdown label="Type" value={row.type} onChange={e => onChange({ type: e.target.value })} options={["Debit", "Credit"]} />
+      <div style={{ fontSize: 10.5, color: T.t3, marginTop: -8, marginBottom: 14 }}>
+        {row.type === "Debit" ? "Debit = adds to what they owe (pending amount)." : "Credit = reduces balance (payment received)."}
+      </div>
+      <Field label="Amount (₹)" type="number" value={row.amount} onChange={e => onChange({ amount: e.target.value })} placeholder="e.g. 2500" />
+      <Field label="Note (optional)" value={row.note} onChange={e => onChange({ note: e.target.value })} placeholder="e.g. Balance as of Aug 2026" />
+    </>
+  );
+
+  // ── Customer statement view ─────────────────────────────────────────────
+  if (selected) {
+    const stmt = ledgerEntriesFor(ledger, selected).slice().sort((a, b) => (a.date === b.date ? (a.createdAt || 0) - (b.createdAt || 0) : a.date.localeCompare(b.date)));
+    let running = 0;
+    const rows = stmt.map(e => { running += (e.type === "Debit" ? 1 : -1) * (parseFloat(e.amount) || 0); return { ...e, running }; });
+    const balance = running;
+    const isHighRisk = balance > OUTSTANDING_RISK_LIMIT;
+    const balColor = balance <= 0 ? T.emerald : (isHighRisk ? T.rose : T.amber);
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <button onClick={() => setSelected(null)}
+          style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t2, padding: "6px 12px", fontSize: 12, cursor: "pointer", fontFamily: FONT, alignSelf: "flex-start" }}>← All Customers</button>
+
+        {/* Tally-style ledger header banner */}
+        <div style={{ background: `linear-gradient(135deg, ${T.card}, ${T.cardHigh})`, border: `1px solid ${balColor}44`, borderRadius: 16, padding: 18, position: "relative", overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: -30, right: -30, width: 120, height: 120, borderRadius: "50%", background: balColor + "14" }} />
+          <div style={{ fontSize: 10.5, color: T.t3, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>Customer Account</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: T.t1, marginTop: 4 }}>{selected}</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 10 }}>
+            <div style={{ fontSize: 30, fontWeight: 800, color: balColor }}>₹{Math.round(Math.abs(balance)).toLocaleString("en-IN")}</div>
+            {isHighRisk && <Chip label="🚨 HIGH RISK" color={T.rose} />}
+            {balance < 0 && <Chip label="In Credit" color={T.emerald} />}
+          </div>
+          <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>
+            {balance > 0 ? "Outstanding balance" : balance < 0 ? "Customer has paid in advance" : "Fully settled"}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn label="+ Add Entry" full onClick={() => openAddFor(selected)} />
+          <Btn label={generatingStatementPDF ? "Generating…" : "📄 Statement PDF"} full color={T.amber} onClick={() => downloadCustomerStatement(selected)} />
+        </div>
+
+        {/* Tally-style Date | Particulars | Debit | Credit | Balance table */}
+        <Card>
+          <Label sub={`${rows.length} ${rows.length === 1 ? "entry" : "entries"} · running balance shown per row, like a bank passbook`}>Ledger Statement</Label>
+          {rows.length === 0 && <div style={{ fontSize: 12, color: T.t3, padding: "16px 0" }}>No entries yet — add one to start this customer's account.</div>}
+          {rows.length > 0 && (
+            <div style={{ marginTop: 10, borderRadius: 10, overflow: "hidden", border: `1px solid ${T.border}` }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1.7fr 1fr 1fr 1.1fr", background: T.cardHigh, padding: "8px 10px", fontSize: 10, fontWeight: 700, color: T.t3, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                <div>Date</div><div>Particulars</div><div style={{ textAlign: "right" }}>Debit</div><div style={{ textAlign: "right" }}>Credit</div><div style={{ textAlign: "right" }}>Balance</div>
+              </div>
+              {rows.map((r, i) => (
+                <div key={r.id} style={{ display: "grid", gridTemplateColumns: "1.1fr 1.7fr 1fr 1fr 1.1fr", padding: "9px 10px", fontSize: 11.5, background: i % 2 ? T.surface : "transparent", borderTop: `1px solid ${T.border}`, alignItems: "center" }}>
+                  <div style={{ color: T.t2 }}>{formatDateReadable(r.date)}</div>
+                  <div style={{ color: T.t1, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span>{r.note || (r.type === "Debit" ? "Outstanding" : "Payment")}</span>
+                    {r.source === "manual" && (
+                      <button onClick={() => deleteEntry(r.id)} title="Delete entry"
+                        style={{ background: "none", border: "none", color: T.t3, cursor: "pointer", fontSize: 11, padding: 0 }}>🗑️</button>
+                    )}
+                  </div>
+                  <div style={{ textAlign: "right", color: T.rose, fontWeight: 700 }}>{r.type === "Debit" ? `₹${Math.round(r.amount).toLocaleString("en-IN")}` : "—"}</div>
+                  <div style={{ textAlign: "right", color: T.emerald, fontWeight: 700 }}>{r.type === "Credit" ? `₹${Math.round(r.amount).toLocaleString("en-IN")}` : "—"}</div>
+                  <div style={{ textAlign: "right", color: r.running > 0 ? T.amber : T.t2, fontWeight: 800 }}>₹{Math.round(r.running).toLocaleString("en-IN")}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Sheet open={showAdd} onClose={() => setShowAdd(false)} title="Add Ledger Entry">
+          {ledgerRowFields(addForm, patch => setAddForm(f => ({ ...f, ...patch })))}
+          <Btn label="Save Entry" full onClick={saveAddEntry} disabled={!addForm.customer.trim() || !(parseFloat(addForm.amount) > 0)} />
+        </Sheet>
+      </div>
+    );
+  }
+
+  // ── Overview: every customer with a balance ─────────────────────────────
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <SyncBadge status={ledgerSyncStatus} />
+      </div>
+
+      <Card accent={T.amber}>
+        <Label sub="A running Debit/Credit account per customer — like a Tally ledger. Daily Orders auto-updates this when you log an order or mark it Paid; use this tab to correct balances or add pending amounts manually">Outstanding Ledger</Label>
+        <div style={{ display: "flex", gap: 8, marginTop: 12, marginBottom: 4, flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 100px", background: T.rose + "14", border: `1px solid ${T.rose}44`, borderRadius: 12, padding: "10px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: T.rose }}>{pendingCount}</div>
+            <div style={{ fontSize: 9.5, color: T.rose, fontWeight: 700, marginTop: 2, textTransform: "uppercase" }}>Customers Owing</div>
+          </div>
+          <div style={{ flex: "1 1 100px", background: T.amber + "14", border: `1px solid ${T.amber}44`, borderRadius: 12, padding: "10px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: T.amber }}>₹{Math.round(totalOutstanding).toLocaleString("en-IN")}</div>
+            <div style={{ fontSize: 9.5, color: T.amber, fontWeight: 700, marginTop: 2, textTransform: "uppercase" }}>Total Outstanding</div>
+          </div>
+          <div style={{ flex: "1 1 100px", background: T.rose + "14", border: `1px solid ${T.rose}44`, borderRadius: 12, padding: "10px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: T.rose }}>{highRiskCount}</div>
+            <div style={{ fontSize: 9.5, color: T.rose, fontWeight: 700, marginTop: 2, textTransform: "uppercase" }}>High Risk</div>
+          </div>
+        </div>
+      </Card>
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn label="+ Add Entry" full onClick={() => openAddFor("")} />
+        <Btn label="📥 Bulk Update" full color={T.indigo} onClick={() => setShowBulk(true)} />
+      </div>
+      <Btn label={generatingSummaryPDF ? "Generating…" : "📄 Download Outstanding Summary (PDF)"} full color={T.amber} onClick={downloadOutstandingSummary} />
+
+      <Card>
+        <Label sub="Sorted highest balance first — tap a customer for their full statement">Customer Balances</Label>
+        {balances.length === 0 && <div style={{ fontSize: 12, color: T.t3, padding: "16px 0" }}>No ledger activity yet. Add an entry to get started.</div>}
+        {balances.map(c => {
+          const isHighRisk = c.balance > OUTSTANDING_RISK_LIMIT;
+          const color = c.balance <= 0 ? T.emerald : (isHighRisk ? T.rose : T.amber);
+          return (
+            <button key={c.name} onClick={() => setSelected(c.name)} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%",
+              background: "none", border: "none", borderBottom: `1px solid ${T.border}`, padding: "12px 0",
+              cursor: "pointer", fontFamily: FONT, textAlign: "left",
+            }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: T.t1 }}>{c.name}</span>
+                  {isHighRisk && <Chip label="🚨 HIGH RISK" color={T.rose} small />}
+                </div>
+                <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>{c.entries.length} {c.entries.length === 1 ? "entry" : "entries"}</div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 15, fontWeight: 800, color }}>₹{Math.round(Math.abs(c.balance)).toLocaleString("en-IN")}</span>
+                <span style={{ color: T.t4, fontSize: 14 }}>›</span>
+              </div>
+            </button>
+          );
+        })}
+      </Card>
+
+      <Sheet open={showAdd} onClose={() => setShowAdd(false)} title="Add Ledger Entry">
+        {ledgerRowFields(addForm, patch => setAddForm(f => ({ ...f, ...patch })))}
+        <Btn label="Save Entry" full onClick={saveAddEntry} disabled={!addForm.customer.trim() || !(parseFloat(addForm.amount) > 0)} />
+      </Sheet>
+
+      <Sheet open={showBulk} onClose={() => setShowBulk(false)} title="Bulk Update Outstanding">
+        <div style={{ fontSize: 11.5, color: T.t3, marginBottom: 12 }}>Add one row per customer — date and amount for each. Rows left blank are skipped.</div>
+        {bulkRows.map((row, idx) => (
+          <div key={idx} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.t3 }}>ROW {idx + 1}</div>
+              {bulkRows.length > 1 && (
+                <button onClick={() => removeBulkRow(idx)} style={{ background: "none", border: "none", color: T.rose, cursor: "pointer", fontSize: 11, fontFamily: FONT, fontWeight: 700 }}>Remove</button>
+              )}
+            </div>
+            {ledgerRowFields(row, patch => updateBulkRow(idx, patch))}
+          </div>
+        ))}
+        <div style={{ marginBottom: 12 }}>
+          <Btn label="+ Add Row" full color={T.t2} ghost onClick={addBulkRow} />
+        </div>
+        <Btn label={`Save All (${bulkRows.filter(r => r.customer.trim() && parseFloat(r.amount) > 0).length} valid)`} full color={T.indigo} onClick={saveBulkRows} />
+      </Sheet>
+    </div>
+  );
+}
+
 function Expenses() {
   const [expenses, setExpenses, expensesSyncStatus] = useSheetSynced("expenses", "expenses", INITIAL_EXPENSES);
   const [showAdd, setShowAdd] = useState(false);
@@ -6769,6 +7323,7 @@ const MORE_MENU = [
   { id:"repeat",    label:"Repeat Orders", icon:"🔁" },
   { id:"lostcustomers", label:"Lost Customers", icon:"🚫" },
   { id:"existingcustomers", label:"Existing Customers", icon:"🔄" },
+  { id:"outstanding", label:"Outstanding", icon:"📒" },
   { id:"expenses",  label:"Expenses",      icon:"💸" },
   { id:"marketing", label:"Marketing",     icon:"📢" },
   { id:"reports",   label:"Reports",       icon:"📈" },
@@ -8748,6 +9303,7 @@ export default function App() {
       case "repeat":    return <RepeatOrders />;
       case "lostcustomers": return <LostCustomers />;
       case "existingcustomers": return <ExistingCustomerPipeline />;
+      case "outstanding": return <OutstandingLedger />;
       case "dailyorders": return <DailyOrders {...moduleProps} />;
       case "expenses":  return <Expenses />;
       case "marketing": return <Marketing />;
