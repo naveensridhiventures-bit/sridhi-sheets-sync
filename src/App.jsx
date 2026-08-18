@@ -5882,6 +5882,33 @@ function OutstandingLedger() {
     setLedger(ledger.filter(e => e.id !== id));
   };
 
+  // ── Edit an existing entry (any entry — manual or auto-synced from an
+  // order) — lets a telecaller correct a wrong amount/date/type directly,
+  // or square off a payment, without deleting and re-adding. Editing an
+  // auto entry detaches it from its source order (becomes "manual") so a
+  // later change on that order can't silently overwrite the correction.
+  const [editingEntry, setEditingEntry] = useState(null); // the entry object being edited, or null
+  const [editForm, setEditForm] = useState(emptyLedgerRow());
+  const openEditFor = (entry) => {
+    setEditingEntry(entry);
+    setEditForm({ customer: entry.customer, date: entry.date, type: entry.type, amount: String(entry.amount ?? ""), note: entry.note || "" });
+  };
+  const saveEditEntry = () => {
+    if (!editingEntry || !editForm.customer.trim() || !editForm.date || !(parseFloat(editForm.amount) > 0)) return;
+    setLedger(ledger.map(e => e.id === editingEntry.id ? {
+      ...e, customer: editForm.customer.trim(), date: editForm.date, type: editForm.type,
+      amount: parseFloat(editForm.amount) || 0, note: editForm.note.trim(),
+      source: "manual", orderId: undefined,
+    } : e));
+    setEditingEntry(null);
+  };
+  const deleteEditingEntry = () => {
+    if (!editingEntry) return;
+    if (!window.confirm("Delete this ledger entry? This can't be undone.")) return;
+    setLedger(ledger.filter(e => e.id !== editingEntry.id));
+    setEditingEntry(null);
+  };
+
   // ── Bulk update — add many customers' outstanding entries in one sitting
   const updateBulkRow = (idx, patch) => setBulkRows(rows => rows.map((r, i) => i === idx ? { ...r, ...patch } : r));
   const addBulkRow = () => setBulkRows(rows => [...rows, emptyLedgerRow()]);
@@ -6165,6 +6192,7 @@ function OutstandingLedger() {
     const balance = running;
     const isHighRisk = balance > OUTSTANDING_RISK_LIMIT;
     const balColor = balance <= 0 ? T.emerald : (isHighRisk ? T.rose : T.amber);
+    const initials = selected.trim().split(/\s+/).slice(0, 2).map(w => w[0]).join("").toUpperCase();
 
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -6172,16 +6200,25 @@ function OutstandingLedger() {
           style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t2, padding: "6px 12px", fontSize: 12, cursor: "pointer", fontFamily: FONT, alignSelf: "flex-start" }}>← All Customers</button>
 
         {/* Tally-style ledger header banner */}
-        <div style={{ background: `linear-gradient(135deg, ${T.card}, ${T.cardHigh})`, border: `1px solid ${balColor}44`, borderRadius: 16, padding: 18, position: "relative", overflow: "hidden" }}>
-          <div style={{ position: "absolute", top: -30, right: -30, width: 120, height: 120, borderRadius: "50%", background: balColor + "14" }} />
-          <div style={{ fontSize: 10.5, color: T.t3, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>Customer Account</div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: T.t1, marginTop: 4 }}>{selected}</div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 10 }}>
-            <div style={{ fontSize: 30, fontWeight: 800, color: balColor }}>₹{Math.round(Math.abs(balance)).toLocaleString("en-IN")}</div>
+        <div style={{ background: `linear-gradient(135deg, ${T.card}, ${T.cardHigh})`, border: `1px solid ${balColor}44`, borderRadius: 18, padding: 20, position: "relative", overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: -40, right: -40, width: 160, height: 160, borderRadius: "50%", background: balColor + "12" }} />
+          <div style={{ position: "absolute", bottom: -50, left: -30, width: 120, height: 120, borderRadius: "50%", background: balColor + "0a" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 12, position: "relative" }}>
+            <div style={{
+              width: 44, height: 44, borderRadius: 12, background: balColor + "22", border: `1px solid ${balColor}44`,
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 800, color: balColor, flexShrink: 0,
+            }}>{initials}</div>
+            <div>
+              <div style={{ fontSize: 10.5, color: T.t3, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>Customer Account</div>
+              <div style={{ fontSize: 19, fontWeight: 800, color: T.t1, marginTop: 2 }}>{selected}</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 14, position: "relative" }}>
+            <div style={{ fontSize: 32, fontWeight: 800, color: balColor, letterSpacing: "-0.02em" }}>₹{Math.round(Math.abs(balance)).toLocaleString("en-IN")}</div>
             {isHighRisk && <Chip label="🚨 HIGH RISK" color={T.rose} />}
             {balance < 0 && <Chip label="In Credit" color={T.emerald} />}
           </div>
-          <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>
+          <div style={{ fontSize: 11, color: T.t3, marginTop: 2, position: "relative" }}>
             {balance > 0 ? "Outstanding balance" : balance < 0 ? "Customer has paid in advance" : "Fully settled"}
           </div>
         </div>
@@ -6190,10 +6227,18 @@ function OutstandingLedger() {
           <Btn label="+ Add Entry" full onClick={() => openAddFor(selected)} />
           <Btn label={generatingStatementPDF ? "Generating…" : "📄 Statement PDF"} full color={T.amber} onClick={() => downloadCustomerStatement(selected)} />
         </div>
+        {balance > 0 && (
+          <Btn label={`💰 Record Payment of ₹${Math.round(balance).toLocaleString("en-IN")}`} full color={T.emerald}
+            onClick={() => {
+              setAddForm({ customer: selected, date: todayISO(), type: "Credit", amount: String(Math.round(balance)), note: "Payment received" });
+              setAddCustomerPick(selected);
+              setShowAdd(true);
+            }} />
+        )}
 
         {/* Tally-style Date | Particulars | Debit | Credit | Balance table */}
         <Card>
-          <Label sub={`${rows.length} ${rows.length === 1 ? "entry" : "entries"} · running balance shown per row, like a bank passbook`}>Ledger Statement</Label>
+          <Label sub={`${rows.length} ${rows.length === 1 ? "entry" : "entries"} · running balance shown per row, like a bank passbook · tap any row to edit`}>Ledger Statement</Label>
           {rows.length === 0 && <div style={{ fontSize: 12, color: T.t3, padding: "16px 0" }}>No entries yet — add one to start this customer's account.</div>}
           {rows.length > 0 && (
             <div style={{ marginTop: 10, borderRadius: 10, overflow: "hidden", border: `1px solid ${T.border}` }}>
@@ -6201,19 +6246,21 @@ function OutstandingLedger() {
                 <div>Date</div><div>Particulars</div><div style={{ textAlign: "right" }}>Debit</div><div style={{ textAlign: "right" }}>Credit</div><div style={{ textAlign: "right" }}>Balance</div>
               </div>
               {rows.map((r, i) => (
-                <div key={r.id} style={{ display: "grid", gridTemplateColumns: "1.1fr 1.7fr 1fr 1fr 1.1fr", padding: "9px 10px", fontSize: 11.5, background: i % 2 ? T.surface : "transparent", borderTop: `1px solid ${T.border}`, alignItems: "center" }}>
+                <button key={r.id} onClick={() => openEditFor(r)} style={{
+                  display: "grid", gridTemplateColumns: "1.1fr 1.7fr 1fr 1fr 1.1fr", padding: "9px 10px", fontSize: 11.5,
+                  background: i % 2 ? T.surface : "transparent", borderTop: `1px solid ${T.border}`, alignItems: "center",
+                  width: "100%", border: "none", borderTopWidth: 1, borderTopStyle: "solid", borderTopColor: T.border,
+                  cursor: "pointer", fontFamily: FONT, textAlign: "left",
+                }}>
                   <div style={{ color: T.t2 }}>{formatDateReadable(r.date)}</div>
                   <div style={{ color: T.t1, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                     <span>{r.note || (r.type === "Debit" ? "Outstanding" : "Payment")}</span>
-                    {r.source === "manual" && (
-                      <button onClick={() => deleteEntry(r.id)} title="Delete entry"
-                        style={{ background: "none", border: "none", color: T.t3, cursor: "pointer", fontSize: 11, padding: 0 }}>🗑️</button>
-                    )}
+                    <span style={{ color: T.t4, fontSize: 10 }}>✏️</span>
                   </div>
                   <div style={{ textAlign: "right", color: T.rose, fontWeight: 700 }}>{r.type === "Debit" ? `₹${Math.round(r.amount).toLocaleString("en-IN")}` : "—"}</div>
                   <div style={{ textAlign: "right", color: T.emerald, fontWeight: 700 }}>{r.type === "Credit" ? `₹${Math.round(r.amount).toLocaleString("en-IN")}` : "—"}</div>
                   <div style={{ textAlign: "right", color: r.running > 0 ? T.amber : T.t2, fontWeight: 800 }}>₹{Math.round(r.running).toLocaleString("en-IN")}</div>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -6222,6 +6269,14 @@ function OutstandingLedger() {
         <Sheet open={showAdd} onClose={() => setShowAdd(false)} title="Add Ledger Entry">
           {ledgerRowFields(addForm, patch => setAddForm(f => ({ ...f, ...patch })))}
           <Btn label="Save Entry" full onClick={saveAddEntry} disabled={!addForm.customer.trim() || !(parseFloat(addForm.amount) > 0)} />
+        </Sheet>
+
+        <Sheet open={!!editingEntry} onClose={() => setEditingEntry(null)} title="Edit Ledger Entry">
+          {ledgerRowFields(editForm, patch => setEditForm(f => ({ ...f, ...patch })))}
+          <div style={{ display: "flex", gap: 8 }}>
+            <Btn label="Save Changes" full onClick={saveEditEntry} disabled={!editForm.customer.trim() || !(parseFloat(editForm.amount) > 0)} />
+            <Btn label="🗑️ Delete" color={T.rose} ghost onClick={deleteEditingEntry} />
+          </div>
         </Sheet>
       </div>
     );
@@ -6237,16 +6292,19 @@ function OutstandingLedger() {
       <Card accent={T.amber}>
         <Label sub="A running Debit/Credit account per customer — like a Tally ledger. Daily Orders auto-updates this when you log an order or mark it Paid; use this tab to correct balances or add pending amounts manually">Outstanding Ledger</Label>
         <div style={{ display: "flex", gap: 8, marginTop: 12, marginBottom: 4, flexWrap: "wrap" }}>
-          <div style={{ flex: "1 1 100px", background: T.rose + "14", border: `1px solid ${T.rose}44`, borderRadius: 12, padding: "10px 10px", textAlign: "center" }}>
-            <div style={{ fontSize: 20, fontWeight: 800, color: T.rose }}>{pendingCount}</div>
+          <div style={{ flex: "1 1 100px", background: `linear-gradient(160deg, ${T.rose}1c, ${T.rose}08)`, border: `1px solid ${T.rose}3a`, borderRadius: 14, padding: "12px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: 16, marginBottom: 2 }}>👥</div>
+            <div style={{ fontSize: 21, fontWeight: 800, color: T.rose }}>{pendingCount}</div>
             <div style={{ fontSize: 9.5, color: T.rose, fontWeight: 700, marginTop: 2, textTransform: "uppercase" }}>Customers Owing</div>
           </div>
-          <div style={{ flex: "1 1 100px", background: T.amber + "14", border: `1px solid ${T.amber}44`, borderRadius: 12, padding: "10px 10px", textAlign: "center" }}>
-            <div style={{ fontSize: 18, fontWeight: 800, color: T.amber }}>₹{Math.round(totalOutstanding).toLocaleString("en-IN")}</div>
+          <div style={{ flex: "1 1 100px", background: `linear-gradient(160deg, ${T.amber}1c, ${T.amber}08)`, border: `1px solid ${T.amber}3a`, borderRadius: 14, padding: "12px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: 16, marginBottom: 2 }}>💰</div>
+            <div style={{ fontSize: 19, fontWeight: 800, color: T.amber }}>₹{Math.round(totalOutstanding).toLocaleString("en-IN")}</div>
             <div style={{ fontSize: 9.5, color: T.amber, fontWeight: 700, marginTop: 2, textTransform: "uppercase" }}>Total Outstanding</div>
           </div>
-          <div style={{ flex: "1 1 100px", background: T.rose + "14", border: `1px solid ${T.rose}44`, borderRadius: 12, padding: "10px 10px", textAlign: "center" }}>
-            <div style={{ fontSize: 20, fontWeight: 800, color: T.rose }}>{highRiskCount}</div>
+          <div style={{ flex: "1 1 100px", background: `linear-gradient(160deg, ${T.rose}1c, ${T.rose}08)`, border: `1px solid ${T.rose}3a`, borderRadius: 14, padding: "12px 10px", textAlign: "center" }}>
+            <div style={{ fontSize: 16, marginBottom: 2 }}>🚨</div>
+            <div style={{ fontSize: 21, fontWeight: 800, color: T.rose }}>{highRiskCount}</div>
             <div style={{ fontSize: 9.5, color: T.rose, fontWeight: 700, marginTop: 2, textTransform: "uppercase" }}>High Risk</div>
           </div>
         </div>
@@ -6264,18 +6322,25 @@ function OutstandingLedger() {
         {balances.map(c => {
           const isHighRisk = c.balance > OUTSTANDING_RISK_LIMIT;
           const color = c.balance <= 0 ? T.emerald : (isHighRisk ? T.rose : T.amber);
+          const initials = c.name.trim().split(/\s+/).slice(0, 2).map(w => w[0]).join("").toUpperCase();
           return (
             <button key={c.name} onClick={() => setSelected(c.name)} style={{
               display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%",
-              background: "none", border: "none", borderBottom: `1px solid ${T.border}`, padding: "12px 0",
-              cursor: "pointer", fontFamily: FONT, textAlign: "left",
+              background: "none", border: "none", borderBottom: `1px solid ${T.border}`, padding: "10px 0",
+              cursor: "pointer", fontFamily: FONT, textAlign: "left", transition: "background 0.15s",
             }}>
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: T.t1 }}>{c.name}</span>
-                  {isHighRisk && <Chip label="🚨 HIGH RISK" color={T.rose} small />}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 10, background: color + "1e", border: `1px solid ${color}44`,
+                  display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800, color, flexShrink: 0,
+                }}>{initials}</div>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: T.t1 }}>{c.name}</span>
+                    {isHighRisk && <Chip label="🚨 HIGH RISK" color={T.rose} small />}
+                  </div>
+                  <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>{c.entries.length} {c.entries.length === 1 ? "entry" : "entries"}</div>
                 </div>
-                <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>{c.entries.length} {c.entries.length === 1 ? "entry" : "entries"}</div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ fontSize: 15, fontWeight: 800, color }}>₹{Math.round(Math.abs(c.balance)).toLocaleString("en-IN")}</span>

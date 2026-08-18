@@ -215,6 +215,16 @@ def _coerce(tab_key, row):
                     row["items"] = []
             elif not isinstance(raw_items, list):
                 row["items"] = []
+    elif tab_key == "outstandingLedger":
+        # id and orderId are numeric on the frontend (Date.now()-based) but
+        # come back from Sheets as plain text — without coercion, strict
+        # (===) comparisons like "does this Debit belong to order X" silently
+        # fail after every reload, breaking the auto Debit/Credit sync and
+        # letting stray/duplicate entries pile up.
+        for f in ("id", "amount", "orderId", "createdAt"):
+            if row.get(f, "") not in (None, ""):
+                try: row[f] = float(row[f]) if "." in str(row[f]) else int(row[f])
+                except: pass
     elif tab_key == "existingCustomers":
         # Each remark is either a legacy plain string, or a newer structured
         # entry (JSON-encoded, carrying telecaller attribution) — the whole
