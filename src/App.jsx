@@ -63,7 +63,7 @@ const INITIAL_SAMPLES = [
 
 const LOST_REASONS = ["Not Delivered on Time", "Quality Not Good", "Outstanding", "Others"];
 const EXISTING_CUSTOMER_STATUSES = ["Calling", "Interested", "Rejoined", "Own Making", "Not Reachable", "Not Interested"];
-const TELECALLERS = ["Thulasi", "Ramya", "Sabi (Intern)", "Azgar (Intern)", "Naveen HR"];
+const TELECALLERS = ["Thulasi", "Ramya", "Sabi (Intern)", "Naveen HR"];
 
 // Quick-pick remark tags for the Existing Customer call log. Each carries a
 // sentiment so calls can be rolled up into a Positive / Negative / Neutral
@@ -3749,452 +3749,6 @@ function downloadCSV(filename, content) {
   URL.revokeObjectURL(url);
 }
 
-// ─── TELECALLER DAILY ACTIVITY ───────────────────────────────────────────
-// Dedicated daybook for telecallers: log each Interested lead, each Order
-// (customer + kg), and each Sample (customer + qty) as its own dated entry,
-// separate from the full CRM pipeline. Management gets a Team Overview +
-// per-telecaller detail, day/week/month, with a downloadable PDF.
-const ACTIVITY_KG_RATE = 35;
-
-function summarizeActivity(rows, telecaller) {
-  const set = telecaller ? rows.filter(r => r.telecaller === telecaller) : rows;
-  const interested = set.filter(r => r.type === "interested").length;
-  const orderRows = set.filter(r => r.type === "order");
-  const samples = set.filter(r => r.type === "sample").length;
-  const totalKg = orderRows.reduce((s, r) => s + (parseFloat(r.kg) || 0), 0);
-  const totalAmount = orderRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-  const conv = interested ? Math.round((orderRows.length / interested) * 100) : 0;
-  return { interested, orders: orderRows.length, samples, totalKg, totalAmount, conv };
-}
-
-function TelecallerActivity({ embedded = false } = {}) {
-  const [activity, setActivity, activitySyncStatus] = useSheetSynced("telecallerActivity", "telecallerActivity", []);
-  const [view, setView] = useState("entry"); // entry | reports
-
-  // ── Entry state ──
-  const [telecaller, setTelecaller] = useState(TELECALLERS[0]);
-  const [date, setDate] = useState(todayISO());
-  const [type, setType] = useState("interested");
-  const [form, setForm] = useState({ customer: "", area: "", notes: "", kg: "", amount: "", qty: "", unit: "KG" });
-
-  // ── Report state ──
-  const [reportPreset, setReportPreset] = useState("Today");
-  const [reportFrom, setReportFrom] = useState(todayISO());
-  const [reportTo, setReportTo] = useState(todayISO());
-  const [reportTelecaller, setReportTelecaller] = useState("All");
-  const [generatingReport, setGeneratingReport] = useState(false);
-
-  const applyReportPreset = (preset) => {
-    setReportPreset(preset);
-    const now = new Date();
-    if (preset === "Today") { setReportFrom(todayISO()); setReportTo(todayISO()); }
-    else if (preset === "This Week") {
-      const day = now.getDay() || 7;
-      const monday = new Date(now); monday.setDate(now.getDate() - day + 1);
-      setReportFrom(localISO(monday)); setReportTo(todayISO());
-    } else if (preset === "This Month") {
-      const first = new Date(now.getFullYear(), now.getMonth(), 1);
-      setReportFrom(localISO(first)); setReportTo(todayISO());
-    }
-  };
-
-  const dayEntries = useMemo(
-    () => (activity || []).filter(a => a.telecaller === telecaller && a.date === date),
-    [activity, telecaller, date]
-  );
-  const dayTally = useMemo(() => summarizeActivity(dayEntries, null), [dayEntries]);
-
-  const rangeEntries = useMemo(
-    () => (activity || []).filter(a => a.date >= reportFrom && a.date <= reportTo),
-    [activity, reportFrom, reportTo]
-  );
-
-  const resetForm = () => setForm({ customer: "", area: "", notes: "", kg: "", amount: "", qty: "", unit: "KG" });
-
-  const addEntry = () => {
-    const name = form.customer.trim();
-    if (!name) { alert("Enter a customer / business name."); return; }
-    const entry = {
-      id: Date.now() + "_" + Math.random().toString(36).slice(2, 7),
-      date, telecaller, type, customer: name,
-      createdAt: Date.now(),
-    };
-    if (type === "interested") {
-      entry.area = form.area.trim(); entry.notes = form.notes.trim();
-    } else if (type === "order") {
-      entry.kg = parseFloat(form.kg) || 0;
-      entry.amount = form.amount !== "" ? (parseFloat(form.amount) || 0) : entry.kg * ACTIVITY_KG_RATE;
-    } else {
-      entry.qty = parseFloat(form.qty) || 0; entry.unit = (form.unit || "KG").trim(); entry.notes = form.notes.trim();
-    }
-    setActivity(prev => [...(prev || []), entry]);
-    resetForm();
-  };
-
-  const deleteEntry = (id) => setActivity(prev => (prev || []).filter(e => e.id !== id));
-
-  const detailFor = (e) => {
-    if (e.type === "interested") return [e.area, e.notes].filter(Boolean).join(" — ") || "—";
-    if (e.type === "order") return `${e.kg || 0} kg · ₹${(e.amount || 0).toLocaleString("en-IN")}`;
-    return `${e.qty || 0} ${e.unit || ""}${e.notes ? " — " + e.notes : ""}`;
-  };
-  const typeChip = (t) => {
-    const map = { interested: [T.indigo, "Interested"], order: [T.amber, "Order"], sample: [T.sky, "Sample"] };
-    const [color, label] = map[t] || [T.t3, t];
-    return <Chip small label={label} color={color} />;
-  };
-
-  // ── PDF export: Team Overview page + one detail page per telecaller ──
-  const downloadActivityReport = async () => {
-    if (generatingReport) return;
-    setGeneratingReport(true);
-    try {
-      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
-        import("jspdf"), import("jspdf-autotable"),
-      ]);
-      const NAVY = [8, 40, 25], TEAL = [23, 148, 74], AMBER = [180, 110, 5], INDIGO = [79, 70, 229];
-      const GRID = [214, 220, 214], INK = [26, 32, 46], SUBTLE = [110, 118, 138];
-      const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
-      const pageW = doc.internal.pageSize.getWidth();
-      const pageH = doc.internal.pageSize.getHeight();
-      const margin = 32;
-      const rangeLabel = reportFrom === reportTo ? formatDateReadable(reportFrom) : `${formatDateReadable(reportFrom)}  –  ${formatDateReadable(reportTo)}`;
-
-      const header = (title) => {
-        const headerH = 74;
-        doc.setFillColor(...NAVY);
-        doc.rect(0, 0, pageW, headerH, "F");
-        doc.setFillColor(...TEAL);
-        doc.rect(0, headerH - 2, pageW, 2, "F");
-        const logoSize = 34, badgePad = 5, badgeSize = logoSize + badgePad * 2;
-        const badgeX = margin, badgeY = (headerH - badgeSize) / 2 - 1;
-        doc.setFillColor(255, 255, 255);
-        doc.roundedRect(badgeX, badgeY, badgeSize, badgeSize, 8, 8, "F");
-        try { doc.addImage(SRIDHI_LOGO_PNG, "PNG", badgeX + badgePad, badgeY + badgePad, logoSize, logoSize); } catch (e) {}
-        const textX = badgeX + badgeSize + 14;
-        doc.setTextColor(255, 255, 255);
-        doc.setFont("helvetica", "bold"); doc.setFontSize(15);
-        doc.text(title, textX, 30);
-        doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(200, 214, 205);
-        doc.text(`${reportPreset} · ${rangeLabel}`, textX, 46);
-        doc.setFontSize(8);
-        doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`, pageW - margin, 30, { align: "right" });
-        return headerH + 20;
-      };
-      const footer = (label) => {
-        const pageCount = doc.internal.getNumberOfPages();
-        for (let i = 1; i <= pageCount; i++) {
-          doc.setPage(i);
-          doc.setDrawColor(...GRID);
-          doc.line(margin, pageH - 26, pageW - margin, pageH - 26);
-          doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...SUBTLE);
-          doc.text(label, margin, pageH - 13);
-          doc.text(`Page ${i} of ${pageCount}`, pageW - margin, pageH - 13, { align: "right" });
-        }
-      };
-
-      // ── Page 1: Team overview ──
-      let y = header("Telecaller Performance Report");
-      const totals = summarizeActivity(rangeEntries, null);
-      const boxes = [
-        ["Interested", totals.interested, TEAL], ["Orders", totals.orders, AMBER],
-        ["Kg Sold", totals.totalKg, INDIGO], ["Order Value", "₹" + totals.totalAmount.toLocaleString("en-IN"), TEAL],
-        ["Samples", totals.samples, [58, 174, 224]], ["Conversion", totals.conv + "%", AMBER],
-      ];
-      doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(...NAVY);
-      doc.text("TEAM TOTALS", margin, y); y += 10;
-      const bw = (pageW - margin * 2 - 5 * 8) / 6;
-      boxes.forEach(([label, val, color], i) => {
-        const bx = margin + i * (bw + 8);
-        doc.setFillColor(...color.map(c => Math.min(255, c + (255 - c) * 0.88)));
-        doc.setDrawColor(...color);
-        doc.roundedRect(bx, y, bw, 46, 8, 8, "FD");
-        doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.setTextColor(...color);
-        doc.text(String(val), bx + 8, y + 24);
-        doc.setFont("helvetica", "normal"); doc.setFontSize(6.5); doc.setTextColor(...SUBTLE);
-        doc.text(label.toUpperCase(), bx + 8, y + 37);
-      });
-      y += 68;
-
-      doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(...NAVY);
-      doc.text("BY TELECALLER", margin, y); y += 8;
-      const teamRows = TELECALLERS.map(t => {
-        const s = summarizeActivity(rangeEntries, t);
-        return [t, s.interested, s.orders, s.totalKg, "₹" + s.totalAmount.toLocaleString("en-IN"), s.samples, s.conv + "%"];
-      });
-      autoTable(doc, {
-        startY: y,
-        margin: { top: 94, bottom: 40 },
-        head: [["Telecaller", "Interested", "Orders", "Kg", "Value", "Samples", "Conv."]],
-        body: teamRows,
-        theme: "grid",
-        styles: { font: "helvetica", fontSize: 9, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "middle" },
-        headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 },
-        alternateRowStyles: { fillColor: [248, 250, 248] },
-        columnStyles: { 0: { fontStyle: "bold", cellWidth: 100 } },
-      });
-
-      // ── One detail page per telecaller ──
-      const targets = reportTelecaller === "All" ? TELECALLERS : [reportTelecaller];
-      targets.forEach(t => {
-        doc.addPage();
-        const s = summarizeActivity(rangeEntries, t);
-        let yy = header(`${t} — Activity Detail`);
-        const rows = rangeEntries.filter(e => e.telecaller === t).sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
-
-        const chips = [
-          [`${s.interested} Interested`, TEAL], [`${s.orders} Orders`, AMBER],
-          [`${s.samples} Samples`, [58, 174, 224]], [`${s.conv}% Conversion`, INDIGO],
-        ];
-        let cx = margin;
-        chips.forEach(([label, color]) => {
-          doc.setFont("helvetica", "bold"); doc.setFontSize(9);
-          const w = doc.getTextWidth(label) + 20;
-          doc.setFillColor(...color.map(c => Math.min(255, c + (255 - c) * 0.88)));
-          doc.setDrawColor(...color);
-          doc.roundedRect(cx, yy, w, 22, 11, 11, "FD");
-          doc.setTextColor(...color);
-          doc.text(label, cx + 10, yy + 15);
-          cx += w + 8;
-        });
-        yy += 36;
-
-        const section = (title, color, cols, body) => {
-          doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...color);
-          doc.text(title, margin, yy); yy += 6;
-          if (!body.length) {
-            doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(...SUBTLE);
-            doc.text("None recorded.", margin, yy + 12); yy += 24; return;
-          }
-          autoTable(doc, {
-            startY: yy + 4, margin: { top: 94, bottom: 40 },
-            head: [cols], body,
-            theme: "grid",
-            styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5, lineColor: GRID, lineWidth: 0.6, textColor: INK },
-            headStyles: { fillColor: color, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
-            alternateRowStyles: { fillColor: [248, 250, 248] },
-            didDrawPage: () => header(`${t} — Activity Detail`),
-          });
-          yy = doc.lastAutoTable.finalY + 18;
-        };
-
-        section("INTERESTED LEADS", TEAL, ["Date", "Customer", "Area", "Notes"],
-          rows.filter(e => e.type === "interested").map(e => [formatDateReadable(e.date), e.customer, e.area || "—", e.notes || "—"]));
-        section("ORDERS", AMBER, ["Date", "Customer", "Kg", "Amount"],
-          rows.filter(e => e.type === "order").map(e => [formatDateReadable(e.date), e.customer, e.kg, "₹" + (e.amount || 0).toLocaleString("en-IN")]));
-        section("SAMPLES", INDIGO, ["Date", "Customer", "Qty", "Notes"],
-          rows.filter(e => e.type === "sample").map(e => [formatDateReadable(e.date), e.customer, `${e.qty || 0} ${e.unit || ""}`, e.notes || "—"]));
-      });
-
-      footer("Sridhi Ventures · Telecaller Performance Report");
-      doc.save(`Telecaller-Activity-Report_${reportFrom}_to_${reportTo}.pdf`);
-    } finally {
-      setGeneratingReport(false);
-    }
-  };
-
-  return (
-    <div>
-      <Label sub="Interested · Orders · Samples — logged daily, reported to management">Telecaller Activity</Label>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        {[["entry", "✍️ Entry"], ["reports", "📊 Reports"]].map(([id, lbl]) => (
-          <button key={id} onClick={() => setView(id)} style={{
-            flex: 1, padding: "10px 0", borderRadius: 12, cursor: "pointer", fontFamily: FONT,
-            fontWeight: 700, fontSize: 13, border: `1px solid ${view === id ? T.accent : T.border}`,
-            background: view === id ? T.accentSub : "transparent", color: view === id ? T.accent : T.t2,
-          }}>{lbl}</button>
-        ))}
-      </div>
-
-      {view === "entry" ? (
-        <>
-          <Card style={{ marginBottom: 14 }}>
-            <div style={{ display: "flex", gap: 10, marginBottom: 4 }}>
-              <div style={{ flex: 1 }}>
-                <Dropdown label="Telecaller" value={telecaller} onChange={e => setTelecaller(e.target.value)} options={TELECALLERS} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Date</div>
-                <input type="date" value={date} max={todayISO()} onChange={e => setDate(e.target.value || todayISO())} style={inputStyle} />
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: 6, margin: "10px 0 14px" }}>
-              {[["interested", "☎ Interested", T.indigo], ["order", "📦 Order", T.amber], ["sample", "🧪 Sample", T.sky]].map(([id, lbl, color]) => (
-                <button key={id} onClick={() => setType(id)} style={{
-                  flex: 1, padding: "9px 0", borderRadius: 10, cursor: "pointer", fontFamily: FONT,
-                  fontWeight: 700, fontSize: 12, border: `1px solid ${type === id ? color : T.border}`,
-                  background: type === id ? color + "18" : "transparent", color: type === id ? color : T.t2,
-                }}>{lbl}</button>
-              ))}
-            </div>
-
-            <Field label="Customer / Business Name" value={form.customer} onChange={e => setForm({ ...form, customer: e.target.value })} placeholder="e.g. Sri Krishna Mess" />
-            {type === "interested" && (
-              <>
-                <Field label="Area" value={form.area} onChange={e => setForm({ ...form, area: e.target.value })} placeholder="e.g. Ambattur" />
-                <Field label="Notes (optional)" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="What they said, follow-up plan…" />
-              </>
-            )}
-            {type === "order" && (
-              <div style={{ display: "flex", gap: 10 }}>
-                <div style={{ flex: 1 }}>
-                  <Field label="Kilograms" type="number" value={form.kg} onChange={e => {
-                    const kg = e.target.value;
-                    setForm({ ...form, kg, amount: kg ? String((parseFloat(kg) || 0) * ACTIVITY_KG_RATE) : "" });
-                  }} placeholder="e.g. 10" />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <Field label="Amount (₹)" type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} placeholder={`auto: kg × ${ACTIVITY_KG_RATE}`} />
-                </div>
-              </div>
-            )}
-            {type === "sample" && (
-              <>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <div style={{ flex: 1 }}><Field label="Quantity" type="number" value={form.qty} onChange={e => setForm({ ...form, qty: e.target.value })} placeholder="e.g. 3" /></div>
-                  <div style={{ flex: 1 }}><Field label="Unit" value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} placeholder="KG" /></div>
-                </div>
-                <Field label="Feedback / notes (optional)" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Sample feedback…" />
-              </>
-            )}
-            <Btn full label={`+ Add ${type === "interested" ? "Interested Lead" : type === "order" ? "Order" : "Sample"}`}
-              color={type === "interested" ? T.indigo : type === "order" ? T.amber : T.sky} onClick={addEntry} />
-          </Card>
-
-          <Card>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <Label size={14}>{telecaller} · {formatDateReadable(date)}</Label>
-              <SyncBadge status={activitySyncStatus} />
-            </div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-              {[["Interested", dayTally.interested, T.indigo], ["Orders", dayTally.orders, T.amber], ["Samples", dayTally.samples, T.sky]].map(([l, v, c]) => (
-                <div key={l} style={{ flex: 1, textAlign: "center", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 4px" }}>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: c }}>{v}</div>
-                  <div style={{ fontSize: 9, color: T.t3, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>{l}</div>
-                </div>
-              ))}
-            </div>
-            {!dayEntries.length ? (
-              <div style={{ fontSize: 12.5, color: T.t3, fontStyle: "italic", padding: "10px 2px" }}>No entries logged yet for this day.</div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {[...dayEntries].sort((a, b) => b.createdAt - a.createdAt).map(e => (
-                  <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10 }}>
-                    {typeChip(e.type)}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: T.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.customer}</div>
-                      <div style={{ fontSize: 11, color: T.t3 }}>{detailFor(e)}</div>
-                    </div>
-                    <button onClick={() => deleteEntry(e.id)} style={{ background: "none", border: "none", color: T.rose, cursor: "pointer", fontSize: 16, padding: "0 2px" }}>✕</button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </>
-      ) : (
-        <>
-          <Card style={{ marginBottom: 14 }}>
-            <Label size={14}>Report Range</Label>
-            <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-              {["Today", "This Week", "This Month", "Custom"].map(p => (
-                <button key={p} onClick={() => applyReportPreset(p)} style={{
-                  padding: "7px 13px", borderRadius: 20, cursor: "pointer", fontFamily: FONT,
-                  fontWeight: 700, fontSize: 11.5,
-                  background: reportPreset === p ? T.amber : "transparent",
-                  color: reportPreset === p ? "#1A1200" : T.t2,
-                  border: `1px solid ${reportPreset === p ? T.amber : T.border}`,
-                }}>{p}</button>
-              ))}
-            </div>
-            {reportPreset === "Custom" && (
-              <div style={{ display: "flex", gap: 10, marginBottom: 4 }}>
-                <div style={{ flex: 1 }}><input type="date" value={reportFrom} max={todayISO()} onChange={e => { setReportFrom(e.target.value); setReportPreset("Custom"); }} style={inputStyle} /></div>
-                <div style={{ flex: 1 }}><input type="date" value={reportTo} max={todayISO()} onChange={e => { setReportTo(e.target.value); setReportPreset("Custom"); }} style={inputStyle} /></div>
-              </div>
-            )}
-            <div style={{ marginTop: 12 }}>
-              <Dropdown label="Telecaller filter (PDF detail pages)" value={reportTelecaller} onChange={e => setReportTelecaller(e.target.value)} options={["All", ...TELECALLERS]} />
-            </div>
-            <Btn full label={generatingReport ? "Generating…" : "🧾 Download PDF Report"} color={T.amber} disabled={generatingReport} onClick={downloadActivityReport} />
-          </Card>
-
-          <Card style={{ marginBottom: 14 }}>
-            <Label size={14} sub={reportFrom === reportTo ? formatDateReadable(reportFrom) : `${formatDateReadable(reportFrom)} – ${formatDateReadable(reportTo)}`}>Team Overview</Label>
-            {!rangeEntries.length ? (
-              <div style={{ fontSize: 12.5, color: T.t3, fontStyle: "italic" }}>No activity logged in this range yet.</div>
-            ) : (() => {
-              const totals = summarizeActivity(rangeEntries, null);
-              const maxInterested = Math.max(1, ...TELECALLERS.map(t => summarizeActivity(rangeEntries, t).interested));
-              return (
-                <>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-                    {[["Interested", totals.interested, T.indigo], ["Orders", totals.orders, T.amber], ["Kg Sold", totals.totalKg, T.sky],
-                      ["Value", "₹" + totals.totalAmount.toLocaleString("en-IN"), T.emerald], ["Samples", totals.samples, T.orange], ["Conv.", totals.conv + "%", T.accent]]
-                      .map(([l, v, c]) => (
-                        <div key={l} style={{ flex: "1 1 90px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px" }}>
-                          <div style={{ fontSize: 17, fontWeight: 800, color: c }}>{v}</div>
-                          <div style={{ fontSize: 9, color: T.t3, fontWeight: 700, textTransform: "uppercase" }}>{l}</div>
-                        </div>
-                      ))}
-                  </div>
-                  {TELECALLERS.map(t => {
-                    const s = summarizeActivity(rangeEntries, t);
-                    const pct = (s.interested / maxInterested) * 100;
-                    return (
-                      <div key={t} style={{ marginBottom: 10 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, marginBottom: 4 }}>
-                          <span style={{ fontWeight: 700, color: T.t1 }}>{t}</span>
-                          <span style={{ color: T.t3 }}>{s.interested} interested · {s.orders} orders · {s.samples} samples · {s.conv}%</span>
-                        </div>
-                        <div style={{ height: 8, background: T.surface, borderRadius: 4, overflow: "hidden" }}>
-                          <div style={{ width: pct + "%", height: "100%", background: T.indigo, borderRadius: 4 }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </>
-              );
-            })()}
-          </Card>
-
-          <Card>
-            <Label size={14}>Telecaller Detail</Label>
-            {(reportTelecaller === "All" ? TELECALLERS : [reportTelecaller]).map(t => {
-              const rows = rangeEntries.filter(e => e.telecaller === t).sort((a, b) => b.createdAt - a.createdAt);
-              const s = summarizeActivity(rangeEntries, t);
-              return (
-                <div key={t} style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: T.t1, marginBottom: 6 }}>
-                    {t} <span style={{ fontWeight: 500, color: T.t3, fontSize: 11 }}>— {s.interested} interested · {s.orders} orders · {s.samples} samples · {s.conv}% conversion</span>
-                  </div>
-                  {!rows.length ? (
-                    <div style={{ fontSize: 12, color: T.t3, fontStyle: "italic" }}>No entries in this range.</div>
-                  ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {rows.map(e => (
-                        <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8 }}>
-                          {typeChip(e.type)}
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 12.5, fontWeight: 600, color: T.t1 }}>{e.customer} <span style={{ color: T.t3, fontWeight: 400 }}>· {formatDateReadable(e.date)}</span></div>
-                            <div style={{ fontSize: 11, color: T.t3 }}>{detailFor(e)}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </Card>
-        </>
-      )}
-    </div>
-  );
-}
-
 function DailyOrders({ embedded = false } = {}) {
   const [orders, setOrders, ordersSyncStatus] = useSheetSynced("dailyOrders", "dailyOrders", INITIAL_DAILY_ORDERS);
   const [leads, setLeads] = useSheetSynced("leads", "leads", []);
@@ -4444,6 +3998,25 @@ function DailyOrders({ embedded = false } = {}) {
     .filter(o => (o.paymentStatus || (o.amount > 0 ? "Pending" : "N/A")) === "Pending")
     .sort((a, b) => a.date.localeCompare(b.date)); // oldest pending first — the most urgent
   const outstandingTotal = outstandingOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+
+  // Total pending balance per customer (across every one of their pending
+  // orders) — this is what powers the "existing outstanding" warning shown
+  // while logging a new order, so a telecaller can decide whether to
+  // deliver before the customer racks up more unpaid orders.
+  const OUTSTANDING_RISK_LIMIT = 2500;
+  const customerOutstandingMap = {};
+  outstandingOrders.forEach(o => {
+    const key = (o.customer || "").trim().toLowerCase();
+    customerOutstandingMap[key] = (customerOutstandingMap[key] || 0) + (parseFloat(o.amount) || 0);
+  });
+  const highRiskCustomerKeys = new Set(Object.keys(customerOutstandingMap).filter(k => customerOutstandingMap[k] > OUTSTANDING_RISK_LIMIT));
+  const customerOutstandingOf = (name, excludeOrderId) => {
+    const key = (name || "").trim().toLowerCase();
+    if (!key) return 0;
+    return outstandingOrders
+      .filter(o => (o.customer || "").trim().toLowerCase() === key && o.id !== excludeOrderId)
+      .reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
+  };
   const [generatingOutstandingPDF, setGeneratingOutstandingPDF] = useState(false);
 
   // A separate, always-attractive PDF built just for chasing payments —
@@ -4516,22 +4089,28 @@ function DailyOrders({ embedded = false } = {}) {
         ["Pending Orders", String(count), TEAL],
         ["Outstanding ₹", `Rs ${Math.round(outstandingTotal).toLocaleString("en-IN")}`, AMBER],
         ["Oldest Pending", `${oldest} day${oldest === 1 ? "" : "s"}`, ROSE],
+        ["High Risk", String(highRiskCustomerKeys.size), ROSE],
       ];
-      const boxW = (pageW - margin * 2 - 16) / 3;
+      const boxW = (pageW - margin * 2 - 24) / 4;
       boxes.forEach(([label, value, color], i) => {
         const bx = margin + i * (boxW + 8);
         doc.setFillColor(...color.map(c => Math.min(255, c + (255 - c) * 0.88)));
         doc.setDrawColor(...color);
         doc.roundedRect(bx, y, boxW, 46, 8, 8, "FD");
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(15);
+        doc.setFontSize(14);
         doc.setTextColor(...color);
-        doc.text(value, bx + 12, y + 26);
+        doc.text(value, bx + 10, y + 26);
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(8);
-        doc.text(label.toUpperCase(), bx + 12, y + 39);
+        doc.setFontSize(7.5);
+        doc.text(label.toUpperCase(), bx + 10, y + 39);
       });
-      y += 62;
+      y += 56;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(...SUBTLE);
+      doc.text(`"High Risk" = a customer whose total pending balance across all their orders exceeds Rs ${OUTSTANDING_RISK_LIMIT.toLocaleString("en-IN")}.`, margin, y);
+      y += 14;
 
       if (!outstandingOrders.length) {
         doc.setFont("helvetica", "normal");
@@ -4542,31 +4121,40 @@ function DailyOrders({ embedded = false } = {}) {
         const body = outstandingOrders.map(o => {
           const d = daysPendingOf(o);
           const latest = (o.paymentRemarks && o.paymentRemarks.length) ? o.paymentRemarks[o.paymentRemarks.length - 1] : null;
+          const isHighRisk = highRiskCustomerKeys.has((o.customer || "").trim().toLowerCase());
           return [
             formatDateReadable(o.date), o.customer, o.contact || "—",
             `Rs ${Math.round(o.amount || 0).toLocaleString("en-IN")}`,
             `${d} day${d === 1 ? "" : "s"}`,
+            isHighRisk ? "HIGH RISK" : "Normal",
             latest ? `${latest.note} (${latest.telecaller})` : "No follow-up logged yet",
           ];
         });
         autoTable(doc, {
           startY: y,
           margin: { top: 118, bottom: 40 },
-          head: [["Order Date", "Customer", "Contact", "Amount", "Pending", "Latest Follow-up"]],
+          head: [["Order Date", "Customer", "Contact", "Amount", "Pending", "Risk", "Latest Follow-up"]],
           body,
           theme: "grid",
           styles: { font: "helvetica", fontSize: 8.5, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "middle" },
           headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 },
           alternateRowStyles: { fillColor: [248, 250, 248] },
-          columnStyles: { 1: { fontStyle: "bold" }, 3: { fontStyle: "bold", halign: "right" }, 4: { fontStyle: "bold", halign: "center" } },
+          columnStyles: { 1: { fontStyle: "bold" }, 3: { fontStyle: "bold", halign: "right" }, 4: { fontStyle: "bold", halign: "center" }, 5: { fontStyle: "bold", halign: "center" } },
           didParseCell: (data) => {
-            // Colour the Pending-days column by age, so the oldest, most
-            // urgent follow-ups jump out red without reading every row.
+            // Colour the Pending-days column by age, and the Risk column by
+            // whether this customer's total balance crosses the threshold —
+            // so the riskiest deliveries jump out without reading every row.
             if (data.section === "body" && data.column.index === 4) {
               const row = outstandingOrders[data.row.index];
               const color = agingColor(daysPendingOf(row));
               data.cell.styles.textColor = color;
               data.cell.styles.fillColor = color.map(c => Math.min(255, c + (255 - c) * 0.88));
+            }
+            if (data.section === "body" && data.column.index === 5) {
+              const isHighRisk = data.cell.raw === "HIGH RISK";
+              const color = isHighRisk ? ROSE : GREEN;
+              data.cell.styles.textColor = color;
+              data.cell.styles.fillColor = color.map(c => Math.min(255, c + (255 - c) * 0.9));
             }
           },
           didDrawPage: () => header(),
@@ -5825,7 +5413,12 @@ function DailyOrders({ embedded = false } = {}) {
             <div key={o.id} style={{ padding: "12px 0", borderBottom: `1px solid ${T.border}` }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: T.t1 }}>{o.customer}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: T.t1 }}>{o.customer}</div>
+                    {customerOutstandingMap[(o.customer || "").trim().toLowerCase()] > OUTSTANDING_RISK_LIMIT && (
+                      <Chip label="🚨 HIGH RISK" color={T.rose} small />
+                    )}
+                  </div>
                   <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>{formatDateReadable(o.date)}{o.contact ? ` · ${o.contact}` : ""}</div>
                 </div>
                 <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -5961,7 +5554,12 @@ function DailyOrders({ embedded = false } = {}) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
                   <div>
-                    <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{o.customer}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{o.customer}</div>
+                      {customerOutstandingMap[(o.customer || "").trim().toLowerCase()] > OUTSTANDING_RISK_LIMIT && (
+                        <Chip label="🚨 HIGH RISK" color={T.rose} small />
+                      )}
+                    </div>
                     <div style={{ fontSize:11, color:T.t3, marginTop:2, fontWeight:500 }}>
                       {[o.area, o.telecaller].filter(Boolean).join(" · ") || "—"}
                     </div>
@@ -6054,6 +5652,31 @@ function DailyOrders({ embedded = false } = {}) {
         {customerPick === NEW_CUSTOMER_OPTION && (
           <Field label="New Customer Name *" value={form.customer} onChange={e => setForm({ ...form, customer: e.target.value })} placeholder="e.g. Ganesh Stores" />
         )}
+        {(() => {
+          const existingOutstanding = customerOutstandingOf(form.customer, editingId);
+          if (!form.customer.trim() || existingOutstanding <= 0) return null;
+          const isHighRisk = existingOutstanding > OUTSTANDING_RISK_LIMIT;
+          const color = isHighRisk ? T.rose : T.amber;
+          return (
+            <div style={{
+              display: "flex", alignItems: "flex-start", gap: 10,
+              background: color + "18", border: `1.5px solid ${color}66`,
+              borderRadius: 12, padding: "12px 14px", marginTop: -6, marginBottom: 16,
+            }}>
+              <div style={{ fontSize: 22, lineHeight: 1 }}>{isHighRisk ? "🚨" : "⚠️"}</div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 800, color }}>
+                  {isHighRisk ? "HIGH RISK — " : ""}Existing Outstanding: ₹{Math.round(existingOutstanding).toLocaleString("en-IN")}
+                </div>
+                <div style={{ fontSize: 11, color: T.t2, marginTop: 3 }}>
+                  {isHighRisk
+                    ? `Balance is over ₹${OUTSTANDING_RISK_LIMIT.toLocaleString("en-IN")} — decide before delivering this order: collect on delivery, or hold until they clear the balance.`
+                    : "This customer has a pending balance from earlier orders."}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         <Field label="Area" value={form.area} onChange={e => setForm({ ...form, area: e.target.value })} placeholder="e.g. Ambattur" />
         <Field label="Contact Number" type="tel" value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder="e.g. 9876543210" />
         <Field label="Delivery Address (full address)" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="Door no., street, landmark — for the driver" />
@@ -7141,7 +6764,6 @@ const NAV = [
   { id:"more",      label:"More",     icon:"more"      },
 ];
 const MORE_MENU = [
-  { id:"activity",  label:"Telecaller Activity", icon:"📝" },
   { id:"dailyorders", label:"Daily Orders", icon:"📦" },
   { id:"samples",   label:"Samples",       icon:"🧪" },
   { id:"repeat",    label:"Repeat Orders", icon:"🔁" },
@@ -7252,7 +6874,6 @@ const DESKTOP_NAV = [
   { id: "leads",     label: "CRM",          icon: "crm" },
   { id: "pipeline",  label: "Pipeline",     icon: "pipeline" },
   { id: "repeat",    label: "Orders",       icon: "orders" },
-  { id: "activity",  label: "Telecaller Activity", icon: "clipboard", tag: "New" },
   { id: "lostcustomers", label: "Lost Customers", icon: "lostuser" },
   { id: "existingcustomers", label: "Existing Customers", icon: "existing" },
   { id: "dailyorders", label: "Daily Orders", icon: "cart" },
@@ -9029,7 +8650,7 @@ export default function App() {
 
   useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; }, [activeTab]);
 
-  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", dailyorders:"Daily Orders", activity:"Telecaller Activity", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads", today:"Today Tasks", prospects:"Find Prospects", lostcustomers:"Lost Customers" };
+  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", dailyorders:"Daily Orders", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads", today:"Today Tasks", prospects:"Find Prospects", lostcustomers:"Lost Customers" };
 
   // ── INSTALL BANNER ──
   const InstallBanner = () => showInstall ? (
@@ -9128,7 +8749,6 @@ export default function App() {
       case "lostcustomers": return <LostCustomers />;
       case "existingcustomers": return <ExistingCustomerPipeline />;
       case "dailyorders": return <DailyOrders {...moduleProps} />;
-      case "activity":  return <TelecallerActivity {...moduleProps} />;
       case "expenses":  return <Expenses />;
       case "marketing": return <Marketing />;
       case "reports":   return <Reports />;
