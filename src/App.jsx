@@ -5628,6 +5628,12 @@ function DailyOrders({ embedded = false } = {}) {
                   {!cancelled && (o.paymentStatus === "Paid"
                     ? <Chip label="✅ Paid" color={T.emerald} />
                     : (o.amount || 0) > 0 && <Chip label={`⚠ Pending · ${daysPendingOf(o)}d`} color={T.rose} />)}
+                  {(() => {
+                    const bal = customerOutstandingOf(o.customer);
+                    if (bal <= 0) return null;
+                    const risky = bal > OUTSTANDING_RISK_LIMIT;
+                    return <Chip label={`💳 Owes ₹${Math.round(bal).toLocaleString("en-IN")}`} color={risky ? T.rose : T.amber} />;
+                  })()}
                 </div>
                 {cancelled && o.cancelRemarks && (
                   <div style={{ fontSize: 11, color: T.t3, marginTop: 6 }}>Note: {o.cancelRemarks}</div>
@@ -6176,8 +6182,20 @@ function OutstandingLedger() {
         <Field label="Customer Name" value={row.customer} onChange={e => onChange({ customer: e.target.value })} placeholder="e.g. Oscar" />
       )}
       <Field label="Date" type="date" value={row.date} onChange={e => onChange({ date: e.target.value })} />
-      <Dropdown label="Type" value={row.type} onChange={e => onChange({ type: e.target.value })} options={["Debit", "Credit"]} />
-      <div style={{ fontSize: 10.5, color: T.t3, marginTop: -8, marginBottom: 14 }}>
+      <div style={{ fontSize: 11, color: T.t2, fontWeight: 700, marginBottom: 6 }}>Type</div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+        <button type="button" onClick={() => onChange({ type: "Debit" })} style={{
+          flex: 1, padding: "12px 8px", borderRadius: 10, cursor: "pointer", fontFamily: FONT, fontWeight: 800, fontSize: 12.5,
+          border: `2px solid ${row.type === "Debit" ? T.rose : T.border}`, background: row.type === "Debit" ? T.rose + "22" : T.card,
+          color: row.type === "Debit" ? T.rose : T.t3,
+        }}>📤 Debit<br /><span style={{ fontWeight: 500, fontSize: 10 }}>they owe more</span></button>
+        <button type="button" onClick={() => onChange({ type: "Credit" })} style={{
+          flex: 1, padding: "12px 8px", borderRadius: 10, cursor: "pointer", fontFamily: FONT, fontWeight: 800, fontSize: 12.5,
+          border: `2px solid ${row.type === "Credit" ? T.emerald : T.border}`, background: row.type === "Credit" ? T.emerald + "22" : T.card,
+          color: row.type === "Credit" ? T.emerald : T.t3,
+        }}>📥 Credit<br /><span style={{ fontWeight: 500, fontSize: 10 }}>payment received</span></button>
+      </div>
+      <div style={{ fontSize: 10.5, color: T.t3, marginBottom: 14 }}>
         {row.type === "Debit" ? "Debit = adds to what they owe (pending amount)." : "Credit = reduces balance (payment received)."}
       </div>
       <Field label="Amount (₹)" type="number" value={row.amount} onChange={e => onChange({ amount: e.target.value })} placeholder="e.g. 2500" />
