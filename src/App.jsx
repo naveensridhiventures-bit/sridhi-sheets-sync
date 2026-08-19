@@ -4050,6 +4050,7 @@ function DailyOrders({ embedded = false } = {}) {
   const daysPendingOf = (o) => Math.max(0, Math.round((new Date(todayISO()) - new Date(o.date)) / 86400000));
   const outstandingOrders = active
     .filter(o => (o.paymentStatus || (o.amount > 0 ? "Pending" : "N/A")) === "Pending")
+    .filter(o => o.date === todayISO()) // Payment Followup on this page is today's pending only — the Outstanding tab is where all-time unpaid balances live
     .sort((a, b) => a.date.localeCompare(b.date)); // oldest pending first — the most urgent
   const outstandingTotal = outstandingOrders.reduce((a, o) => a + (parseFloat(o.amount) || 0), 0);
 
@@ -5435,7 +5436,7 @@ function DailyOrders({ embedded = false } = {}) {
       }}>+ Log Order (₹{RATE_PER_KG}/KG)</button>
 
       <Card accent={T.rose}>
-        <Label sub="Every priced order starts Pending — mark it Paid as money comes in. Anything still pending shows here, oldest first, so nothing gets forgotten">Payment Followup</Label>
+        <Label sub="Every priced order today starts Pending — mark it Paid as money comes in. Older unpaid balances live in the Outstanding tab">Payment Followup</Label>
         <div style={{ display: "flex", gap: 8, marginTop: 10, marginBottom: 14 }}>
           <div style={{ flex: 1, background: T.rose + "14", border: `1px solid ${T.rose}44`, borderRadius: 12, padding: "10px 10px", textAlign: "center" }}>
             <div style={{ fontSize: 20, fontWeight: 800, color: T.rose }}>{outstandingOrders.length}</div>
@@ -5443,7 +5444,7 @@ function DailyOrders({ embedded = false } = {}) {
           </div>
           <div style={{ flex: 1, background: T.amber + "14", border: `1px solid ${T.amber}44`, borderRadius: 12, padding: "10px 10px", textAlign: "center" }}>
             <div style={{ fontSize: 20, fontWeight: 800, color: T.amber }}>₹{Math.round(outstandingTotal).toLocaleString("en-IN")}</div>
-            <div style={{ fontSize: 10, color: T.amber, fontWeight: 700, marginTop: 2, textTransform: "uppercase" }}>Outstanding</div>
+            <div style={{ fontSize: 10, color: T.amber, fontWeight: 700, marginTop: 2, textTransform: "uppercase" }}>Unpaid Today</div>
           </div>
         </div>
 
