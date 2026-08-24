@@ -1,5 +1,5 @@
 """
-api/sheets.py - Sridhi Ventures BOS Google Sheets sync
+api/sync.py - Sridhi Ventures BOS Google Sheets sync
 """
 import json
 import os
@@ -20,11 +20,6 @@ except Exception as _e:
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 def _norm_tab_name(s):
-    # Matches tab names ignoring case AND whitespace, so a sheet tab someone
-    # typed as "Existing Customers" still matches the "ExistingCustomers"
-    # config key instead of silently falling through to a tab that doesn't
-    # exist (which is what happened here — reads/writes targeted a
-    # non-existent tab, so nothing ever actually reached the sheet).
     return "".join(str(s).split()).lower()
 
 TAB_CONFIG = {
@@ -37,6 +32,7 @@ TAB_CONFIG = {
     "existingCustomers": {"tab": "ExistingCustomers", "headers": ["id","name","contact","area","address","reason","status","remarks","lastRemarkAt","createdAt","telecaller"]},
     "telecallerActivity": {"tab": "TelecallerActivity", "headers": ["id","date","telecaller","type","customer","area","kg","amount","qty","unit","notes","createdAt"]},
     "outstandingLedger": {"tab": "OutstandingLedger", "headers": ["id","customer","date","type","amount","note","source","orderId","createdAt"]},
+    "milkDistributors": {"tab": "MilkDistributors", "headers": ["id","name","contact","area","address","mapLink","telecaller","status","fieldSalesRemarks","telecallerRemarks","lastRemarkAt","createdAt"]},
 }
 
 _cache = {}
@@ -45,7 +41,6 @@ CACHE_TTL = 60
 def get_token():
     email = os.environ.get("GOOGLE_SERVICE_ACCOUNT_EMAIL", "")
     raw_key = os.environ.get("GOOGLE_PRIVATE_KEY", "")
-    # Handle all Vercel key encoding variants
     raw_key = raw_key.replace("\\n", "\n").replace("\r", "").strip()
     creds = service_account.Credentials.from_service_account_info(
         {"type": "service_account", "client_email": email, "private_key": raw_key,
@@ -56,7 +51,6 @@ def get_token():
     return creds.token
 
 def get_sheet_tabs(sheet_id, token):
-    """Get all actual tab names from the spreadsheet."""
     url = "https://sheets.googleapis.com/v4/spreadsheets/{}?fields=sheets.properties.title".format(sheet_id)
     req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
     with urllib.request.urlopen(req, timeout=15) as resp:
@@ -64,10 +58,6 @@ def get_sheet_tabs(sheet_id, token):
     return [s["properties"]["title"] for s in data.get("sheets", [])]
 
 def sheets_get(sheet_id, tab_name, token):
-    # No trailing row number — an open-ended column range (A:Z) reads every
-    # row Google Sheets actually has data in, however large the tab grows.
-    # The previous hardcoded A1:Z500 silently hid (and on the next write,
-    # effectively dropped) anything added past row 500.
     encoded = urllib.parse.quote(tab_name + "!A:Z", safe="")
     url = "https://sheets.googleapis.com/v4/spreadsheets/{}/values/{}".format(sheet_id, encoded)
     req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
@@ -98,10 +88,6 @@ def read_tab(tab_name, token):
     ]
 
 def _cell_str(v):
-    # Lists/dicts (e.g. a dailyOrders row's multi-product "items" array) must
-    # round-trip through JSON, not Python's str()/repr(), or they come back
-    # as unparsable text on read (breaking anything keyed off that field,
-    # like per-product totals for a newer product such as Vada Batter).
     if isinstance(v, (list, dict)):
         return json.dumps(v)
     return str(v or "")
@@ -111,26 +97,15 @@ def write_tab(tab_name, headers, records, token):
     data_rows = [[_cell_str(r.get(h, "")) for h in headers] for r in records]
     sheets_update(sheet_id, tab_name, [headers] + data_rows, token)
 
-# Tabs are never hard-deleted from in this app (everything is soft-managed via
-# a status/cancel field), so it's always safe to upsert-merge rather than
-# blindly overwrite. This is what prevents a second telecaller's save from
-# silently erasing a row the first telecaller just added a moment earlier.
 ID_FIELD = {"hrLeads": "contact"}
 
 def _merge_key(row, id_field):
     v = row.get(id_field, "")
     if v not in (None, ""):
         return str(v)
-    # No id at all (legacy row) — key on full content so it still dedupes
-    # exact repeats but never collides with a genuinely different row.
     return "row::" + json.dumps(row, sort_keys=True, default=str)
 
 def merge_records(existing_rows, incoming_records, tab_key):
-    """Upsert incoming_records onto existing_rows by id, preserving any row
-    that exists on the sheet but wasn't included in this particular write
-    (i.e. rows another telecaller/device saved that this client doesn't know
-    about yet). Incoming rows win on id collisions since they're the newer,
-    intentional edit."""
     id_field = ID_FIELD.get(tab_key, "id")
     merged = {}
     order = []
@@ -147,10 +122,6 @@ def merge_records(existing_rows, incoming_records, tab_key):
     return [merged[k] for k in order]
 
 def _apply_deletes(records, deleted_ids, tab_key):
-    """Explicit deletions win over the upsert-merge above. Without this, a
-    telecaller deleting a wrongly-entered order would see it vanish locally
-    but then get silently resurrected on the next sync, because the merge
-    logic (by design) preserves any row still present on the sheet."""
     if not deleted_ids:
         return records
     id_field = ID_FIELD.get(tab_key, "id")
@@ -158,7 +129,6 @@ def _apply_deletes(records, deleted_ids, tab_key):
     return [r for r in records if str(r.get(id_field, "")) not in deleted_set]
 
 def _normalize_phone(phone):
-    """Normalize phone numbers to 10 digits: strip +91, 091, spaces, dashes."""
     import re
     digits = re.sub(r"[^0-9]", "", str(phone or ""))
     if digits.startswith("91") and len(digits) == 12:
@@ -216,19 +186,11 @@ def _coerce(tab_key, row):
             elif not isinstance(raw_items, list):
                 row["items"] = []
     elif tab_key == "outstandingLedger":
-        # id and orderId are numeric on the frontend (Date.now()-based) but
-        # come back from Sheets as plain text — without coercion, strict
-        # (===) comparisons like "does this Debit belong to order X" silently
-        # fail after every reload, breaking the auto Debit/Credit sync and
-        # letting stray/duplicate entries pile up.
         for f in ("id", "amount", "orderId", "createdAt"):
             if row.get(f, "") not in (None, ""):
                 try: row[f] = float(row[f]) if "." in str(row[f]) else int(row[f])
                 except: pass
     elif tab_key == "existingCustomers":
-        # Each remark is either a legacy plain string, or a newer structured
-        # entry (JSON-encoded, carrying telecaller attribution) — the whole
-        # list is still stored as one "||"-joined sheet cell either way.
         def _deserialize_remark(s):
             s = s.strip()
             if s.startswith("{") and s.endswith("}"):
@@ -246,12 +208,30 @@ def _coerce(tab_key, row):
                 except: pass
             else:
                 row[f] = None
+    elif tab_key == "milkDistributors":
+        def _deserialize(s):
+            s = s.strip()
+            if s.startswith("{") and s.endswith("}"):
+                try:
+                    obj = json.loads(s)
+                    if isinstance(obj, dict):
+                        return obj
+                except Exception:
+                    pass
+            return s
+        for f in ("fieldSalesRemarks", "telecallerRemarks"):
+            row[f] = [_deserialize(r) for r in row.get(f, "").split(" || ") if r] if row.get(f) else []
+        for f in ("lastRemarkAt", "createdAt"):
+            if row.get(f, "") not in (None, ""):
+                try: row[f] = int(float(row[f]))
+                except: pass
+            else:
+                row[f] = None
     return row
 
 def _decoerce_leads(lead):
     import time as _time
     out = dict(lead)
-    # Assign a unique id if missing
     if not out.get("id"):
         out["id"] = str(int(_time.time() * 1000)) + "_" + str(abs(hash(out.get("contact","") + out.get("name",""))))[:6]
     remarks = out.get("remarks", [])
@@ -265,11 +245,20 @@ def _decoerce_existing_customer(row):
         out["id"] = str(int(_time.time() * 1000)) + "_" + str(abs(hash(out.get("contact","") + out.get("name",""))))[:6]
     remarks = out.get("remarks", [])
     def _serialize_remark(r):
-        # New-format remarks are structured (carry telecaller attribution);
-        # encode as compact JSON so it round-trips. Legacy remarks are plain
-        # strings and pass through unchanged.
         return json.dumps(r, ensure_ascii=False) if isinstance(r, dict) else str(r)
     out["remarks"] = " || ".join(_serialize_remark(r) for r in remarks) if isinstance(remarks, list) else (remarks or "")
+    return out
+
+def _decoerce_milk_distributor(row):
+    import time as _time
+    out = dict(row)
+    if not out.get("id"):
+        out["id"] = str(int(_time.time() * 1000)) + "_" + str(abs(hash(out.get("contact","") + out.get("name",""))))[:6]
+    def _serialize(r):
+        return json.dumps(r, ensure_ascii=False) if isinstance(r, dict) else str(r)
+    for f in ("fieldSalesRemarks", "telecallerRemarks"):
+        items = out.get(f, [])
+        out[f] = " || ".join(_serialize(r) for r in items) if isinstance(items, list) else (items or "")
     return out
 
 def fetch_all_tabs():
@@ -278,19 +267,14 @@ def fetch_all_tabs():
         return cached["data"]
     token = get_token()
     sheet_id = os.environ["GOOGLE_SHEET_ID"]
-    # Get actual tab names first to match them correctly
     actual_tabs = get_sheet_tabs(sheet_id, token)
     result = {}
     for key, cfg in TAB_CONFIG.items():
-        # Find matching tab (case-insensitive)
         matched = next((t for t in actual_tabs if _norm_tab_name(t) == _norm_tab_name(cfg["tab"])), cfg["tab"])
         try:
             rows = read_tab(matched, token)
             result[key] = [_coerce(key, r) for r in rows]
         except Exception:
-            # A single missing/misnamed tab (e.g. one that hasn't been created
-            # in the spreadsheet yet) must not take down every other tab's
-            # sync — fall back to empty for this tab only and keep going.
             result[key] = []
     _cache["ALL"] = {"ts": time.time(), "data": result}
     return result
@@ -315,7 +299,6 @@ class handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         tab = parse_qs(parsed.query).get("tab", ["all"])[0]
 
-        # Debug endpoint
         if tab == "debug":
             if _IMPORT_ERROR:
                 self._send(500, {"error": "google-auth import failed", "trace": _IMPORT_ERROR})
@@ -330,7 +313,6 @@ class handler(BaseHTTPRequestHandler):
                 self._send(500, {"error": str(e), "trace": traceback.format_exc()})
             return
 
-        # Handle writes via GET (Vercel rewrites block POST to Python functions)
         method = parse_qs(parsed.query).get("_method", ["GET"])[0]
         if method == "POST":
             b64_body = parse_qs(parsed.query).get("_body", [""])[0]
@@ -346,6 +328,8 @@ class handler(BaseHTTPRequestHandler):
                             records = [_decoerce_leads(r) for r in records]
                         elif tab == "existingCustomers":
                             records = [_decoerce_existing_customer(r) for r in records]
+                        elif tab == "milkDistributors":
+                            records = [_decoerce_milk_distributor(r) for r in records]
                         token = get_token()
                         sheet_id = os.environ["GOOGLE_SHEET_ID"]
                         actual_tabs = get_sheet_tabs(sheet_id, token)
@@ -393,13 +377,12 @@ class handler(BaseHTTPRequestHandler):
             records = [_decoerce_leads(r) for r in records]
         elif tab == "existingCustomers":
             records = [_decoerce_existing_customer(r) for r in records]
+        elif tab == "milkDistributors":
+            records = [_decoerce_milk_distributor(r) for r in records]
         try:
             token = get_token()
             actual_tabs = get_sheet_tabs(os.environ["GOOGLE_SHEET_ID"], token)
             matched = next((t for t in actual_tabs if _norm_tab_name(t) == _norm_tab_name(cfg["tab"])), cfg["tab"])
-            # Re-read fresh (not the 60s cache) right before merging+writing —
-            # keeps the race window to milliseconds instead of minutes, and the
-            # merge itself means even a same-instant collision can't drop rows.
             existing = read_tab(matched, token)
             merged = merge_records(existing, records, tab)
             merged = _apply_deletes(merged, deleted_ids, tab)

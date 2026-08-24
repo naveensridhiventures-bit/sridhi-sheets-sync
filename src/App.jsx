@@ -83,6 +83,42 @@ const REMARK_TAGS = [
 ];
 const SENTIMENT_COLOR = { positive: T.emerald, negative: T.rose, neutral: T.amber };
 
+// ─── MILK DISTRIBUTOR PIPELINE constants ───────────────────────────────────
+// Fixed 3-person telecaller roster for Milk Distributor follow-up (separate
+// from the main TELECALLERS list used elsewhere in the app).
+const MILK_TELECALLERS = ["Azgar", "Sabi", "Thulasi"];
+const MILK_DISTRIBUTOR_STATUSES = [
+  "New", "Call Scheduled", "Visit Scheduled", "Visited", "Sample Given",
+  "Interested", "Converted", "Follow-up", "Not Interested",
+];
+// Quick-pick tags the telecaller taps when logging a call — mirrors the
+// Existing Customer call-log pattern so calls roll up into a sentiment view.
+const MILK_TC_REMARK_TAGS = [
+  { label: "Interested",       sentiment: "positive" },
+  { label: "Sample Requested", sentiment: "positive" },
+  { label: "Visit Scheduled",  sentiment: "positive" },
+  { label: "Call Back Later",  sentiment: "neutral"  },
+  { label: "Shop Closed",      sentiment: "neutral"  },
+  { label: "Not Reachable",    sentiment: "negative" },
+  { label: "Not Interested",   sentiment: "negative" },
+  { label: "Wrong Number",     sentiment: "negative" },
+];
+// Quick-pick tags the field sales rep taps after an on-ground visit.
+const MILK_FS_REMARK_TAGS = [
+  { label: "Visited — Interested",     sentiment: "positive" },
+  { label: "Sample Delivered",         sentiment: "positive" },
+  { label: "Order Confirmed",          sentiment: "positive" },
+  { label: "Visited — Think & Revert", sentiment: "neutral"  },
+  { label: "Shop Closed",              sentiment: "neutral"  },
+  { label: "Could Not Locate",         sentiment: "negative" },
+  { label: "Visited — Not Interested", sentiment: "negative" },
+];
+const MILK_STATUS_COLORS = {
+  "New": T.t3, "Call Scheduled": T.indigo, "Visit Scheduled": T.amber,
+  "Visited": T.sky, "Sample Given": T.amber, "Interested": T.emerald,
+  "Converted": T.emerald, "Follow-up": T.amber, "Not Interested": T.rose,
+};
+
 
 const INITIAL_EXPENSES = [
 ];
@@ -3251,6 +3287,636 @@ function ExistingCustomerPipeline() {
         <Dropdown label="Telecaller (required)" value={form.telecaller} onChange={e => setForm({ ...form, telecaller: e.target.value })} options={TELECALLERS} />
         <Field label="Date" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
         <Btn label="Add Customer" full onClick={addCustomer} disabled={!form.name.trim()} />
+      </Sheet>
+    </div>
+  );
+}
+
+// ─── MILK DISTRIBUTOR PIPELINE ─────────────────────────────────────────────
+// Telecallers add & call milk distributor leads (status + remark). Field
+// Sales taps "Visit & Update" to open the saved map location and log their
+// own on-ground remark. Both remark histories live on the same row so
+// anyone opening a distributor sees the full call + visit trail.
+function mdRemarkText(r) { return typeof r === "string" ? r : (r && r.text) || ""; }
+function mdRemarkByOf(r) { return (typeof r === "object" && r && r.by) || null; }
+function mdRemarkAtOf(r) { return (typeof r === "object" && r && r.at) || null; }
+function mdRemarkTagOf(r) { return (typeof r === "object" && r && r.tag) || null; }
+function mdRemarkSentimentOf(r) { return (typeof r === "object" && r && r.sentiment) || "neutral"; }
+
+function MilkDistributorPipeline() {
+  const [distributors, setDistributors] = useSheetSynced("milkDistributors", "milkDistributors", []);
+  const [selected, setSelected] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [filterTelecaller, setFilterTelecaller] = useState("All");
+  const [locBusy, setLocBusy] = useState(false);
+  const [visitingId, setVisitingId] = useState(null);
+
+  const [form, setForm] = useState({ name: "", contact: "", area: "", address: "", mapLink: "", telecaller: MILK_TELECALLERS[0], status: MILK_DISTRIBUTOR_STATUSES[0] });
+  const [editForm, setEditForm] = useState({ name: "", contact: "", area: "", address: "", mapLink: "", telecaller: MILK_TELECALLERS[0] });
+
+  const [tcRemarkBy, setTcRemarkBy] = useState(MILK_TELECALLERS[0]);
+  const [tcRemarkTag, setTcRemarkTag] = useState(null);
+  const [tcRemarkText, setTcRemarkText] = useState("");
+
+  const [fsRemarkBy, setFsRemarkBy] = useState("");
+  const [fsRemarkTag, setFsRemarkTag] = useState(null);
+  const [fsRemarkText, setFsRemarkText] = useState("");
+
+  // Report state
+  const [reportTelecaller, setReportTelecaller] = useState("All");
+  const [reportPreset, setReportPreset] = useState("Today");
+  const [reportFrom, setReportFrom] = useState(todayISO());
+  const [reportTo, setReportTo] = useState(todayISO());
+  const [reportGroupBy, setReportGroupBy] = useState("Day");
+  const [generatingReport, setGeneratingReport] = useState(false);
+
+  const list = distributors || [];
+  const filtered = filterTelecaller === "All" ? list : list.filter(d => d.telecaller === filterTelecaller);
+  const sorted = [...filtered].sort((a, b) => (b.lastRemarkAt || b.createdAt || 0) - (a.lastRemarkAt || a.createdAt || 0));
+
+  const applyReportPreset = (preset) => {
+    setReportPreset(preset);
+    const now = new Date();
+    if (preset === "Today") {
+      setReportFrom(todayISO()); setReportTo(todayISO());
+    } else if (preset === "This Week") {
+      const day = now.getDay() || 7;
+      const monday = new Date(now); monday.setDate(now.getDate() - day + 1);
+      setReportFrom(localISO(monday)); setReportTo(todayISO());
+    } else if (preset === "This Month") {
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      setReportFrom(localISO(first)); setReportTo(todayISO());
+    }
+  };
+
+  const captureLocation = (onSet) => {
+    if (!navigator.geolocation) { alert("Location isn't available on this device/browser."); return; }
+    setLocBusy(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        onSet(`https://www.google.com/maps?q=${latitude},${longitude}`);
+        setLocBusy(false);
+      },
+      () => { alert("Couldn't get your location. Check location permission and try again."); setLocBusy(false); },
+      { enableHighAccuracy: true, timeout: 12000 }
+    );
+  };
+
+  const addDistributor = () => {
+    if (!form.name.trim()) return;
+    const rec = {
+      id: Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+      name: form.name.trim(), contact: form.contact.trim(), area: form.area.trim(),
+      address: form.address.trim(), mapLink: form.mapLink.trim(), telecaller: form.telecaller,
+      status: form.status, telecallerRemarks: [], fieldSalesRemarks: [],
+      lastRemarkAt: Date.now(), createdAt: Date.now(),
+    };
+    setDistributors([...(list || []), rec]);
+    setForm({ name: "", contact: "", area: "", address: "", mapLink: "", telecaller: MILK_TELECALLERS[0], status: MILK_DISTRIBUTOR_STATUSES[0] });
+    setShowAdd(false);
+  };
+
+  const openEdit = (d) => {
+    setEditForm({ name: d.name || "", contact: d.contact || "", area: d.area || "", address: d.address || "", mapLink: d.mapLink || "", telecaller: d.telecaller || MILK_TELECALLERS[0] });
+    setShowEdit(true);
+  };
+  const saveEdit = () => {
+    if (!selected) return;
+    const updated = { ...selected, ...editForm };
+    setDistributors(list.map(d => d.id === selected.id ? updated : d));
+    setSelected(updated);
+    setShowEdit(false);
+  };
+
+  const deleteDistributor = (d) => {
+    if (!window.confirm(`Delete "${d.name}" and their entire call/visit history? This can't be undone.`)) return;
+    setDistributors(list.filter(x => x.id !== d.id));
+    setSelected(null);
+  };
+
+  const setStatus = (id, status) => {
+    const now = Date.now();
+    const stamp = new Date(now).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + new Date(now).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+    setDistributors(list.map(d => d.id === id
+      ? { ...d, status, telecallerRemarks: [...(d.telecallerRemarks || []), { text: `[${stamp} · System] Status changed to "${status}"`, by: "System", at: now }], lastRemarkAt: now }
+      : d));
+    setSelected(s => s && s.id === id ? { ...s, status } : s);
+  };
+
+  const saveMapLink = (id, link) => {
+    setDistributors(list.map(d => d.id === id ? { ...d, mapLink: link } : d));
+    setSelected(s => s && s.id === id ? { ...s, mapLink: link } : s);
+  };
+
+  const addTelecallerRemark = (id) => {
+    if (!tcRemarkText.trim() && !tcRemarkTag) return;
+    const now = Date.now();
+    const sentiment = tcRemarkTag ? (MILK_TC_REMARK_TAGS.find(t => t.label === tcRemarkTag) || {}).sentiment : "neutral";
+    const entry = { text: tcRemarkText.trim() || tcRemarkTag, tag: tcRemarkTag, sentiment, by: tcRemarkBy, at: now };
+    setDistributors(list.map(d => d.id === id ? { ...d, telecallerRemarks: [...(d.telecallerRemarks || []), entry], lastRemarkAt: now } : d));
+    setSelected(s => s && s.id === id ? { ...s, telecallerRemarks: [...(s.telecallerRemarks || []), entry], lastRemarkAt: now } : s);
+    setTcRemarkText(""); setTcRemarkTag(null);
+  };
+
+  const addFieldSalesRemark = (id) => {
+    if (!fsRemarkText.trim() && !fsRemarkTag) return;
+    const now = Date.now();
+    const sentiment = fsRemarkTag ? (MILK_FS_REMARK_TAGS.find(t => t.label === fsRemarkTag) || {}).sentiment : "neutral";
+    const entry = { text: fsRemarkText.trim() || fsRemarkTag, tag: fsRemarkTag, sentiment, by: fsRemarkBy.trim() || "Field Sales", at: now };
+    setDistributors(list.map(d => d.id === id ? { ...d, fieldSalesRemarks: [...(d.fieldSalesRemarks || []), entry], lastRemarkAt: now } : d));
+    setSelected(s => s && s.id === id ? { ...s, fieldSalesRemarks: [...(s.fieldSalesRemarks || []), entry], lastRemarkAt: now } : s);
+    setFsRemarkText(""); setFsRemarkTag(null);
+    setVisitingId(null);
+  };
+
+  const visitAndUpdate = (d) => {
+    if (d.mapLink) window.open(d.mapLink, "_blank", "noopener,noreferrer");
+    else alert("No map location saved yet for this distributor — ask the telecaller to add one first.");
+    setVisitingId(d.id);
+  };
+
+  // ── PDF Report — day-wise / week-wise / month-wise, professional layout ──
+  const downloadPDF = async (groupMode) => {
+    if (generatingReport) return;
+    setGeneratingReport(true);
+    try {
+      const { jsPDF } = await import("jspdf");
+      const autoTable = (await import("jspdf-autotable")).default;
+      const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 32;
+
+      const NAVY = [8, 40, 25], TEAL = [23, 148, 74];
+      const GRID = [214, 220, 214], INK = [26, 32, 46], SUBTLE = [110, 118, 138];
+      const AMBER = [180, 110, 5], ROSE = [200, 45, 60], INDIGO = [76, 95, 224];
+      const STATUS_COLORS = {
+        "New": [110, 118, 138], "Call Scheduled": INDIGO, "Visit Scheduled": AMBER,
+        "Visited": [56, 150, 190], "Sample Given": AMBER, "Interested": TEAL,
+        "Converted": [16, 150, 100], "Follow-up": AMBER, "Not Interested": ROSE,
+      };
+      const colorForStatus = (s) => STATUS_COLORS[s] || [110, 118, 138];
+      const TC_COLORS = { "Azgar": INDIGO, "Sabi": AMBER, "Thulasi": TEAL };
+      const colorForTC = (t) => TC_COLORS[t] || [90, 98, 120];
+
+      const rangeLabel = reportFrom === reportTo
+        ? new Date(reportFrom).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+        : `${new Date(reportFrom).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} – ${new Date(reportTo).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}`;
+
+      const header = () => {
+        const headerH = 70;
+        doc.setFillColor(...NAVY);
+        doc.rect(0, 0, pageW, headerH, "F");
+        doc.setFillColor(...TEAL);
+        doc.rect(0, headerH - 2, pageW, 2, "F");
+
+        const logoSize = 34, badgePad = 5, badgeSize = logoSize + badgePad * 2;
+        const badgeX = margin, badgeY = (headerH - badgeSize) / 2 - 1;
+        doc.setFillColor(255, 255, 255);
+        doc.roundedRect(badgeX, badgeY, badgeSize, badgeSize, 8, 8, "F");
+        try { doc.addImage(SRIDHI_LOGO_PNG, "PNG", badgeX + badgePad, badgeY + badgePad, logoSize, logoSize); } catch (e) {}
+
+        const textX = badgeX + badgeSize + 14;
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(15);
+        doc.text("SRIDHI VENTURES — Milk Distributor Field Report", textX, 29);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(200, 214, 205);
+        doc.text(`${groupMode}-wise · Telecaller calls & field sales visits`, textX, 44);
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(13);
+        doc.setTextColor(...TEAL.map(c => Math.min(255, c + 70)));
+        doc.text(rangeLabel, pageW - margin, 28, { align: "right" });
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(200, 214, 205);
+        doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`, pageW - margin, 42, { align: "right" });
+      };
+
+      const footer = () => {
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+          doc.setPage(i);
+          doc.setDrawColor(...GRID);
+          doc.line(margin, pageH - 26, pageW - margin, pageH - 26);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(7.5);
+          doc.setTextColor(...SUBTLE);
+          doc.text("Sridhi Ventures · Milk Distributor Report", margin, pageH - 13);
+          doc.text(`Page ${i} of ${pageCount}`, pageW - margin, pageH - 13, { align: "right" });
+        }
+      };
+
+      header();
+      let y = 90;
+
+      // Distributors in scope for this report
+      const scope = reportTelecaller === "All" ? list : list.filter(d => d.telecaller === reportTelecaller);
+
+      // Overview strip — status breakdown chips
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10.5);
+      doc.setTextColor(...NAVY);
+      doc.text(`${scope.length} DISTRIBUTOR${scope.length === 1 ? "" : "S"}${reportTelecaller !== "All" ? ` · ${reportTelecaller}` : ""} IN SCOPE`, margin, y);
+      let chipX = margin;
+      const chipY = y + 12;
+      MILK_DISTRIBUTOR_STATUSES.forEach(s => {
+        const count = scope.filter(d => (d.status || MILK_DISTRIBUTOR_STATUSES[0]) === s).length;
+        if (!count) return;
+        const label = `${s}  ${count}`;
+        const w = doc.getTextWidth(label) + 20;
+        const color = colorForStatus(s);
+        doc.setDrawColor(...color);
+        doc.setFillColor(...color.map(c => Math.min(255, c + (255 - c) * 0.88)));
+        doc.roundedRect(chipX, chipY, w, 20, 6, 6, "FD");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        doc.setTextColor(...color);
+        doc.text(label, chipX + 10, chipY + 14);
+        chipX += w + 8;
+      });
+      y = chipY + 34;
+
+      // Flatten every remark (telecaller call + field sales visit) into one
+      // event stream within the date range, so day/week/month grouping can
+      // walk chronologically across both activity types together.
+      const rangeStartMs = new Date(reportFrom + "T00:00:00").getTime();
+      const rangeEndMs = new Date(reportTo + "T23:59:59").getTime();
+      const events = [];
+      scope.forEach(d => {
+        (d.telecallerRemarks || []).forEach(r => {
+          const at = mdRemarkAtOf(r);
+          if (!at || at < rangeStartMs || at > rangeEndMs) return;
+          if (mdRemarkByOf(r) === "System") return; // skip auto status-change log lines
+          events.push({ at, type: "Telecaller Call", distributor: d.name, area: d.area || "—", telecaller: d.telecaller || "—", status: d.status || "—", by: mdRemarkByOf(r) || d.telecaller || "—", tag: mdRemarkTagOf(r) || "—", text: mdRemarkText(r) });
+        });
+        (d.fieldSalesRemarks || []).forEach(r => {
+          const at = mdRemarkAtOf(r);
+          if (!at || at < rangeStartMs || at > rangeEndMs) return;
+          events.push({ at, type: "Field Visit", distributor: d.name, area: d.area || "—", telecaller: d.telecaller || "—", status: d.status || "—", by: mdRemarkByOf(r) || "—", tag: mdRemarkTagOf(r) || "—", text: mdRemarkText(r) });
+        });
+      });
+      events.sort((a, b) => a.at - b.at);
+
+      const groupKey = (ts) => {
+        const dt = new Date(ts);
+        if (groupMode === "Day") return localISO(dt);
+        if (groupMode === "Month") return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
+        // Week — Monday-start ISO week bucketed by that week's Monday date
+        const day = dt.getDay() || 7;
+        const monday = new Date(dt); monday.setDate(dt.getDate() - day + 1);
+        return localISO(monday);
+      };
+      const groupLabel = (key) => {
+        if (groupMode === "Day") {
+          return new Date(key).toLocaleDateString("en-IN", { weekday: "long", day: "2-digit", month: "short", year: "numeric" });
+        }
+        if (groupMode === "Month") {
+          const [yr, mo] = key.split("-").map(Number);
+          return new Date(yr, mo - 1, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+        }
+        const monday = new Date(key);
+        const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+        return `Week of ${monday.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} – ${sunday.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}`;
+      };
+
+      const groups = {};
+      events.forEach(e => {
+        const k = groupKey(e.at);
+        if (!groups[k]) groups[k] = [];
+        groups[k].push(e);
+      });
+      const groupKeys = Object.keys(groups).sort();
+
+      const sectionTitle = (text, color = NAVY, badge = null) => {
+        if (y > pageH - 100) { doc.addPage(); header(); y = 100; }
+        doc.setFillColor(...color);
+        doc.roundedRect(margin, y - 12, 4, 14, 2, 2, "F");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11.5);
+        doc.setTextColor(...INK);
+        doc.text(text, margin + 12, y);
+        if (badge) {
+          const bw = doc.getTextWidth(badge) + 16;
+          doc.setFillColor(...color.map(c => Math.min(255, c + (255 - c) * 0.88)));
+          doc.roundedRect(margin + 12 + doc.getTextWidth(text) + 10, y - 11, bw, 16, 5, 5, "F");
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(8);
+          doc.setTextColor(...color);
+          doc.text(badge, margin + 12 + doc.getTextWidth(text) + 10 + bw / 2, y, { align: "center" });
+        }
+        y += 12;
+      };
+
+      if (groupKeys.length === 0) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10.5);
+        doc.setTextColor(...SUBTLE);
+        doc.text("No telecaller calls or field visits logged in this period.", margin, y + 10);
+        y += 30;
+      }
+
+      groupKeys.forEach(k => {
+        const rows = groups[k];
+        sectionTitle(groupLabel(k), TEAL, `${rows.length} ${rows.length === 1 ? "entry" : "entries"}`);
+        autoTable(doc, {
+          startY: y,
+          margin: { top: 90, bottom: 40 },
+          head: [["Time", "Type", "Distributor", "Area", "Telecaller", "By", "Status", "Remark"]],
+          body: rows.map(e => [
+            new Date(e.at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }),
+            e.type, e.distributor, e.area, e.telecaller, e.by, e.status, e.text || "—",
+          ]),
+          theme: "grid",
+          styles: { font: "helvetica", fontSize: 8, cellPadding: 5.5, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "middle" },
+          headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+          alternateRowStyles: { fillColor: [248, 250, 248] },
+          columnStyles: { 2: { fontStyle: "bold" }, 4: { fontStyle: "bold", halign: "center" }, 6: { fontStyle: "bold", halign: "center" }, 7: { cellWidth: 220 } },
+          didParseCell: (data) => {
+            if (data.section === "body" && data.column.index === 1) {
+              const color = data.cell.raw === "Field Visit" ? [16, 150, 100] : INDIGO;
+              data.cell.styles.textColor = color;
+            }
+            if (data.section === "body" && data.column.index === 4) {
+              const color = colorForTC(data.cell.raw);
+              data.cell.styles.textColor = color;
+              data.cell.styles.fillColor = color.map(c => Math.min(255, c + (255 - c) * 0.88));
+            }
+            if (data.section === "body" && data.column.index === 6) {
+              const color = colorForStatus(data.cell.raw);
+              data.cell.styles.textColor = color;
+              data.cell.styles.fillColor = color.map(c => Math.min(255, c + (255 - c) * 0.9));
+            }
+          },
+          didDrawPage: () => header(),
+        });
+        y = doc.lastAutoTable.finalY + 26;
+      });
+
+      footer();
+      doc.save(`Milk-Distributor-${groupMode}wise-Report_${reportFrom}_to_${reportTo}.pdf`);
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
+  const downloadExcel = () => {
+    const rows = sorted.map(d => ({
+      "Distributor": d.name, "Contact": d.contact || "", "Area": d.area || "", "Address": d.address || "",
+      "Map Location": d.mapLink || "", "Assigned Telecaller": d.telecaller || "", "Status": d.status || "",
+      "Latest Telecaller Remark": (d.telecallerRemarks && d.telecallerRemarks.length) ? mdRemarkText(d.telecallerRemarks[d.telecallerRemarks.length - 1]) : "",
+      "Latest Field Sales Remark": (d.fieldSalesRemarks && d.fieldSalesRemarks.length) ? mdRemarkText(d.fieldSalesRemarks[d.fieldSalesRemarks.length - 1]) : "",
+      "Last Updated": d.lastRemarkAt ? new Date(d.lastRemarkAt).toLocaleString("en-IN") : "",
+    }));
+    const headers = Object.keys(rows[0] || { "Distributor": "" });
+    const csvEscape = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const lines = [headers.join(","), ...rows.map(r => headers.map(h => csvEscape(r[h])).join(","))];
+    downloadCSV(`Milk-Distributor-List_${todayISO()}.csv`, lines.join("\n"));
+  };
+
+  // ── Detail view ──────────────────────────────────────────────────────
+  if (selected) {
+    const d = list.find(x => x.id === selected.id) || selected;
+    const tcHistory = [...(d.telecallerRemarks || [])].reverse();
+    const fsHistory = [...(d.fieldSalesRemarks || [])].reverse();
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <button onClick={() => { setSelected(null); setVisitingId(null); }} style={{ background: "none", border: "none", color: T.accent, fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "left", padding: 0 }}>← Back to list</button>
+
+        <Card accent={T.indigo}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div style={{ fontSize: 17, fontWeight: 800, color: T.t1 }}>{d.name}</div>
+              <div style={{ fontSize: 12, color: T.t3, marginTop: 3 }}>{d.area || "—"}{d.address ? ` · ${d.address}` : ""}</div>
+              {d.contact && <div style={{ fontSize: 12, color: T.accent, marginTop: 4, fontWeight: 600 }}>📞 {d.contact}</div>}
+            </div>
+            <Chip label={d.status || "New"} color={MILK_STATUS_COLORS[d.status] || T.t3} />
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+            <Btn label="✏️ Edit" small ghost onClick={() => openEdit(d)} />
+            <Btn label="🗑️ Delete" small ghost color={T.rose} onClick={() => deleteDistributor(d)} />
+          </div>
+        </Card>
+
+        <Card accent={T.sky}>
+          <Label sub="Telecaller sets this once; field sales taps it to navigate">Map Location</Label>
+          {d.mapLink ? (
+            <a href={d.mapLink} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginBottom: 10, fontSize: 12.5, color: T.sky, fontWeight: 700, textDecoration: "none" }}>🗺️ Open saved location →</a>
+          ) : (
+            <div style={{ fontSize: 12, color: T.t3, marginBottom: 10 }}>No location saved yet.</div>
+          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            <Btn label={locBusy ? "Locating…" : "📍 Use My Current Location"} small ghost onClick={() => captureLocation(link => saveMapLink(d.id, link))} disabled={locBusy} />
+          </div>
+          <Field label="Or paste a Google Maps link" value={d.mapLink || ""} onChange={e => saveMapLink(d.id, e.target.value)} placeholder="Paste a Google Maps share link" />
+        </Card>
+
+        <Card accent={T.amber}>
+          <Label sub="Tap to update where this distributor stands">Status</Label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {MILK_DISTRIBUTOR_STATUSES.map(s => (
+              <button key={s} onClick={() => setStatus(d.id, s)} style={{
+                background: d.status === s ? MILK_STATUS_COLORS[s] : "transparent",
+                color: d.status === s ? "#fff" : T.t2,
+                border: `1px solid ${d.status === s ? MILK_STATUS_COLORS[s] : T.border}`,
+                borderRadius: 10, padding: "7px 12px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+              }}>{s}</button>
+            ))}
+          </div>
+        </Card>
+
+        <Card accent={T.indigo}>
+          <Label sub="Logged by the telecaller after a call">Telecaller Remark</Label>
+          <Dropdown label="Telecaller" value={tcRemarkBy} onChange={e => setTcRemarkBy(e.target.value)} options={MILK_TELECALLERS} />
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6, marginBottom: 8 }}>
+            {MILK_TC_REMARK_TAGS.map(tag => (
+              <button key={tag.label} onClick={() => setTcRemarkTag(tcRemarkTag === tag.label ? null : tag.label)} style={{
+                background: tcRemarkTag === tag.label ? SENTIMENT_COLOR[tag.sentiment] : "transparent",
+                color: tcRemarkTag === tag.label ? "#fff" : SENTIMENT_COLOR[tag.sentiment],
+                border: `1px solid ${SENTIMENT_COLOR[tag.sentiment]}`, borderRadius: 20, padding: "5px 11px",
+                fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+              }}>{tag.label}</button>
+            ))}
+          </div>
+          <textarea value={tcRemarkText} onChange={e => setTcRemarkText(e.target.value)} rows={3}
+            placeholder="Add extra detail (optional if a tag is picked)…"
+            style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 13, fontFamily: FONT, outline: "none", width: "100%", boxSizing: "border-box", resize: "none" }} />
+          <div style={{ marginTop: 8 }}><Btn label="Save Telecaller Remark" full onClick={() => addTelecallerRemark(d.id)} disabled={!tcRemarkText.trim() && !tcRemarkTag} /></div>
+
+          {tcHistory.length > 0 && (
+            <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+              {tcHistory.map((r, i) => (
+                <div key={i} style={{ background: T.surface, borderRadius: 10, padding: "9px 11px", borderLeft: `3px solid ${SENTIMENT_COLOR[mdRemarkSentimentOf(r)]}` }}>
+                  <div style={{ fontSize: 12.5, color: T.t1 }}>{mdRemarkText(r)}</div>
+                  <div style={{ fontSize: 10.5, color: T.t3, marginTop: 3 }}>{mdRemarkByOf(r) || "—"} · {mdRemarkAtOf(r) ? new Date(mdRemarkAtOf(r)).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Card accent={T.emerald}>
+          <Label sub="Field sales visits on the ground and updates here">Field Sales Remark</Label>
+          {visitingId !== d.id ? (
+            <Btn label="📍 Visit & Update" full color={T.emerald} onClick={() => visitAndUpdate(d)} />
+          ) : (
+            <>
+              <Field label="Field Sales Rep Name" value={fsRemarkBy} onChange={e => setFsRemarkBy(e.target.value)} placeholder="Your name" />
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6, marginBottom: 8 }}>
+                {MILK_FS_REMARK_TAGS.map(tag => (
+                  <button key={tag.label} onClick={() => setFsRemarkTag(fsRemarkTag === tag.label ? null : tag.label)} style={{
+                    background: fsRemarkTag === tag.label ? SENTIMENT_COLOR[tag.sentiment] : "transparent",
+                    color: fsRemarkTag === tag.label ? "#fff" : SENTIMENT_COLOR[tag.sentiment],
+                    border: `1px solid ${SENTIMENT_COLOR[tag.sentiment]}`, borderRadius: 20, padding: "5px 11px",
+                    fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+                  }}>{tag.label}</button>
+                ))}
+              </div>
+              <textarea value={fsRemarkText} onChange={e => setFsRemarkText(e.target.value)} rows={3}
+                placeholder="What happened at the visit? (optional if a tag is picked)…"
+                style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 13, fontFamily: FONT, outline: "none", width: "100%", boxSizing: "border-box", resize: "none" }} />
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <Btn label="Save Visit Remark" full onClick={() => addFieldSalesRemark(d.id)} disabled={!fsRemarkText.trim() && !fsRemarkTag} />
+                <Btn label="Cancel" ghost onClick={() => setVisitingId(null)} />
+              </div>
+            </>
+          )}
+
+          {fsHistory.length > 0 && (
+            <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+              {fsHistory.map((r, i) => (
+                <div key={i} style={{ background: T.surface, borderRadius: 10, padding: "9px 11px", borderLeft: `3px solid ${SENTIMENT_COLOR[mdRemarkSentimentOf(r)]}` }}>
+                  <div style={{ fontSize: 12.5, color: T.t1 }}>{mdRemarkText(r)}</div>
+                  <div style={{ fontSize: 10.5, color: T.t3, marginTop: 3 }}>{mdRemarkByOf(r) || "Field Sales"} · {mdRemarkAtOf(r) ? new Date(mdRemarkAtOf(r)).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Sheet open={showEdit} onClose={() => setShowEdit(false)} title="Edit Distributor Details">
+          <Field label="Distributor Name" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} placeholder="e.g. Sri Ganesh Milk Distributors" />
+          <Field label="Contact No" value={editForm.contact} onChange={e => setEditForm({ ...editForm, contact: e.target.value })} placeholder="98765 43210" />
+          <Field label="Area" value={editForm.area} onChange={e => setEditForm({ ...editForm, area: e.target.value })} placeholder="e.g. Velachery" />
+          <Field label="Address" value={editForm.address} onChange={e => setEditForm({ ...editForm, address: e.target.value })} placeholder="Optional" />
+          <Dropdown label="Assigned Telecaller" value={editForm.telecaller} onChange={e => setEditForm({ ...editForm, telecaller: e.target.value })} options={MILK_TELECALLERS} />
+          <Btn label="Save Changes" full onClick={saveEdit} disabled={!editForm.name.trim()} />
+        </Sheet>
+      </div>
+    );
+  }
+
+  // ── List view ────────────────────────────────────────────────────────
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <Card accent={T.indigo}>
+        <Label sub={`${sorted.length} distributor${sorted.length === 1 ? "" : "s"} · most recently updated first`}>Milk Distributors</Label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Btn label="+ Add Distributor" onClick={() => setShowAdd(true)} />
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+          {["All", ...MILK_TELECALLERS].map(t => (
+            <button key={t} onClick={() => setFilterTelecaller(t)} style={{
+              background: filterTelecaller === t ? T.indigo : "transparent",
+              color: filterTelecaller === t ? "#fff" : T.t2,
+              border: `1px solid ${filterTelecaller === t ? T.indigo : T.border}`,
+              borderRadius: 20, padding: "6px 12px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+            }}>{t}</button>
+          ))}
+        </div>
+      </Card>
+
+      <Card accent={T.amber}>
+        <Label sub="Every call & field visit is logged — download an attractive day-wise, week-wise, or month-wise report for management">Field Report</Label>
+        <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Telecaller</div>
+        <select value={reportTelecaller} onChange={e => setReportTelecaller(e.target.value)} style={{ ...inputStyle, marginBottom: 12 }}>
+          <option value="All">All Telecallers</option>
+          {MILK_TELECALLERS.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+
+        <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Date Range</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+          {["Today", "This Week", "This Month", "Custom"].map(p => (
+            <button key={p} onClick={() => applyReportPreset(p)} style={{
+              background: reportPreset === p ? T.amber : "transparent",
+              color: reportPreset === p ? "#1A1200" : T.t2,
+              border: `1px solid ${reportPreset === p ? T.amber : T.border}`,
+              borderRadius: 10, padding: "8px 13px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+            }}>{p}</button>
+          ))}
+        </div>
+        {reportPreset === "Custom" && (
+          <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10.5, color: T.t3, marginBottom: 4, fontWeight: 600 }}>FROM</div>
+              <input type="date" value={reportFrom} onChange={e => setReportFrom(e.target.value)} style={inputStyle} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10.5, color: T.t3, marginBottom: 4, fontWeight: 600 }}>TO</div>
+              <input type="date" value={reportTo} onChange={e => setReportTo(e.target.value)} style={inputStyle} />
+            </div>
+          </div>
+        )}
+
+        <div style={{ fontSize: 11, color: T.t2, marginBottom: 8, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Group Report By</div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          {["Day", "Week", "Month"].map(g => (
+            <button key={g} onClick={() => setReportGroupBy(g)} style={{
+              flex: 1, background: reportGroupBy === g ? T.indigo : "transparent",
+              color: reportGroupBy === g ? "#fff" : T.t2,
+              border: `1px solid ${reportGroupBy === g ? T.indigo : T.border}`,
+              borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+            }}>{g}-wise</button>
+          ))}
+        </div>
+
+        <Btn label={generatingReport ? "Generating…" : `🧾 Download ${reportGroupBy}-wise PDF Report`} full color={T.amber} onClick={() => downloadPDF(reportGroupBy)} />
+        <div style={{ marginTop: 8 }}><Btn label="📊 Download Distributor List (Excel)" full ghost onClick={downloadExcel} /></div>
+      </Card>
+
+      {sorted.length === 0 && (
+        <div style={{ textAlign: "center", color: T.t3, fontSize: 13, padding: 40 }}>No milk distributors added yet. Tap "+ Add Distributor" to start.</div>
+      )}
+
+      {sorted.map(d => {
+        const latestTc = (d.telecallerRemarks || []).filter(r => mdRemarkByOf(r) !== "System").slice(-1)[0];
+        const latestFs = (d.fieldSalesRemarks || []).slice(-1)[0];
+        const latest = [latestTc, latestFs].filter(Boolean).sort((a, b) => (mdRemarkAtOf(b) || 0) - (mdRemarkAtOf(a) || 0))[0];
+        return (
+          <div key={d.id} onClick={() => setSelected(d)}
+            style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 14, padding: 14, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: T.t1 }}>{d.name}</div>
+              <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>{d.area || "—"} · {d.telecaller || "—"}</div>
+              {d.contact && <div style={{ fontSize: 11, color: T.accent, marginTop: 2, fontWeight: 600 }}>📞 {d.contact}</div>}
+              {latest && <div style={{ fontSize: 11, color: T.t2, marginTop: 4 }}>💬 {mdRemarkText(latest).slice(0, 60)}</div>}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+              <Chip label={d.status || "New"} color={MILK_STATUS_COLORS[d.status] || T.t3} />
+              <span style={{ fontSize: 10, color: T.t3 }}>{formatLastContact(d.lastRemarkAt)}</span>
+              {d.mapLink && <span style={{ fontSize: 10, color: T.sky }}>📍 located</span>}
+            </div>
+          </div>
+        );
+      })}
+
+      <Sheet open={showAdd} onClose={() => setShowAdd(false)} title="Add Milk Distributor">
+        <Field label="Distributor Name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Sri Ganesh Milk Distributors" />
+        <Field label="Contact No" value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder="98765 43210" />
+        <Field label="Area" value={form.area} onChange={e => setForm({ ...form, area: e.target.value })} placeholder="e.g. Velachery" />
+        <Field label="Address" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="Optional" />
+        <Field label="Map Location (optional)" value={form.mapLink} onChange={e => setForm({ ...form, mapLink: e.target.value })} placeholder="Paste a Google Maps share link" />
+        <div style={{ marginBottom: 12 }}>
+          <Btn label={locBusy ? "Locating…" : "📍 Use My Current Location"} small ghost onClick={() => captureLocation(link => setForm(f => ({ ...f, mapLink: link })))} disabled={locBusy} />
+        </div>
+        <Dropdown label="Assigned Telecaller" value={form.telecaller} onChange={e => setForm({ ...form, telecaller: e.target.value })} options={MILK_TELECALLERS} />
+        <Dropdown label="Status" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} options={MILK_DISTRIBUTOR_STATUSES} />
+        <Btn label="Add Distributor" full onClick={addDistributor} disabled={!form.name.trim()} />
       </Sheet>
     </div>
   );
@@ -7407,6 +8073,7 @@ const MORE_MENU = [
   { id:"repeat",    label:"Repeat Orders", icon:"🔁" },
   { id:"lostcustomers", label:"Lost Customers", icon:"🚫" },
   { id:"existingcustomers", label:"Existing Customers", icon:"🔄" },
+  { id:"milkdistributors", label:"Milk Distributor", icon:"🥛" },
   { id:"outstanding", label:"Outstanding", icon:"📒" },
   { id:"expenses",  label:"Expenses",      icon:"💸" },
   { id:"marketing", label:"Marketing",     icon:"📢" },
@@ -7516,6 +8183,7 @@ const DESKTOP_NAV = [
   { id: "repeat",    label: "Orders",       icon: "orders" },
   { id: "lostcustomers", label: "Lost Customers", icon: "lostuser" },
   { id: "existingcustomers", label: "Existing Customers", icon: "existing" },
+  { id: "milkdistributors", label: "Milk Distributor", icon: "pin" },
   { id: "outstanding", label: "Outstanding", icon: "ledger" },
   { id: "dailyorders", label: "Daily Orders", icon: "cart" },
   { id: "fieldsync", label: "Dispatch",     icon: "dispatch" },
@@ -9389,6 +10057,7 @@ export default function App() {
       case "repeat":    return <RepeatOrders />;
       case "lostcustomers": return <LostCustomers />;
       case "existingcustomers": return <ExistingCustomerPipeline />;
+      case "milkdistributors": return <MilkDistributorPipeline />;
       case "outstanding": return <OutstandingLedger />;
       case "dailyorders": return <DailyOrders {...moduleProps} />;
       case "expenses":  return <Expenses />;
