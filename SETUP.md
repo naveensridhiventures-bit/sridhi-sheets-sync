@@ -24,7 +24,7 @@ Result: **first load ~3–4× faster**, repeat visits instant from cache.
 ## Part 1 — Google Sheet (unchanged from v2)
 
 1. Create a Google Sheet named **Sridhi Ventures BOS Data**.
-2. Create tabs: `Leads`, `Samples`, `Expenses`, `RepeatCustomers`, `DailyOrders`, `TelecallerActivity`.
+2. Create tabs: `Leads`, `Samples`, `Expenses`, `RepeatCustomers`, `DailyOrders`, `TelecallerActivity`, `MilkDistributors`.
 3. Add the header row in each tab (see below).
 4. Copy the **Sheet ID** from the URL (`/d/<THIS PART>/edit`).
 
@@ -74,6 +74,26 @@ id  date  telecaller  type  customer  area  kg  amount  qty  unit  notes  create
   under "More"; desktop: sidebar). Management pulls a Team Overview + a
   per-telecaller detail PDF from the same screen, filterable by day, week,
   month, or a custom range.
+
+**MilkDistributors** *(separate mini-pipeline: telecaller cold-calls + sets map location, field sales visits and updates)*
+```
+id  name  contact  area  address  mapLink  status  telecaller  telecallerRemarks  fieldSalesRemarks  createdAt  lastTelecallerRemarkAt  lastFieldSalesRemarkAt
+```
+- Only 3 telecallers currently work this list: Azgar (Intern), Sabi
+  (Intern), Thulasi — set in `MILK_TELECALLERS` in `src/App.jsx`.
+- `status` is one of: New, Contacted, Interested, Visit Scheduled, Visited,
+  Onboarded, Not Interested, Lost.
+- `telecallerRemarks` and `fieldSalesRemarks` are each a list of structured
+  entries (quick-pick tag + free note + who logged it + timestamp), stored
+  the same way as `ExistingCustomers.remarks` — JSON-encoded per entry,
+  joined with ` || ` in the sheet cell.
+- The telecaller sets/edits the Google Maps link for each distributor;
+  field sales taps "Open Map" to navigate there, then logs their own visit
+  remark (separate tag set from the telecaller's call tags).
+- **Milk Distributors** screen (mobile: under "More"; desktop: sidebar) has
+  its own PDF report: a Team Overview page (pipeline status breakdown,
+  response analysis, by-telecaller table) plus a unified Activity Log page
+  of every call and visit, filterable by day, week, month, or custom range.
 
 ---
 
