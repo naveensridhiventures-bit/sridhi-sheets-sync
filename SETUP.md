@@ -77,8 +77,16 @@ id  date  telecaller  type  customer  area  kg  amount  qty  unit  notes  create
 
 **MilkDistributors** *(separate mini-pipeline: telecaller cold-calls + sets map location, field sales visits and updates)*
 ```
-id  name  contact  area  address  mapLink  status  telecaller  telecallerRemarks  fieldSalesRemarks  createdAt  lastTelecallerRemarkAt  lastFieldSalesRemarkAt
+id  name  contact  area  address  mapLink  status  telecaller  currentBrand  telecallerRemarks  fieldSalesRemarks  createdAt  lastTelecallerRemarkAt  lastFieldSalesRemarkAt
 ```
+- `currentBrand` is the milk brand the shop currently buys from (e.g.
+  "Arokiya", "Aavin") — useful context for the field sales pitch.
+- **Bulk Import**: on the Milk Distributors screen, paste rows copied
+  directly from Excel/Google Sheets (Customer Name, Phone Number, Area,
+  Remarks-as-current-brand, Map Link, Calling Remark, Telecaller Name — in
+  any order, with or without a header row). Re-pasting an updated sheet is
+  safe: rows are matched by phone number (or name+area) and merged into
+  the existing distributor rather than duplicated.
 - Only 3 telecallers currently work this list: Azgar (Intern), Sabi
   (Intern), Thulasi — set in `MILK_TELECALLERS` in `src/App.jsx`.
 - `status` is one of: New, Contacted, Interested, Visit Scheduled, Visited,

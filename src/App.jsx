@@ -123,6 +123,100 @@ function milkStageColor(stage) {
   return s ? s.color : T.t3;
 }
 
+// ── Bulk import (paste from Excel/Google Sheets) ───────────────────────────
+// Handles both tab-separated (default when pasting from a spreadsheet) and
+// comma-separated text, with basic support for quoted fields so a map link
+// like "https://maps...?q=12.9,80.1" (which contains a comma) doesn't get
+// split apart when the source was exported as CSV.
+function parseDelimitedLine(line, delim) {
+  const cells = []; let cur = ""; let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else inQuotes = false; }
+      else cur += ch;
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === delim) { cells.push(cur); cur = ""; }
+      else cur += ch;
+    }
+  }
+  cells.push(cur);
+  return cells.map(c => c.trim());
+}
+// Maps a free-text "calling remark" (as seen in real call logs, e.g. "not
+// attend", "call back monday") onto our quick-pick tag + sentiment, so
+// imported rows land in the same Response Analysis as manually-logged calls.
+function classifyCallingRemark(raw) {
+  const s = (raw || "").toLowerCase();
+  if (!s.trim()) return { tag: null, sentiment: "neutral" };
+  if (s.includes("interest")) return { tag: "Interested", sentiment: "positive" };
+  if (s.includes("call back") || s.includes("callback")) return { tag: "Call Back Later", sentiment: "neutral" };
+  if (s.includes("switch off") || s.includes("out of network") || s.includes("not reachable")) return { tag: "Switch Off", sentiment: "negative" };
+  if (s.includes("not attend") || s.includes("no response") || s.includes("no answer")) return { tag: "Not Reachable", sentiment: "negative" };
+  if (s.includes("wrong number")) return { tag: "Wrong Number", sentiment: "negative" };
+  if (s.includes("other brand") || s.includes("no need") || s.includes("not interested")) return { tag: "Not Interested", sentiment: "negative" };
+  return { tag: null, sentiment: "neutral" }; // e.g. "only milk" / "only brand" — ambiguous, kept as a plain note
+}
+function normalizePhone(v) {
+  const digits = (v || "").replace(/[^0-9]/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+}
+// Parses pasted bulk data into MilkDistributor-shaped rows. Recognizes
+// headers by keyword (Name/Phone/Area/Remarks/Map/Calling/Telecaller) in
+// any order; falls back to the fixed column order from the source sheet
+// (Name, Phone, Area, Current Brand, Map Link, Calling Remark, Telecaller)
+// if no header row is detected.
+function parseMilkBulkImport(text) {
+  const lines = text.split(/\r?\n/).map(l => l.replace(/\s+$/, "")).filter(l => l.trim() !== "");
+  if (!lines.length) return { rows: [], skipped: 0 };
+  const delim = lines[0].includes("\t") ? "\t" : ",";
+  const rawRows = lines.map(l => parseDelimitedLine(l, delim));
+
+  const headerCandidate = rawRows[0].map(h => h.toLowerCase());
+  const findCol = (...keywords) => headerCandidate.findIndex(h => keywords.some(k => h.includes(k)));
+  const nameHeaderIdx = findCol("customer", "name");
+  const nameIdx = (nameHeaderIdx >= 0 && !headerCandidate[nameHeaderIdx].includes("telecaller")) ? nameHeaderIdx : -1;
+  const hasHeader = nameIdx >= 0 && findCol("phone", "number", "contact") >= 0 && findCol("area") >= 0;
+
+  let colMap, dataRows;
+  if (hasHeader) {
+    colMap = {
+      name: nameIdx,
+      phone: findCol("phone", "number", "contact"),
+      area: findCol("area"),
+      brand: headerCandidate.findIndex(h => h.includes("remark") && !h.includes("calling") && !h.includes("field")),
+      mapLink: findCol("map"),
+      calling: headerCandidate.findIndex(h => h.includes("calling")),
+      telecaller: findCol("telecaller"),
+    };
+    dataRows = rawRows.slice(1);
+  } else {
+    colMap = { name: 0, phone: 1, area: 2, brand: 3, mapLink: 4, calling: 5, telecaller: 6 };
+    dataRows = rawRows;
+  }
+
+  const get = (row, idx) => (idx >= 0 && idx < row.length) ? row[idx] : "";
+  const rows = [];
+  let skipped = 0;
+  dataRows.forEach(row => {
+    const name = get(row, colMap.name).trim();
+    // Skip repeated header rows (the sample sheet had the header re-appear
+    // partway down) and any row with no distributor name at all.
+    if (!name || /customer\s*name/i.test(name)) { if (row.some(c => c.trim())) skipped++; return; }
+    rows.push({
+      name,
+      contact: get(row, colMap.phone).trim(),
+      area: get(row, colMap.area).trim(),
+      currentBrand: get(row, colMap.brand).trim(),
+      mapLink: get(row, colMap.mapLink).trim(),
+      callingRemark: get(row, colMap.calling).trim(),
+      telecaller: get(row, colMap.telecaller).trim(),
+    });
+  });
+  return { rows, skipped };
+}
+
 
 const INITIAL_EXPENSES = [
 ];
@@ -4239,15 +4333,22 @@ function MilkDistributors({ embedded = false } = {}) {
   const [rows, setRows, syncStatus] = useSheetSynced("milkDistributors", "milkDistributors", []);
   const [selectedId, setSelectedId] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
-  const [addForm, setAddForm] = useState({ name: "", contact: "", area: "", address: "", mapLink: "", telecaller: MILK_TELECALLERS[0] });
+  const [addForm, setAddForm] = useState({ name: "", contact: "", area: "", address: "", mapLink: "", currentBrand: "", telecaller: MILK_TELECALLERS[0] });
   const [stageFilter, setStageFilter] = useState("All");
   const [search, setSearch] = useState("");
+
+  // Bulk import
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importDefaultTc, setImportDefaultTc] = useState("Leave unassigned");
+  const [importPreview, setImportPreview] = useState(null); // { rows, skipped } | null
+  const [importing, setImporting] = useState(false);
 
   // Telecaller remark composer
   const [tcTelecaller, setTcTelecaller] = useState(MILK_TELECALLERS[0]);
   const [tcTag, setTcTag] = useState(null);
   const [tcNote, setTcNote] = useState("");
-  const [mapEdit, setMapEdit] = useState("");
+  const [detailEdit, setDetailEdit] = useState({ name: "", contact: "", area: "", address: "", currentBrand: "", mapLink: "" });
 
   // Field sales remark composer
   const [fsVisitedBy, setFsVisitedBy] = useState("");
@@ -4277,7 +4378,13 @@ function MilkDistributors({ embedded = false } = {}) {
 
   const selected = (rows || []).find(r => r.id === selectedId) || null;
   useEffect(() => {
-    if (selected) { setMapEdit(selected.mapLink || ""); setTcTelecaller(selected.telecaller || MILK_TELECALLERS[0]); }
+    if (selected) {
+      setTcTelecaller(selected.telecaller || MILK_TELECALLERS[0]);
+      setDetailEdit({
+        name: selected.name || "", contact: selected.contact || "", area: selected.area || "",
+        address: selected.address || "", currentBrand: selected.currentBrand || "", mapLink: selected.mapLink || "",
+      });
+    }
   }, [selectedId]); // eslint-disable-line
 
   const filtered = useMemo(() => {
@@ -4295,18 +4402,77 @@ function MilkDistributors({ embedded = false } = {}) {
     const rec = {
       id: Date.now() + "_" + Math.random().toString(36).slice(2, 7),
       name: addForm.name.trim(), contact: addForm.contact.trim(), area: addForm.area.trim(),
-      address: addForm.address.trim(), mapLink: addForm.mapLink.trim(), status: "New",
+      address: addForm.address.trim(), mapLink: addForm.mapLink.trim(), currentBrand: addForm.currentBrand.trim(), status: "New",
       telecaller: addForm.telecaller, telecallerRemarks: [], fieldSalesRemarks: [],
       createdAt: Date.now(), lastTelecallerRemarkAt: null, lastFieldSalesRemarkAt: null,
     };
     setRows(prev => [...(prev || []), rec]);
-    setAddForm({ name: "", contact: "", area: "", address: "", mapLink: "", telecaller: MILK_TELECALLERS[0] });
+    setAddForm({ name: "", contact: "", area: "", address: "", mapLink: "", currentBrand: "", telecaller: MILK_TELECALLERS[0] });
     setShowAdd(false);
     setSelectedId(rec.id);
   };
 
+  const saveDetailEdit = (id) => {
+    if (!detailEdit.name.trim()) { alert("Name can't be empty."); return; }
+    setRows(prev => (prev || []).map(r => r.id === id ? {
+      ...r, name: detailEdit.name.trim(), contact: detailEdit.contact.trim(), area: detailEdit.area.trim(),
+      address: detailEdit.address.trim(), currentBrand: detailEdit.currentBrand.trim(), mapLink: detailEdit.mapLink.trim(),
+    } : r));
+  };
+
+  // ── Bulk import ──
+  const runImportPreview = () => setImportPreview(parseMilkBulkImport(importText));
+  const commitImport = () => {
+    if (!importPreview || !importPreview.rows.length) return;
+    setImporting(true);
+    setRows(prev => {
+      const existing = [...(prev || [])];
+      importPreview.rows.forEach(ir => {
+        const phone = normalizePhone(ir.contact);
+        const matchIdx = existing.findIndex(e =>
+          (phone && normalizePhone(e.contact) === phone) ||
+          (!phone && e.name.trim().toLowerCase() === ir.name.toLowerCase() && (e.area || "").trim().toLowerCase() === (ir.area || "").toLowerCase())
+        );
+        const cls = classifyCallingRemark(ir.callingRemark);
+        let telecaller = MILK_TELECALLERS.find(t => t.toLowerCase() === ir.telecaller.toLowerCase()) || "";
+        if (!telecaller && importDefaultTc !== "Leave unassigned") telecaller = importDefaultTc;
+        const status = cls.sentiment === "positive" ? "Interested" : (ir.callingRemark ? "Contacted" : "New");
+
+        if (matchIdx >= 0) {
+          const cur = existing[matchIdx];
+          const lastNote = (cur.telecallerRemarks || []).length ? cur.telecallerRemarks[cur.telecallerRemarks.length - 1].text : null;
+          const newRemarks = [...(cur.telecallerRemarks || [])];
+          if (ir.callingRemark && ir.callingRemark !== lastNote) {
+            newRemarks.push({ text: ir.callingRemark, tag: cls.tag, sentiment: cls.sentiment, telecaller: telecaller || cur.telecaller || "Import", at: Date.now() });
+          }
+          existing[matchIdx] = {
+            ...cur,
+            area: cur.area || ir.area, mapLink: cur.mapLink || ir.mapLink, currentBrand: cur.currentBrand || ir.currentBrand,
+            telecaller: telecaller || cur.telecaller,
+            telecallerRemarks: newRemarks,
+            lastTelecallerRemarkAt: newRemarks.length ? newRemarks[newRemarks.length - 1].at : cur.lastTelecallerRemarkAt,
+          };
+        } else {
+          const rec = {
+            id: Date.now() + "_" + Math.random().toString(36).slice(2, 7) + Math.random().toString(36).slice(2, 5),
+            name: ir.name, contact: ir.contact, area: ir.area, address: "", mapLink: ir.mapLink, currentBrand: ir.currentBrand,
+            status, telecaller: telecaller || "",
+            telecallerRemarks: ir.callingRemark ? [{ text: ir.callingRemark, tag: cls.tag, sentiment: cls.sentiment, telecaller: telecaller || "Import", at: Date.now() }] : [],
+            fieldSalesRemarks: [], createdAt: Date.now(),
+            lastTelecallerRemarkAt: ir.callingRemark ? Date.now() : null, lastFieldSalesRemarkAt: null,
+          };
+          existing.push(rec);
+        }
+      });
+      return existing;
+    });
+    setImporting(false);
+    setShowImport(false);
+    setImportText("");
+    setImportPreview(null);
+  };
+
   const setStatus = (id, status) => setRows(prev => (prev || []).map(r => r.id === id ? { ...r, status } : r));
-  const saveMapLink = (id) => setRows(prev => (prev || []).map(r => r.id === id ? { ...r, mapLink: mapEdit.trim() } : r));
   const deleteDistributor = (r) => {
     if (!confirm(`Delete "${r.name}"? This cannot be undone.`)) return;
     setRows(prev => (prev || []).filter(x => x.id !== r.id));
@@ -4542,6 +4708,7 @@ function MilkDistributors({ embedded = false } = {}) {
             <Chip label={r.status} color={milkStageColor(r.status)} />
           </div>
           {r.address && <div style={{ fontSize: 12, color: T.t2, marginTop: 8 }}>{r.address}</div>}
+          {r.currentBrand && <div style={{ marginTop: 8 }}><Chip small label={"Currently uses: " + r.currentBrand} color={T.t3} /></div>}
           <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
             {r.contact && <button onClick={() => window.open("tel:" + r.contact)} style={{ flex: "1 1 100px", background: T.emerald + "22", border: `1px solid ${T.emerald}44`, borderRadius: 10, color: T.emerald, padding: "9px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>📞 Call</button>}
             {r.mapLink && <button onClick={() => window.open(r.mapLink, "_blank")} style={{ flex: "1 1 100px", background: T.sky + "22", border: `1px solid ${T.sky}44`, borderRadius: 10, color: T.sky, padding: "9px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>📍 Open Map</button>}
@@ -4550,9 +4717,14 @@ function MilkDistributors({ embedded = false } = {}) {
         </Card>
 
         <Card style={{ marginBottom: 14 }}>
-          <Label sub="Set by telecaller, used by field sales to navigate to the visit">Map Location</Label>
-          <Field label="Google Maps Link" value={mapEdit} onChange={e => setMapEdit(e.target.value)} placeholder="Paste Google Maps link here" />
-          <Btn label="Save Location" small onClick={() => saveMapLink(r.id)} />
+          <Label sub="Map location is set by the telecaller — field sales taps Open Map above to navigate there">Distributor Details</Label>
+          <Field label="Name" value={detailEdit.name} onChange={e => setDetailEdit({ ...detailEdit, name: e.target.value })} />
+          <Field label="Contact" value={detailEdit.contact} onChange={e => setDetailEdit({ ...detailEdit, contact: e.target.value })} type="tel" />
+          <Field label="Area" value={detailEdit.area} onChange={e => setDetailEdit({ ...detailEdit, area: e.target.value })} />
+          <Field label="Address" value={detailEdit.address} onChange={e => setDetailEdit({ ...detailEdit, address: e.target.value })} />
+          <Field label="Currently Uses (brand)" value={detailEdit.currentBrand} onChange={e => setDetailEdit({ ...detailEdit, currentBrand: e.target.value })} placeholder="e.g. Arokiya, Aavin" />
+          <Field label="Google Maps Link" value={detailEdit.mapLink} onChange={e => setDetailEdit({ ...detailEdit, mapLink: e.target.value })} placeholder="Paste Google Maps link here" />
+          <Btn label="Save Details" small onClick={() => saveDetailEdit(r.id)} />
         </Card>
 
         <Card style={{ marginBottom: 14 }}>
@@ -4648,6 +4820,7 @@ function MilkDistributors({ embedded = false } = {}) {
         <Label sub={`${(rows || []).length} distributor${(rows || []).length === 1 ? "" : "s"} · telecaller adds & calls, field sales visits & updates`}>🥛 Milk Distributors</Label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Btn label="+ Add Distributor" onClick={() => setShowAdd(true)} />
+          <Btn label="📥 Bulk Import" ghost onClick={() => { setShowImport(true); setImportPreview(null); }} />
         </div>
       </Card>
 
@@ -4702,7 +4875,10 @@ function MilkDistributors({ embedded = false } = {}) {
               <Chip small label={r.status} color={milkStageColor(r.status)} />
             </div>
             {latest && <div style={{ fontSize: 11.5, color: T.t2, marginTop: 8 }}>{latest.tag ? <b>{latest.tag}</b> : null}{latest.tag && latest.text ? " — " : ""}{latest.text || (!latest.tag ? "—" : "")}</div>}
-            {r.mapLink && <div style={{ fontSize: 10.5, color: T.sky, marginTop: 4 }}>📍 Location set</div>}
+            <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+              {r.mapLink && <div style={{ fontSize: 10.5, color: T.sky }}>📍 Location set</div>}
+              {r.currentBrand && <div style={{ fontSize: 10.5, color: T.t3 }}>Uses: {r.currentBrand}</div>}
+            </div>
           </div>
         );
       })}
@@ -4713,8 +4889,60 @@ function MilkDistributors({ embedded = false } = {}) {
         <Field label="Area" value={addForm.area} onChange={e => setAddForm({ ...addForm, area: e.target.value })} placeholder="e.g. Ambattur" />
         <Field label="Address" value={addForm.address} onChange={e => setAddForm({ ...addForm, address: e.target.value })} placeholder="Optional" />
         <Field label="Map Location (optional now, can add later)" value={addForm.mapLink} onChange={e => setAddForm({ ...addForm, mapLink: e.target.value })} placeholder="Paste Google Maps link" />
+        <Field label="Currently Uses (brand, optional)" value={addForm.currentBrand} onChange={e => setAddForm({ ...addForm, currentBrand: e.target.value })} placeholder="e.g. Arokiya, Aavin" />
         <Dropdown label="Telecaller" value={addForm.telecaller} onChange={e => setAddForm({ ...addForm, telecaller: e.target.value })} options={MILK_TELECALLERS} />
         <Btn label="Add Distributor" full onClick={addDistributor} disabled={!addForm.name.trim()} />
+      </Sheet>
+
+      <Sheet open={showImport} onClose={() => setShowImport(false)} title="Bulk Import Distributors">
+        <div style={{ fontSize: 12, color: T.t2, marginBottom: 12, lineHeight: 1.5 }}>
+          Copy the rows straight from Excel or Google Sheets (including the
+          header row) and paste them below. Expected columns: <b>Customer
+          Name, Phone Number, Area, Remarks (current brand), Map Link,
+          Calling Remark, Telecaller Name</b> — same order works even
+          without a header row. Re-importing an updated sheet is safe: rows
+          are matched by phone number (or name + area) and merged into
+          existing distributors instead of duplicating them.
+        </div>
+        <textarea value={importText} onChange={e => { setImportText(e.target.value); setImportPreview(null); }} rows={8}
+          placeholder="Paste your data here…"
+          style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 12, fontFamily: "monospace", outline: "none", width: "100%", boxSizing: "border-box", resize: "vertical", marginBottom: 12 }} />
+        <Dropdown label="Default telecaller (used for rows with no Telecaller Name)" value={importDefaultTc} onChange={e => setImportDefaultTc(e.target.value)} options={["Leave unassigned", ...MILK_TELECALLERS]} />
+
+        {!importPreview ? (
+          <Btn label="Preview Import" full ghost onClick={runImportPreview} disabled={!importText.trim()} />
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+                <div style={{ fontSize: 18, fontWeight: 800, color: T.emerald }}>{importPreview.rows.length}</div>
+                <div style={{ fontSize: 9, color: T.t3, fontWeight: 700, textTransform: "uppercase" }}>Ready to Import</div>
+              </div>
+              {importPreview.skipped > 0 && (
+                <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: T.rose }}>{importPreview.skipped}</div>
+                  <div style={{ fontSize: 9, color: T.t3, fontWeight: 700, textTransform: "uppercase" }}>Skipped (no name)</div>
+                </div>
+              )}
+            </div>
+            {importPreview.rows.length > 0 && (
+              <div style={{ maxHeight: 220, overflowY: "auto", border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 12 }}>
+                {importPreview.rows.slice(0, 8).map((row, i) => (
+                  <div key={i} style={{ padding: "8px 10px", borderBottom: i < Math.min(importPreview.rows.length, 8) - 1 ? `1px solid ${T.border}` : "none" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: T.t1 }}>{row.name} <span style={{ fontWeight: 400, color: T.t3 }}>{row.area ? "· " + row.area : ""}</span></div>
+                    <div style={{ fontSize: 10.5, color: T.t3, marginTop: 1 }}>{row.callingRemark || "No calling remark"} {row.telecaller ? "· " + row.telecaller : ""}</div>
+                  </div>
+                ))}
+                {importPreview.rows.length > 8 && <div style={{ padding: "8px 10px", fontSize: 11, color: T.t3, fontStyle: "italic" }}>+ {importPreview.rows.length - 8} more…</div>}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn label="Edit Data" ghost onClick={() => setImportPreview(null)} />
+              <Btn label={importing ? "Importing…" : `Import ${importPreview.rows.length} Distributors`} color={T.emerald}
+                onClick={commitImport} disabled={importing || !importPreview.rows.length} />
+            </div>
+          </>
+        )}
       </Sheet>
     </div>
   );
