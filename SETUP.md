@@ -24,7 +24,7 @@ Result: **first load ~3–4× faster**, repeat visits instant from cache.
 ## Part 1 — Google Sheet (unchanged from v2)
 
 1. Create a Google Sheet named **Sridhi Ventures BOS Data**.
-2. Create tabs: `Leads`, `Samples`, `Expenses`, `RepeatCustomers`, `DailyOrders`, `TelecallerActivity`, `MilkDistributors`.
+2. Create tabs: `Leads`, `Samples`, `Expenses`, `RepeatCustomers`, `DailyOrders`, `TelecallerActivity`, `MilkDistributors`, `HubDistributors`.
 3. Add the header row in each tab (see below).
 4. Copy the **Sheet ID** from the URL (`/d/<THIS PART>/edit`).
 
@@ -102,6 +102,31 @@ id  name  contact  area  address  mapLink  status  telecaller  currentBrand  tel
   its own PDF report: a Team Overview page (pipeline status breakdown,
   response analysis, by-telecaller table) plus a unified Activity Log page
   of every call and visit, filterable by day, week, month, or custom range.
+
+**HubDistributors** *(hub-wise distributor tracker: one row per distributor, remark + status trail, up to 5 areas)*
+```
+id  hub  name  contact  areas  address  mapLink  details  status  telecaller  remarks  createdAt  lastRemarkAt
+```
+- `hub` is the hub this distributor is grouped under (e.g. "Ambattur Hub",
+  "Trichy Hub") — filterable on the Hub Distributors screen and in the report.
+- `areas` is a JSON array of up to 5 area names this distributor covers
+  (e.g. `["Ambattur","Avadi","Padi","Korattur","Mogappair"]`) — entered as
+  five separate "Area 1"..."Area 5" fields in the app.
+- `details` is free text for basic details (business type, capacity, etc.).
+- `status` is one of: New, Contacted, Interested, Visited, Deal Accepted,
+  Not Interested, Demanding Something Different, Ring No Response, Busy,
+  Wrong Number.
+- `remarks` is a list of structured entries — note text, the status at the
+  time, which telecaller logged it, and the timestamp — stored the same way
+  as `MilkDistributors.telecallerRemarks` (JSON-encoded per entry, joined
+  with ` || ` in the sheet cell). Saving a remark also updates the
+  distributor's current `status` and `telecaller`.
+- **Hub Distributors** screen (mobile: under "More"; desktop: sidebar) has
+  its own report, filterable by hub, telecaller, and day/week/month/custom
+  date range: a **PDF** (Team Overview — pipeline status breakdown, response
+  analysis, by-telecaller table — plus a detailed Activity Log page of every
+  remark with date & time) and an **Excel** export (one row per distributor
+  with full remark history) — both meant to be shared with management.
 
 ---
 

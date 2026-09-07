@@ -37,6 +37,7 @@ TAB_CONFIG = {
     "existingCustomers": {"tab": "ExistingCustomers", "headers": ["id","name","contact","area","address","reason","status","remarks","lastRemarkAt","createdAt","telecaller"]},
     "telecallerActivity": {"tab": "TelecallerActivity", "headers": ["id","date","telecaller","type","customer","area","kg","amount","qty","unit","notes","createdAt"]},
     "milkDistributors": {"tab": "MilkDistributors", "headers": ["id","name","contact","area","address","mapLink","status","telecaller","currentBrand","telecallerRemarks","fieldSalesRemarks","createdAt","lastTelecallerRemarkAt","lastFieldSalesRemarkAt"]},
+    "hubDistributors": {"tab": "HubDistributors", "headers": ["id","hub","name","contact","areas","address","mapLink","details","status","telecaller","remarks","createdAt","lastRemarkAt"]},
 }
 
 _cache = {}
@@ -263,6 +264,27 @@ def _coerce(tab_key, row):
                 except: pass
             else:
                 row[f] = None
+    elif tab_key == "hubDistributors":
+        # `areas` is a plain JSON array of up to 5 area names (no per-item
+        # attribution needed, unlike remarks) so it's stored as one JSON
+        # cell rather than " || "-joined. `remarks` follows the same
+        # legacy-string-or-structured-JSON pattern as ExistingCustomers.
+        raw_areas = row.get("areas", "")
+        if isinstance(raw_areas, str) and raw_areas.strip():
+            try:
+                parsed = json.loads(raw_areas)
+                row["areas"] = parsed if isinstance(parsed, list) else []
+            except Exception:
+                row["areas"] = []
+        elif not isinstance(raw_areas, list):
+            row["areas"] = []
+        row["remarks"] = [_deserialize_remark_obj(r) for r in row.get("remarks","").split(" || ") if r] if row.get("remarks") else []
+        for f in ("lastRemarkAt", "createdAt"):
+            if row.get(f, "") not in (None, ""):
+                try: row[f] = int(float(row[f]))
+                except: pass
+            else:
+                row[f] = None
     return row
 
 def _decoerce_leads(lead):
@@ -297,6 +319,17 @@ def _decoerce_milk_distributor(row):
     for f in ("telecallerRemarks", "fieldSalesRemarks"):
         remarks = out.get(f, [])
         out[f] = " || ".join(_serialize_remark_obj(r) for r in remarks) if isinstance(remarks, list) else (remarks or "")
+    return out
+
+def _decoerce_hub_distributor(row):
+    import time as _time
+    out = dict(row)
+    if not out.get("id"):
+        out["id"] = str(int(_time.time() * 1000)) + "_" + str(abs(hash(out.get("contact","") + out.get("name",""))))[:6]
+    areas = out.get("areas", [])
+    out["areas"] = json.dumps(areas[:5], ensure_ascii=False) if isinstance(areas, list) else (areas or "[]")
+    remarks = out.get("remarks", [])
+    out["remarks"] = " || ".join(_serialize_remark_obj(r) for r in remarks) if isinstance(remarks, list) else (remarks or "")
     return out
 
 def fetch_all_tabs():
@@ -375,6 +408,8 @@ class handler(BaseHTTPRequestHandler):
                             records = [_decoerce_existing_customer(r) for r in records]
                         elif tab == "milkDistributors":
                             records = [_decoerce_milk_distributor(r) for r in records]
+                        elif tab == "hubDistributors":
+                            records = [_decoerce_hub_distributor(r) for r in records]
                         token = get_token()
                         sheet_id = os.environ["GOOGLE_SHEET_ID"]
                         actual_tabs = get_sheet_tabs(sheet_id, token)
@@ -424,6 +459,8 @@ class handler(BaseHTTPRequestHandler):
             records = [_decoerce_existing_customer(r) for r in records]
         elif tab == "milkDistributors":
             records = [_decoerce_milk_distributor(r) for r in records]
+        elif tab == "hubDistributors":
+            records = [_decoerce_hub_distributor(r) for r in records]
         try:
             token = get_token()
             actual_tabs = get_sheet_tabs(os.environ["GOOGLE_SHEET_ID"], token)

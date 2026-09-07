@@ -123,6 +123,33 @@ function milkStageColor(stage) {
   return s ? s.color : T.t3;
 }
 
+// ── Hub-wise Distributor pipeline ──────────────────────────────────────────
+// Distributors tracked hub-by-hub: name, location, and up to 5 areas each
+// one distributes to, with a single status + timestamped remark trail
+// (who approached them and when) for a clean management report.
+const MAX_HUB_AREAS = 5;
+const HUB_STAGES = [
+  { id: "New",                           color: T.t3     },
+  { id: "Contacted",                     color: T.sky    },
+  { id: "Interested",                    color: T.indigo },
+  { id: "Visited",                       color: T.orange },
+  { id: "Deal Accepted",                 color: T.emerald},
+  { id: "Not Interested",                color: T.rose   },
+  { id: "Demanding Something Different", color: T.amber  },
+  { id: "Ring No Response",              color: "#94A3B8"},
+  { id: "Busy",                          color: "#B08968"},
+  { id: "Wrong Number",                  color: "#C2410C"},
+];
+const HUB_STATUS_SENTIMENT = {
+  "New": "neutral", "Contacted": "neutral", "Interested": "positive", "Visited": "positive",
+  "Deal Accepted": "positive", "Not Interested": "negative", "Demanding Something Different": "neutral",
+  "Ring No Response": "negative", "Busy": "negative", "Wrong Number": "negative",
+};
+function hubStageColor(stage) {
+  const s = HUB_STAGES.find(p => p.id === stage);
+  return s ? s.color : T.t3;
+}
+
 // ── Bulk import (paste from Excel/Google Sheets) ───────────────────────────
 // Handles both tab-separated (default when pasting from a spreadsheet) and
 // comma-separated text, with basic support for quoted fields so a map link
@@ -4948,6 +4975,544 @@ function MilkDistributors({ embedded = false } = {}) {
   );
 }
 
+// ─── HUB DISTRIBUTORS ───────────────────────────────────────────────────────
+// Hub-wise distributor tracker: log each distributor under a hub with their
+// location, basic details and up to 5 areas they cover; maintain one status
+// (from the fixed pipeline above) plus a timestamped remark trail showing
+// which telecaller approached them and when. Built for a clean management
+// report (PDF + Excel) filterable by date range, telecaller, and hub.
+function HubDistributors({ embedded = false } = {}) {
+  const [rows, setRows, syncStatus] = useSheetSynced("hubDistributors", "hubDistributors", []);
+  const [selectedId, setSelectedId] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const blankForm = { hub: "", name: "", contact: "", address: "", mapLink: "", details: "", telecaller: TELECALLERS[0], area1: "", area2: "", area3: "", area4: "", area5: "" };
+  const [addForm, setAddForm] = useState(blankForm);
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [hubFilter, setHubFilter] = useState("All");
+  const [search, setSearch] = useState("");
+
+  const [detailEdit, setDetailEdit] = useState(blankForm);
+
+  // Remark / status composer
+  const [rmTelecaller, setRmTelecaller] = useState(TELECALLERS[0]);
+  const [rmStatus, setRmStatus] = useState(HUB_STAGES[0].id);
+  const [rmNote, setRmNote] = useState("");
+
+  // Report state
+  const [reportPreset, setReportPreset] = useState("Today");
+  const [reportFrom, setReportFrom] = useState(todayISO());
+  const [reportTo, setReportTo] = useState(todayISO());
+  const [reportTelecaller, setReportTelecaller] = useState("All");
+  const [reportHub, setReportHub] = useState("All");
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [generatingExcel, setGeneratingExcel] = useState(false);
+
+  const applyReportPreset = (preset) => {
+    setReportPreset(preset);
+    const now = new Date();
+    if (preset === "Today") { setReportFrom(todayISO()); setReportTo(todayISO()); }
+    else if (preset === "This Week") {
+      const day = now.getDay() || 7;
+      const monday = new Date(now); monday.setDate(now.getDate() - day + 1);
+      setReportFrom(localISO(monday)); setReportTo(todayISO());
+    } else if (preset === "This Month") {
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      setReportFrom(localISO(first)); setReportTo(todayISO());
+    }
+  };
+
+  const hubOptions = useMemo(() => {
+    const set = new Set((rows || []).map(r => (r.hub || "").trim()).filter(Boolean));
+    return ["All", ...Array.from(set).sort()];
+  }, [rows]);
+
+  const areasFromForm = (f) => [f.area1, f.area2, f.area3, f.area4, f.area5].map(a => (a || "").trim()).filter(Boolean).slice(0, MAX_HUB_AREAS);
+
+  const selected = (rows || []).find(r => r.id === selectedId) || null;
+  useEffect(() => {
+    if (selected) {
+      setRmTelecaller(selected.telecaller || TELECALLERS[0]);
+      setRmStatus(selected.status || HUB_STAGES[0].id);
+      const areas = selected.areas || [];
+      setDetailEdit({
+        hub: selected.hub || "", name: selected.name || "", contact: selected.contact || "",
+        address: selected.address || "", mapLink: selected.mapLink || "", details: selected.details || "",
+        telecaller: selected.telecaller || TELECALLERS[0],
+        area1: areas[0] || "", area2: areas[1] || "", area3: areas[2] || "", area4: areas[3] || "", area5: areas[4] || "",
+      });
+    }
+  }, [selectedId]); // eslint-disable-line
+
+  const filtered = useMemo(() => {
+    let list = rows || [];
+    if (statusFilter !== "All") list = list.filter(r => r.status === statusFilter);
+    if (hubFilter !== "All") list = list.filter(r => (r.hub || "") === hubFilter);
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter(r =>
+        (r.name || "").toLowerCase().includes(q) ||
+        (r.hub || "").toLowerCase().includes(q) ||
+        (r.contact || "").includes(q) ||
+        (r.areas || []).some(a => (a || "").toLowerCase().includes(q))
+      );
+    }
+    return [...list].sort((a, b) => (b.lastRemarkAt || b.createdAt || 0) - (a.lastRemarkAt || a.createdAt || 0));
+  }, [rows, statusFilter, hubFilter, search]);
+
+  const addDistributor = () => {
+    if (!addForm.name.trim()) { alert("Enter the distributor name."); return; }
+    if (!addForm.hub.trim()) { alert("Enter the hub name."); return; }
+    const now = Date.now();
+    const rec = {
+      id: Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+      hub: addForm.hub.trim(), name: addForm.name.trim(), contact: addForm.contact.trim(),
+      areas: areasFromForm(addForm),
+      address: addForm.address.trim(), mapLink: addForm.mapLink.trim(), details: addForm.details.trim(),
+      status: "New", telecaller: addForm.telecaller, remarks: [],
+      createdAt: now, lastRemarkAt: null,
+    };
+    setRows(prev => [rec, ...(prev || [])]);
+    setAddForm(blankForm);
+    setShowAdd(false);
+    setSelectedId(rec.id);
+  };
+
+  const saveDetailEdit = (id) => {
+    if (!detailEdit.name.trim()) { alert("Name can't be empty."); return; }
+    if (!detailEdit.hub.trim()) { alert("Hub can't be empty."); return; }
+    setRows(prev => (prev || []).map(r => r.id === id ? {
+      ...r, hub: detailEdit.hub.trim(), name: detailEdit.name.trim(), contact: detailEdit.contact.trim(),
+      address: detailEdit.address.trim(), mapLink: detailEdit.mapLink.trim(), details: detailEdit.details.trim(),
+      areas: areasFromForm(detailEdit),
+    } : r));
+  };
+
+  // A remark always carries the status at the time it was logged — this is
+  // what lets the report show "who approached them, what happened, when"
+  // in one line, and also updates the distributor's current status.
+  const addRemark = (id) => {
+    if (!rmNote.trim()) { alert("Add a short remark before saving."); return; }
+    if (!rmTelecaller) { alert("Select which telecaller approached them."); return; }
+    const at = Date.now();
+    const entry = { text: rmNote.trim(), status: rmStatus, telecaller: rmTelecaller, at };
+    setRows(prev => (prev || []).map(r => r.id === id ? {
+      ...r, status: rmStatus, telecaller: rmTelecaller, remarks: [...(r.remarks || []), entry], lastRemarkAt: at,
+    } : r));
+    setRmNote("");
+  };
+
+  const deleteDistributor = (r) => {
+    if (!confirm(`Delete "${r.name}"? This cannot be undone.`)) return;
+    setRows(prev => (prev || []).filter(x => x.id !== r.id));
+    setSelectedId(null);
+  };
+
+  // ── PDF: Team Overview + detailed Activity Log (status, remark, telecaller, date & time) ──
+  const downloadHubReport = async () => {
+    if (generatingReport) return;
+    setGeneratingReport(true);
+    try {
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+      const NAVY = [8, 40, 25], TEAL = [23, 148, 74], AMBER = [180, 110, 5], INDIGO = [79, 70, 229];
+      const GRID = [214, 220, 214], INK = [26, 32, 46], SUBTLE = [110, 118, 138];
+      const POS = [34, 217, 138], NEG = [251, 113, 133], NEU = [251, 191, 36];
+      const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
+      const pageW = doc.internal.pageSize.getWidth(), pageH = doc.internal.pageSize.getHeight(), margin = 32;
+      const rangeLabel = reportFrom === reportTo ? formatDateReadable(reportFrom) : `${formatDateReadable(reportFrom)}  –  ${formatDateReadable(reportTo)}`;
+
+      const header = (title) => {
+        const headerH = 74;
+        doc.setFillColor(...NAVY); doc.rect(0, 0, pageW, headerH, "F");
+        doc.setFillColor(...TEAL); doc.rect(0, headerH - 2, pageW, 2, "F");
+        const logoSize = 34, badgePad = 5, badgeSize = logoSize + badgePad * 2;
+        const badgeX = margin, badgeY = (headerH - badgeSize) / 2 - 1;
+        doc.setFillColor(255, 255, 255); doc.roundedRect(badgeX, badgeY, badgeSize, badgeSize, 8, 8, "F");
+        try { doc.addImage(SRIDHI_LOGO_PNG, "PNG", badgeX + badgePad, badgeY + badgePad, logoSize, logoSize); } catch (e) {}
+        const textX = badgeX + badgeSize + 14;
+        doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(15);
+        doc.text(title, textX, 30);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(200, 214, 205);
+        doc.text(`${reportPreset} · ${rangeLabel}${reportHub !== "All" ? " · " + reportHub + " Hub" : ""}`, textX, 46);
+        doc.setFontSize(8);
+        doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`, pageW - margin, 30, { align: "right" });
+        return headerH + 20;
+      };
+      const footer = () => {
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+          doc.setPage(i);
+          doc.setDrawColor(...GRID); doc.line(margin, pageH - 26, pageW - margin, pageH - 26);
+          doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...SUBTLE);
+          doc.text("Sridhi Ventures · Hub Distributor Report", margin, pageH - 13);
+          doc.text(`Page ${i} of ${pageCount}`, pageW - margin, pageH - 13, { align: "right" });
+        }
+      };
+
+      let all = rows || [];
+      if (reportHub !== "All") all = all.filter(d => (d.hub || "") === reportHub);
+
+      // Every remark, flattened, scoped to the date range + telecaller + hub.
+      const entries = [];
+      all.forEach(d => {
+        (d.remarks || []).forEach(r => {
+          const at = typeof r === "object" ? r.at : null;
+          if (!at) return;
+          const dateStr = localISO(at);
+          if (dateStr < reportFrom || dateStr > reportTo) return;
+          const tc = typeof r === "object" ? r.telecaller : null;
+          if (reportTelecaller !== "All" && tc !== reportTelecaller) return;
+          entries.push({
+            at, dateStr, hub: d.hub || "—", distributor: d.name, areas: (d.areas || []).join(", ") || "—",
+            by: tc || "—", status: r.status || d.status || "—", note: r.text || "—",
+            sentiment: HUB_STATUS_SENTIMENT[r.status] || "neutral",
+          });
+        });
+      });
+      entries.sort((a, b) => a.at - b.at);
+
+      // ── Page 1: Team overview ──
+      let y = header("Hub Distributors — Team Overview");
+      const totalDistributors = all.length;
+      const stageBreakdown = HUB_STAGES.map(s => ({ ...s, count: all.filter(d => d.status === s.id).length }));
+      const dealsAccepted = all.filter(d => d.status === "Deal Accepted").length;
+      const chips = [
+        [`${totalDistributors} Total Distributors`, TEAL, [229, 248, 238]],
+        [`${entries.length} Remarks Logged`, INDIGO, [235, 234, 253]],
+        [`${dealsAccepted} Deals Accepted`, AMBER, [254, 246, 224]],
+      ];
+      let cx = margin;
+      chips.forEach(([label, color, tint]) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(9.5);
+        const w = doc.getTextWidth(label) + 22;
+        doc.setFillColor(...tint); doc.setDrawColor(...color);
+        doc.roundedRect(cx, y, w, 24, 12, 12, "FD");
+        doc.setTextColor(...color); doc.text(label, cx + 11, y + 16);
+        cx += w + 8;
+      });
+      y += 42;
+
+      doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(...NAVY);
+      doc.text("PIPELINE STATUS", margin, y); y += 10;
+      // Two rows of 5 — the fixed 10-stage pipeline doesn't fit legibly on one row.
+      const perRow = 5, boxGap = 6;
+      const sbw = (pageW - margin * 2 - (perRow - 1) * boxGap) / perRow;
+      stageBreakdown.forEach((s, i) => {
+        const row = Math.floor(i / perRow), col = i % perRow;
+        const bx = margin + col * (sbw + boxGap), by2 = y + row * 46;
+        const rgb = s.color.startsWith("#") ? [parseInt(s.color.slice(1, 3), 16), parseInt(s.color.slice(3, 5), 16), parseInt(s.color.slice(5, 7), 16)] : SUBTLE;
+        doc.setFillColor(...rgb.map(c => Math.min(255, c + (255 - c) * 0.88)));
+        doc.setDrawColor(...rgb);
+        doc.roundedRect(bx, by2, sbw, 40, 6, 6, "FD");
+        doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.setTextColor(...rgb);
+        doc.text(String(s.count), bx + 6, by2 + 18);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(5.6); doc.setTextColor(...SUBTLE);
+        doc.text(s.id.toUpperCase(), bx + 6, by2 + 30, { maxWidth: sbw - 8 });
+      });
+      y += 46 * 2 + 12;
+
+      const posCount = entries.filter(e => e.sentiment === "positive").length;
+      const negCount = entries.filter(e => e.sentiment === "negative").length;
+      const neuCount = entries.filter(e => e.sentiment === "neutral").length;
+      const totalResp = posCount + negCount + neuCount;
+      doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(...NAVY);
+      doc.text("RESPONSE ANALYSIS (REMARKS IN RANGE)", margin, y); y += 10;
+      const statBoxes = [["Positive", posCount, POS], ["Negative", negCount, NEG], ["Neutral", neuCount, NEU]];
+      const boxW = (pageW - margin * 2 - 16) / 3;
+      statBoxes.forEach(([label, count, color], i) => {
+        const bx = margin + i * (boxW + 8);
+        doc.setFillColor(...color.map(c => Math.min(255, c + (255 - c) * 0.88)));
+        doc.setDrawColor(...color);
+        doc.roundedRect(bx, y, boxW, 44, 8, 8, "FD");
+        doc.setFont("helvetica", "bold"); doc.setFontSize(19); doc.setTextColor(...color);
+        doc.text(String(count), bx + 12, y + 27);
+        doc.setFont("helvetica", "bold"); doc.setFontSize(8.5);
+        const pct = totalResp ? Math.round((count / totalResp) * 100) : 0;
+        doc.text(`${label.toUpperCase()} · ${pct}%`, bx + 12, y + 38);
+      });
+      y += 56;
+      if (totalResp) {
+        const barX = margin, barY = y, barW = pageW - margin * 2, barH = 12;
+        let bx2 = barX;
+        [[posCount, POS], [neuCount, NEU], [negCount, NEG]].forEach(([count, color]) => {
+          if (!count) return;
+          const w = (count / totalResp) * barW;
+          doc.setFillColor(...color); doc.rect(bx2, barY, w, barH, "F");
+          bx2 += w;
+        });
+        doc.setDrawColor(...GRID); doc.roundedRect(barX, barY, barW, barH, 3, 3, "S");
+        y += barH + 22;
+      } else y += 8;
+
+      doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(...NAVY);
+      doc.text("BY TELECALLER", margin, y); y += 8;
+      const tcRows = TELECALLERS.map(t => {
+        const tEntries = entries.filter(e => e.by === t);
+        const deals = tEntries.filter(e => e.status === "Deal Accepted").length;
+        const notInt = tEntries.filter(e => e.status === "Not Interested").length;
+        return [t, all.filter(d => d.telecaller === t).length, tEntries.length, deals, notInt];
+      }).filter(row => row[1] > 0 || row[2] > 0);
+      autoTable(doc, {
+        startY: y, margin: { top: 94, bottom: 40 },
+        head: [["Telecaller", "Distributors Assigned", "Remarks in Range", "Deal Accepted", "Not Interested"]],
+        body: tcRows.length ? tcRows : [["—", "—", "—", "—", "—"]], theme: "grid",
+        styles: { font: "helvetica", fontSize: 9, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+        headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 },
+        alternateRowStyles: { fillColor: [248, 250, 248] },
+        columnStyles: { 0: { fontStyle: "bold", cellWidth: 120 } },
+      });
+
+      // ── Page 2+: detailed activity log ──
+      doc.addPage();
+      let yy = header("Hub Distributors — Activity Log");
+      if (!entries.length) {
+        doc.setFont("helvetica", "normal"); doc.setFontSize(11); doc.setTextColor(...SUBTLE);
+        doc.text("No remarks logged in this date range.", margin, yy + 10);
+      } else {
+        autoTable(doc, {
+          startY: yy,
+          margin: { top: 94, bottom: 40 },
+          head: [["Date & Time", "Hub", "Distributor", "Areas", "Telecaller", "Status", "Remark"]],
+          body: entries.map(e => [
+            new Date(e.at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }),
+            e.hub, e.distributor, e.areas, e.by, e.status, e.note,
+          ]),
+          theme: "grid",
+          styles: { font: "helvetica", fontSize: 8, cellPadding: 5, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "top" },
+          headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+          alternateRowStyles: { fillColor: [248, 250, 248] },
+          columnStyles: { 2: { fontStyle: "bold" }, 6: { cellWidth: 130 } },
+          didParseCell: (data) => {
+            if (data.section === "body" && data.column.index === 5) {
+              const rawStatus = data.cell.raw;
+              const color = hubStageColor(rawStatus);
+              const rgb = color.startsWith("#") ? [parseInt(color.slice(1, 3), 16), parseInt(color.slice(3, 5), 16), parseInt(color.slice(5, 7), 16)] : SUBTLE;
+              data.cell.styles.textColor = rgb;
+              data.cell.styles.fillColor = rgb.map(c => Math.min(255, c + (255 - c) * 0.9));
+              data.cell.styles.fontStyle = "bold";
+            }
+          },
+          didDrawPage: () => header("Hub Distributors — Activity Log"),
+        });
+      }
+
+      footer();
+      doc.save(`Hub-Distributor-Report_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
+  // ── Excel: one row per distributor, full remark history included ──
+  const downloadHubExcel = () => {
+    if (generatingExcel) return;
+    setGeneratingExcel(true);
+    try {
+      let all = rows || [];
+      if (reportHub !== "All") all = all.filter(d => (d.hub || "") === reportHub);
+      const excelRows = all.map(d => {
+        const remarks = d.remarks || [];
+        const latest = remarks.length ? remarks[remarks.length - 1] : null;
+        return {
+          "Hub": d.hub || "",
+          "Distributor Name": d.name || "",
+          "Contact": d.contact || "",
+          "Area 1": (d.areas || [])[0] || "", "Area 2": (d.areas || [])[1] || "", "Area 3": (d.areas || [])[2] || "",
+          "Area 4": (d.areas || [])[3] || "", "Area 5": (d.areas || [])[4] || "",
+          "Address": d.address || "",
+          "Map Location": d.mapLink || "",
+          "Business Details": d.details || "",
+          "Status": d.status || "",
+          "Approached By (Telecaller)": d.telecaller || "",
+          "Latest Remark": latest ? latest.text : "",
+          "Latest Remark Date & Time": latest && latest.at ? new Date(latest.at).toLocaleString("en-IN") : "",
+          "Full Remark History": remarks.map(r => `[${new Date(r.at).toLocaleString("en-IN")} · ${r.telecaller} · ${r.status}] ${r.text}`).join(" | "),
+          "Added On": d.createdAt ? new Date(d.createdAt).toLocaleString("en-IN") : "",
+        };
+      });
+      const ws = XLSX.utils.json_to_sheet(excelRows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Hub Distributors");
+      XLSX.writeFile(wb, `Hub-Distributor-Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } finally {
+      setGeneratingExcel(false);
+    }
+  };
+
+  // ── Detail view ──
+  if (selected) {
+    const r = selected;
+    return (
+      <div>
+        <button onClick={() => setSelectedId(null)} style={{ background: "none", border: "none", color: T.accent, fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 12, fontFamily: FONT }}>← Back to list</button>
+
+        <Card accent={hubStageColor(r.status)} style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 17, fontWeight: 800, color: T.t1 }}>{r.name}</div>
+              <div style={{ fontSize: 12, color: T.t3, marginTop: 2 }}>{r.hub ? "🏢 " + r.hub + " Hub" : "No hub set"} {r.contact ? "· " + r.contact : ""}</div>
+            </div>
+            <Chip label={r.status} color={hubStageColor(r.status)} />
+          </div>
+          {r.address && <div style={{ fontSize: 12, color: T.t2, marginTop: 8 }}>{r.address}</div>}
+          {(r.areas || []).length > 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+              {r.areas.map((a, i) => <Chip key={i} small label={a} color={T.sky} />)}
+            </div>
+          )}
+          {r.details && <div style={{ fontSize: 12, color: T.t2, marginTop: 8 }}>{r.details}</div>}
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+            {r.contact && <button onClick={() => window.open("tel:" + r.contact)} style={{ flex: "1 1 100px", background: T.emerald + "22", border: `1px solid ${T.emerald}44`, borderRadius: 10, color: T.emerald, padding: "9px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>📞 Call</button>}
+            {r.mapLink && <button onClick={() => window.open(r.mapLink, "_blank")} style={{ flex: "1 1 100px", background: T.sky + "22", border: `1px solid ${T.sky}44`, borderRadius: 10, color: T.sky, padding: "9px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>📍 Open Map</button>}
+            <button onClick={() => deleteDistributor(r)} style={{ flex: "1 1 100px", background: T.rose + "18", border: `1px solid ${T.rose}44`, borderRadius: 10, color: T.rose, padding: "9px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>🗑️ Delete</button>
+          </div>
+        </Card>
+
+        <Card style={{ marginBottom: 14 }}>
+          <Label sub="Basic details — hub, location and the areas this distributor covers (up to 5)">Distributor Details</Label>
+          <Field label="Hub *" value={detailEdit.hub} onChange={e => setDetailEdit({ ...detailEdit, hub: e.target.value })} placeholder="e.g. Ambattur Hub" />
+          <Field label="Name *" value={detailEdit.name} onChange={e => setDetailEdit({ ...detailEdit, name: e.target.value })} />
+          <Field label="Contact" value={detailEdit.contact} onChange={e => setDetailEdit({ ...detailEdit, contact: e.target.value })} type="tel" />
+          <Field label="Address / Location" value={detailEdit.address} onChange={e => setDetailEdit({ ...detailEdit, address: e.target.value })} />
+          <Field label="Google Maps Link" value={detailEdit.mapLink} onChange={e => setDetailEdit({ ...detailEdit, mapLink: e.target.value })} placeholder="Paste Google Maps link here" />
+          <Field label="Basic Details (business type, capacity, etc.)" value={detailEdit.details} onChange={e => setDetailEdit({ ...detailEdit, details: e.target.value })} placeholder="Optional" />
+          <div style={{ fontSize: 11, color: T.t2, marginTop: 4, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Areas Distributed (up to 5)</div>
+          {[1, 2, 3, 4, 5].map(n => (
+            <Field key={n} value={detailEdit[`area${n}`]} onChange={e => setDetailEdit({ ...detailEdit, [`area${n}`]: e.target.value })} placeholder={`Area ${n}`} />
+          ))}
+          <Btn label="Save Details" small onClick={() => saveDetailEdit(r.id)} />
+        </Card>
+
+        <Card style={{ marginBottom: 14 }}>
+          <Label sub={`${(r.remarks || []).length} remark${(r.remarks || []).length === 1 ? "" : "s"} logged`}>Remarks & Status</Label>
+          {(r.remarks || []).length === 0 && <div style={{ fontSize: 12, color: T.t3, marginBottom: 10 }}>No remarks logged yet.</div>}
+          {(r.remarks || []).slice().reverse().map((rm, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0", borderBottom: i < r.remarks.length - 1 ? `1px solid ${T.border}` : "none" }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, marginTop: 5, flexShrink: 0, background: hubStageColor(rm.status) }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, color: T.t2 }}><b style={{ color: T.t1 }}>{rm.status}</b>{rm.text ? " — " + rm.text : ""}</div>
+                <div style={{ fontSize: 10, color: T.t4, marginTop: 1 }}>{rm.telecaller} · {new Date(rm.at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+              </div>
+            </div>
+          ))}
+          <Dropdown label="Approached By (Telecaller)" value={rmTelecaller} onChange={e => setRmTelecaller(e.target.value)} options={TELECALLERS} />
+          <div style={{ fontSize: 11, color: T.t2, marginTop: 2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Status</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+            {HUB_STAGES.map(s => {
+              const active = rmStatus === s.id;
+              return (
+                <button key={s.id} onClick={() => setRmStatus(s.id)} style={{
+                  background: active ? s.color + "22" : T.surface, border: `1px solid ${active ? s.color : T.border}`,
+                  borderRadius: 20, padding: "6px 12px", fontSize: 11, fontWeight: 700,
+                  color: active ? s.color : T.t2, cursor: "pointer", fontFamily: FONT,
+                }}>{s.id}</button>
+              );
+            })}
+          </div>
+          <textarea value={rmNote} onChange={e => setRmNote(e.target.value)} rows={2}
+            placeholder="What happened on the call / visit…"
+            style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 13, fontFamily: FONT, outline: "none", width: "100%", boxSizing: "border-box", resize: "none" }} />
+          <div style={{ marginTop: 8 }}><Btn label="Save Remark" full onClick={() => addRemark(r.id)} disabled={!rmNote.trim()} /></div>
+        </Card>
+      </div>
+    );
+  }
+
+  // ── List view ──
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <Card accent={T.emerald}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <SyncBadge status={syncStatus} />
+        </div>
+        <Label sub={`${(rows || []).length} distributor${(rows || []).length === 1 ? "" : "s"} across ${Math.max(hubOptions.length - 1, 0)} hub${hubOptions.length - 1 === 1 ? "" : "s"} · remark, status & who approached them`}>🏢 Hub Distributors</Label>
+        <Btn label="+ Add Distributor" onClick={() => setShowAdd(true)} />
+      </Card>
+
+      <Card accent={T.amber}>
+        <Label sub="Every remark is logged with status, telecaller and date & time — download a report to share with management">Hub Distributor Report</Label>
+        <Dropdown label="Hub" value={reportHub} onChange={e => setReportHub(e.target.value)} options={hubOptions} />
+        <Dropdown label="Telecaller (for the by-telecaller breakdown)" value={reportTelecaller} onChange={e => setReportTelecaller(e.target.value)} options={["All", ...TELECALLERS]} />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+          {["Today", "This Week", "This Month", "Custom"].map(p => (
+            <button key={p} onClick={() => applyReportPreset(p)} style={{
+              background: reportPreset === p ? T.amber : "transparent", color: reportPreset === p ? "#1A1200" : T.t2,
+              border: `1px solid ${reportPreset === p ? T.amber : T.border}`, borderRadius: 10, padding: "8px 13px",
+              fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+            }}>{p}</button>
+          ))}
+        </div>
+        {reportPreset === "Custom" && (
+          <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}><div style={{ fontSize: 10.5, color: T.t3, marginBottom: 4, fontWeight: 600 }}>FROM</div><input type="date" value={reportFrom} max={todayISO()} onChange={e => { setReportFrom(e.target.value); setReportPreset("Custom"); }} style={inputStyle} /></div>
+            <div style={{ flex: 1 }}><div style={{ fontSize: 10.5, color: T.t3, marginBottom: 4, fontWeight: 600 }}>TO</div><input type="date" value={reportTo} max={todayISO()} onChange={e => { setReportTo(e.target.value); setReportPreset("Custom"); }} style={inputStyle} /></div>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn label={generatingReport ? "Generating…" : "🧾 PDF Report"} color={T.amber} disabled={generatingReport} onClick={downloadHubReport} />
+          <Btn label={generatingExcel ? "Generating…" : "📊 Excel"} ghost color={T.amber} disabled={generatingExcel} onClick={downloadHubExcel} />
+        </div>
+      </Card>
+
+      <Field label="Search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, hub, area, contact…" />
+      {hubOptions.length > 1 && (
+        <Dropdown label="Filter by Hub" value={hubFilter} onChange={e => setHubFilter(e.target.value)} options={hubOptions} />
+      )}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
+        {["All", ...HUB_STAGES.map(s => s.id)].map(s => (
+          <button key={s} onClick={() => setStatusFilter(s)} style={{
+            background: statusFilter === s ? (s === "All" ? T.accent : hubStageColor(s)) + "22" : T.surface,
+            border: `1px solid ${statusFilter === s ? (s === "All" ? T.accent : hubStageColor(s)) : T.border}`,
+            borderRadius: 20, padding: "6px 12px", fontSize: 11, fontWeight: 700,
+            color: statusFilter === s ? (s === "All" ? T.accent : hubStageColor(s)) : T.t2, cursor: "pointer", fontFamily: FONT,
+          }}>{s}</button>
+        ))}
+      </div>
+
+      {!filtered.length ? (
+        <div style={{ fontSize: 12.5, color: T.t3, fontStyle: "italic", padding: "10px 2px" }}>No distributors yet — add the first one above.</div>
+      ) : filtered.map(r => {
+        const latest = (r.remarks || [])[r.remarks.length - 1];
+        return (
+          <div key={r.id} onClick={() => setSelectedId(r.id)} style={{
+            background: T.card, border: `1px solid ${T.border}`, borderRadius: 14, padding: "12px 14px", cursor: "pointer",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: T.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</div>
+                <div style={{ fontSize: 11.5, color: T.t3, marginTop: 2 }}>{r.hub ? "🏢 " + r.hub : "No hub"} {r.telecaller ? "· " + r.telecaller : ""}</div>
+              </div>
+              <Chip small label={r.status} color={hubStageColor(r.status)} />
+            </div>
+            {(r.areas || []).length > 0 && (
+              <div style={{ fontSize: 10.5, color: T.t3, marginTop: 6 }}>Areas: {r.areas.join(", ")}</div>
+            )}
+            {latest && <div style={{ fontSize: 11.5, color: T.t2, marginTop: 6 }}>{latest.text}</div>}
+            <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+              {r.mapLink && <div style={{ fontSize: 10.5, color: T.sky }}>📍 Location set</div>}
+              {r.lastRemarkAt && <div style={{ fontSize: 10.5, color: T.t4 }}>Updated {new Date(r.lastRemarkAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</div>}
+            </div>
+          </div>
+        );
+      })}
+
+      <Sheet open={showAdd} onClose={() => setShowAdd(false)} title="Add Hub Distributor">
+        <Field label="Hub *" value={addForm.hub} onChange={e => setAddForm({ ...addForm, hub: e.target.value })} placeholder="e.g. Ambattur Hub" />
+        <Field label="Distributor Name *" value={addForm.name} onChange={e => setAddForm({ ...addForm, name: e.target.value })} placeholder="e.g. Sri Lakshmi Traders" />
+        <Field label="Contact" value={addForm.contact} onChange={e => setAddForm({ ...addForm, contact: e.target.value })} type="tel" placeholder="98765 43210" />
+        <Field label="Address / Location" value={addForm.address} onChange={e => setAddForm({ ...addForm, address: e.target.value })} placeholder="Optional" />
+        <Field label="Google Maps Link" value={addForm.mapLink} onChange={e => setAddForm({ ...addForm, mapLink: e.target.value })} placeholder="Paste Google Maps link" />
+        <Field label="Basic Details" value={addForm.details} onChange={e => setAddForm({ ...addForm, details: e.target.value })} placeholder="Business type, capacity, etc. (optional)" />
+        <div style={{ fontSize: 11, color: T.t2, marginTop: 4, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Areas Distributed (up to 5)</div>
+        {[1, 2, 3, 4, 5].map(n => (
+          <Field key={n} value={addForm[`area${n}`]} onChange={e => setAddForm({ ...addForm, [`area${n}`]: e.target.value })} placeholder={`Area ${n}`} />
+        ))}
+        <Dropdown label="Approached By (Telecaller)" value={addForm.telecaller} onChange={e => setAddForm({ ...addForm, telecaller: e.target.value })} options={TELECALLERS} />
+        <Btn label="Add Distributor" full onClick={addDistributor} disabled={!addForm.name.trim() || !addForm.hub.trim()} />
+      </Sheet>
+    </div>
+  );
+}
+
 function DailyOrders({ embedded = false } = {}) {
   const [orders, setOrders, ordersSyncStatus] = useSheetSynced("dailyOrders", "dailyOrders", INITIAL_DAILY_ORDERS);
   const [leads, setLeads] = useSheetSynced("leads", "leads", []);
@@ -7665,6 +8230,7 @@ const NAV = [
 const MORE_MENU = [
   { id:"activity",  label:"Telecaller Activity", icon:"📝" },
   { id:"milkdistributors", label:"Milk Distributors", icon:"🥛" },
+  { id:"hubdistributors", label:"Hub Distributors", icon:"🏢" },
   { id:"dailyorders", label:"Daily Orders", icon:"📦" },
   { id:"samples",   label:"Samples",       icon:"🧪" },
   { id:"repeat",    label:"Repeat Orders", icon:"🔁" },
@@ -7744,6 +8310,7 @@ function DIcon({ id, size = 18, color = "currentColor", strokeWidth = 1.8 }) {
     case "dispatch": return <svg {...p}><rect x="1" y="6" width="14" height="11" rx="1.5"/><path d="M15 10h4l3 3v4h-7z"/><circle cx="6" cy="19.5" r="1.6"/><circle cx="17.5" cy="19.5" r="1.6"/></svg>;
     case "samples": return <svg {...p}><path d="M10 2v6.2L4.5 18a2 2 0 0 0 1.7 3h11.6a2 2 0 0 0 1.7-3L14 8.2V2"/><path d="M8.5 2h7"/><path d="M7 15h10"/></svg>;
     case "milk": return <svg {...p}><path d="M9 2h6l1 4-1.5 2v10a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2V8L8 4z"/><path d="M8 12h8"/></svg>;
+    case "hub": return <svg {...p}><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M9 14h.01"/><path d="M15 14h.01"/></svg>;
     case "phone": return <svg {...p}><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.7a2 2 0 0 1-.4 2.1L8 9.9a16 16 0 0 0 6 6l1.4-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.5 2.7.6a2 2 0 0 1 1.8 2.1z"/></svg>;
     case "followups": return <svg {...p}><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/></svg>;
     case "expenses": return <svg {...p}><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M17 12h.01"/><path d="M3 10h18"/></svg>;
@@ -7778,6 +8345,7 @@ const DESKTOP_NAV = [
   { id: "repeat",    label: "Orders",       icon: "orders" },
   { id: "activity",  label: "Telecaller Activity", icon: "clipboard", tag: "New" },
   { id: "milkdistributors", label: "Milk Distributors", icon: "milk", tag: "New" },
+  { id: "hubdistributors", label: "Hub Distributors", icon: "hub", tag: "New" },
   { id: "lostcustomers", label: "Lost Customers", icon: "lostuser" },
   { id: "existingcustomers", label: "Existing Customers", icon: "existing" },
   { id: "dailyorders", label: "Daily Orders", icon: "cart" },
@@ -9554,7 +10122,7 @@ export default function App() {
 
   useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; }, [activeTab]);
 
-  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", dailyorders:"Daily Orders", activity:"Telecaller Activity", milkdistributors:"Milk Distributors", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads", today:"Today Tasks", prospects:"Find Prospects", lostcustomers:"Lost Customers" };
+  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", dailyorders:"Daily Orders", activity:"Telecaller Activity", milkdistributors:"Milk Distributors", hubdistributors:"Hub Distributors", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads", today:"Today Tasks", prospects:"Find Prospects", lostcustomers:"Lost Customers" };
 
   // ── INSTALL BANNER ──
   const InstallBanner = () => showInstall ? (
@@ -9655,6 +10223,7 @@ export default function App() {
       case "dailyorders": return <DailyOrders {...moduleProps} />;
       case "activity":  return <TelecallerActivity {...moduleProps} />;
       case "milkdistributors": return <MilkDistributors {...moduleProps} />;
+      case "hubdistributors": return <HubDistributors {...moduleProps} />;
       case "expenses":  return <Expenses />;
       case "marketing": return <Marketing />;
       case "reports":   return <Reports />;
