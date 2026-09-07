@@ -168,12 +168,43 @@ function classifyHubRemark(raw) {
   return null;
 }
 
+// Pulls a phone-number-shaped run of digits out of a free-text cell and
+// returns whatever text is left over, trimmed of stray separators. This is
+// what stops something like "80935 73503 Just enquiry" from landing whole
+// inside the Contact field — the number and the note get split apart.
+function extractPhoneAndRemainder(text) {
+  const s = (text || "").trim();
+  const m = s.match(/(\+?\d[\d\s-]{6,}\d)/);
+  if (!m) return { phone: "", remainder: s };
+  const phone = m[0].replace(/\s{2,}/g, " ").trim();
+  const remainder = (s.slice(0, m.index) + s.slice(m.index + m[0].length))
+    .replace(/^[\s,.\-–—:;|]+|[\s,.\-–—:;|]+$/g, "").trim();
+  return { phone, remainder };
+}
+
+// Decides whether leftover text (after the phone number is pulled out) is
+// a distributor/shop NAME or a calling REMARK/note — e.g. "Just enquiry",
+// "not interested", "call back later" read as remarks; "Sri Lakshmi
+// Traders" reads as a name. Falls back to treating it as a name only when
+// nothing about it looks like a note.
+const HUB_REMARK_HINTS = /enquir|inquir|interest|not\s|wrong|busy|\bring\b|response|visit|deal|demand|call\s*back|callback|switch\s*off|no\s*answer|reachable|follow\s*up|later|pending|closed|reject/i;
+function classifyNameOrRemark(text) {
+  const s = (text || "").trim();
+  if (!s) return { name: "", remark: "" };
+  if (HUB_REMARK_HINTS.test(s)) return { name: "", remark: s };
+  return { name: s, remark: "" };
+}
+
 // Parses pasted bulk data into HubDistributor-shaped rows. Recognizes
 // headers by keyword (Hub/Name/Phone/Area/Address/Map/Details/Remark or
 // Status/Telecaller) in any order and in any subset — a row can be missing
 // every column except a phone number and still produces a usable record,
-// which is the whole point of a quick bulk paste from field notes.
-function parseHubBulkImport(text) {
+// which is the whole point of a quick bulk paste from field notes. Even a
+// single freeform cell like "80935 73503 Just enquiry" (no columns at all)
+// is split correctly: the digits become Contact, the leftover words become
+// either the Name or a Remark depending on what they read like, and any
+// telecaller name mentioned inline (e.g. "...Azgar") is picked up too.
+function parseHubBulkImport(text, defaultTelecaller) {
   const lines = text.split(/\r?\n/).map(l => l.replace(/\s+$/, "")).filter(l => l.trim() !== "");
   if (!lines.length) return { rows: [], skipped: 0 };
 
@@ -212,12 +243,10 @@ function parseHubBulkImport(text) {
     colMap.details = -1; colMap.remark = -1;
     dataRows = rawRows;
   } else {
-    dataRows = rawRows; // single column — classified per-line below
+    dataRows = rawRows; // single freeform column — parsed per-line below
   }
 
   const get = (row, idx) => (idx !== undefined && idx >= 0 && idx < row.length) ? row[idx].trim() : "";
-  const digitsOf = (v) => (v || "").replace(/[^0-9]/g, "");
-  const looksLikePhone = (v) => digitsOf(v).length >= 7;
 
   const rows = [];
   let skipped = 0;
@@ -233,14 +262,42 @@ function parseHubBulkImport(text) {
       details = get(row, colMap.details);
       remark = get(row, colMap.remark);
       telecaller = get(row, colMap.telecaller);
+      // Even in a mapped Contact column, strip off any note text that got
+      // typed alongside the number (e.g. "80935 73503 Just enquiry") so the
+      // phone field only ever holds the phone number.
+      if (contact) {
+        const { phone, remainder } = extractPhoneAndRemainder(contact);
+        if (phone) {
+          contact = phone;
+          if (remainder) {
+            const split = classifyNameOrRemark(remainder);
+            if (!name && split.name) name = split.name;
+            if (split.remark) remark = remark ? remark + "; " + split.remark : split.remark;
+          }
+        }
+      }
     } else {
-      // Single column, no delimiter at all — one value per line. If it
-      // reads as a phone number, treat the whole line as a contact-only
-      // row; otherwise treat it as a name-only row.
+      // Single freeform cell, no columns at all. Pull the phone number out
+      // first, then decide whether whatever's left is a name or a note —
+      // and pick up an inline telecaller mention (e.g. "...by Azgar") too.
       const val = row[0] || "";
-      if (looksLikePhone(val)) { contact = val; name = ""; }
-      else { name = val; contact = ""; }
-      hub = area = address = mapLink = details = remark = telecaller = "";
+      let working = val;
+      const tcHit = TELECALLERS.find(t => {
+        const base = t.replace(/\s*\(intern\)\s*/i, "").trim().toLowerCase();
+        return base && working.toLowerCase().includes(base);
+      });
+      if (tcHit) {
+        const base = tcHit.replace(/\s*\(intern\)\s*/i, "").trim();
+        const re = new RegExp(base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(\\s*\\(intern\\))?", "i");
+        working = working.replace(re, "").trim();
+        telecaller = tcHit;
+      } else telecaller = "";
+      const { phone, remainder } = extractPhoneAndRemainder(working);
+      contact = phone;
+      const split = classifyNameOrRemark(remainder);
+      name = split.name;
+      remark = split.remark;
+      hub = area = address = mapLink = details = "";
     }
 
     // A row needs at least a name OR a contact number to be worth anything;
@@ -251,7 +308,7 @@ function parseHubBulkImport(text) {
     rows.push({
       name: name || "", contact: contact || "",
       hub: hub || "", area: area || "", address: address || "", mapLink: mapLink || "",
-      details: details || "", remark: remark || "", telecaller: telecaller || "",
+      details: details || "", remark: remark || "", telecaller: telecaller || defaultTelecaller || "",
     });
   });
   return { rows, skipped };
@@ -5103,7 +5160,11 @@ function HubDistributors({ embedded = false } = {}) {
   // Bulk import
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState("");
-  const [importDefaultTc, setImportDefaultTc] = useState("Leave unassigned");
+  // Most sparse phone-only pastes so far have come from field calls made
+  // by Azgar (Intern), so that's the sensible default rather than blank —
+  // still fully overridable per import, and never overrides a telecaller
+  // name actually found inline in the pasted text.
+  const [importDefaultTc, setImportDefaultTc] = useState("Azgar (Intern)");
   const [importDefaultHub, setImportDefaultHub] = useState("");
   const [importPreview, setImportPreview] = useState(null); // { rows, skipped } | null
   const [importing, setImporting] = useState(false);
@@ -5198,7 +5259,7 @@ function HubDistributors({ embedded = false } = {}) {
   // by phone, falling back to name+hub) or creates a new minimal record.
   // Re-pasting an updated sheet is safe: matches are merged, not duplicated,
   // and existing details are never overwritten by a blank incoming cell.
-  const runImportPreview = () => setImportPreview(parseHubBulkImport(importText));
+  const runImportPreview = () => setImportPreview(parseHubBulkImport(importText, importDefaultTc !== "Leave unassigned" ? importDefaultTc : ""));
   const commitImport = () => {
     if (!importPreview || !importPreview.rows.length) return;
     setImporting(true);
@@ -5294,6 +5355,77 @@ function HubDistributors({ embedded = false } = {}) {
     if (!confirm(`Delete "${r.name}"? This cannot be undone.`)) return;
     setRows(prev => (prev || []).filter(x => x.id !== r.id));
     setSelectedId(null);
+  };
+
+  // ── Clean up messy rows ──
+  // Fixes distributors that were imported before the parser correctly split
+  // freeform text (e.g. Contact showing "80935 73503 Just enquiry" and Name
+  // echoing the same string) — re-splits the phone number out, moves any
+  // leftover note into a proper timestamped remark, and clears the
+  // "Unnamed · ..." placeholder once a real value is available. Safe to run
+  // repeatedly: rows that are already clean are left untouched.
+  const cleanupHubRow = (r) => {
+    let changed = false;
+    let name = r.name || "";
+    let contact = r.contact || "";
+    let foundRemark = "";
+
+    if (contact) {
+      const { phone, remainder } = extractPhoneAndRemainder(contact);
+      if (phone && (phone !== contact)) {
+        contact = phone;
+        changed = true;
+        if (remainder) {
+          const split = classifyNameOrRemark(remainder);
+          if (split.name && (!name || /^unnamed/i.test(name))) name = split.name;
+          if (split.remark) foundRemark = split.remark;
+        }
+      }
+    }
+
+    if (/^unnamed/i.test(name)) {
+      const stripped = name.replace(/^unnamed\s*[·:-]?\s*/i, "").trim();
+      const { phone, remainder } = extractPhoneAndRemainder(stripped);
+      if (phone && !contact) { contact = phone; changed = true; }
+      if (remainder) {
+        const split = classifyNameOrRemark(remainder);
+        if (split.name) { name = split.name; changed = true; }
+        if (split.remark && !foundRemark) foundRemark = split.remark;
+      }
+    }
+
+    // Regenerate the "Unnamed · ..." placeholder if it's now stale (the
+    // contact just changed) or was never set, so it always matches the
+    // cleaned-up phone number rather than echoing the old messy text.
+    if (!name || /^unnamed/i.test(name)) {
+      const regenerated = contact ? ("Unnamed · " + contact) : "Unnamed Distributor";
+      if (regenerated !== name) { name = regenerated; changed = true; }
+    }
+
+    let remarks = r.remarks || [];
+    let status = r.status;
+    if (foundRemark && !remarks.some(rm => rm.text === foundRemark)) {
+      const newStatus = classifyHubRemark(foundRemark) || status || "New";
+      remarks = [...remarks, { text: foundRemark, status: newStatus, telecaller: r.telecaller || "Import", at: Date.now() }];
+      status = newStatus;
+      changed = true;
+    }
+
+    if (!changed) return r;
+    return { ...r, name, contact, remarks, status, lastRemarkAt: remarks.length ? remarks[remarks.length - 1].at : r.lastRemarkAt };
+  };
+
+  const [cleaningUp, setCleaningUp] = useState(false);
+  const cleanupAllRows = () => {
+    if (!confirm("Scan every distributor and split any Name/Contact fields that still have a note stuck to the phone number (like \"80935 73503 Just enquiry\")? The leftover note becomes a proper remark instead. Rows already clean are left untouched.")) return;
+    setCleaningUp(true);
+    let fixedCount = 0;
+    setRows(prev => (prev || []).map(r => {
+      const cleaned = cleanupHubRow(r);
+      if (cleaned !== r) fixedCount++;
+      return cleaned;
+    }));
+    setTimeout(() => { setCleaningUp(false); alert(fixedCount ? `Fixed ${fixedCount} distributor${fixedCount === 1 ? "" : "s"}.` : "Nothing needed fixing — all rows already look clean."); }, 50);
   };
 
   // ── PDF: Team Overview + detailed Activity Log (status, remark, telecaller, date & time) ──
@@ -5617,6 +5749,7 @@ function HubDistributors({ embedded = false } = {}) {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Btn label="+ Add Distributor" onClick={() => setShowAdd(true)} />
           <Btn label="📥 Bulk Import" ghost onClick={() => { setShowImport(true); setImportPreview(null); }} />
+          <Btn label={cleaningUp ? "Cleaning…" : "🧹 Clean Up Data"} ghost small disabled={cleaningUp} onClick={cleanupAllRows} />
         </div>
       </Card>
 
