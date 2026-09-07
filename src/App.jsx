@@ -204,7 +204,7 @@ function classifyNameOrRemark(text) {
 // is split correctly: the digits become Contact, the leftover words become
 // either the Name or a Remark depending on what they read like, and any
 // telecaller name mentioned inline (e.g. "...Azgar") is picked up too.
-function parseHubBulkImport(text, defaultTelecaller) {
+function parseHubBulkImport(text, batchTelecaller) {
   const lines = text.split(/\r?\n/).map(l => l.replace(/\s+$/, "")).filter(l => l.trim() !== "");
   if (!lines.length) return { rows: [], skipped: 0 };
 
@@ -277,26 +277,19 @@ function parseHubBulkImport(text, defaultTelecaller) {
         }
       }
     } else {
-      // Single freeform cell, no columns at all. Pull the phone number out
-      // first, then decide whether whatever's left is a name or a note —
-      // and pick up an inline telecaller mention (e.g. "...by Azgar") too.
+      // Single freeform cell, no columns at all. Pull the phone number out,
+      // then decide whether whatever's left is a name or a note. Telecaller
+      // is deliberately NOT auto-detected from the text here — it's set
+      // explicitly for the whole batch (see batchTelecaller below), so a
+      // shop name that happens to contain part of a telecaller's name (e.g.
+      // "Ramya Traders") never gets silently mangled.
       const val = row[0] || "";
-      let working = val;
-      const tcHit = TELECALLERS.find(t => {
-        const base = t.replace(/\s*\(intern\)\s*/i, "").trim().toLowerCase();
-        return base && working.toLowerCase().includes(base);
-      });
-      if (tcHit) {
-        const base = tcHit.replace(/\s*\(intern\)\s*/i, "").trim();
-        const re = new RegExp(base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(\\s*\\(intern\\))?", "i");
-        working = working.replace(re, "").trim();
-        telecaller = tcHit;
-      } else telecaller = "";
-      const { phone, remainder } = extractPhoneAndRemainder(working);
+      const { phone, remainder } = extractPhoneAndRemainder(val);
       contact = phone;
       const split = classifyNameOrRemark(remainder);
       name = split.name;
       remark = split.remark;
+      telecaller = "";
       hub = area = address = mapLink = details = "";
     }
 
@@ -308,7 +301,12 @@ function parseHubBulkImport(text, defaultTelecaller) {
     rows.push({
       name: name || "", contact: contact || "",
       hub: hub || "", area: area || "", address: address || "", mapLink: mapLink || "",
-      details: details || "", remark: remark || "", telecaller: telecaller || defaultTelecaller || "",
+      details: details || "", remark: remark || "",
+      // The telecaller picked for this whole import always wins for a
+      // freeform/no-column row; a genuine per-row Telecaller column (from a
+      // header-based paste) is respected instead, since that's intentional
+      // per-row data rather than a guess.
+      telecaller: (colMap && colMap.telecaller >= 0 && telecaller) ? telecaller : (batchTelecaller || telecaller || ""),
     });
   });
   return { rows, skipped };
@@ -5259,7 +5257,7 @@ function HubDistributors({ embedded = false } = {}) {
   // by phone, falling back to name+hub) or creates a new minimal record.
   // Re-pasting an updated sheet is safe: matches are merged, not duplicated,
   // and existing details are never overwritten by a blank incoming cell.
-  const runImportPreview = () => setImportPreview(parseHubBulkImport(importText, importDefaultTc !== "Leave unassigned" ? importDefaultTc : ""));
+  const runImportPreview = () => setImportPreview(parseHubBulkImport(importText, importDefaultTc));
   const commitImport = () => {
     if (!importPreview || !importPreview.rows.length) return;
     setImporting(true);
@@ -5271,8 +5269,7 @@ function HubDistributors({ embedded = false } = {}) {
           (phone && normalizePhone(e.contact) === phone) ||
           (!phone && ir.name && e.name.trim().toLowerCase() === ir.name.toLowerCase() && (e.hub || "").trim().toLowerCase() === (ir.hub || importDefaultHub || "").trim().toLowerCase())
         );
-        let telecaller = TELECALLERS.find(t => t.toLowerCase() === ir.telecaller.toLowerCase()) || "";
-        if (!telecaller && importDefaultTc !== "Leave unassigned") telecaller = importDefaultTc;
+        let telecaller = TELECALLERS.find(t => t.toLowerCase() === (ir.telecaller || "").toLowerCase()) || importDefaultTc;
         const statusFromRemark = classifyHubRemark(ir.remark);
         const areas = (ir.area || "").split(/[,/|]/).map(a => a.trim()).filter(Boolean).slice(0, MAX_HUB_AREAS);
         // A contact-only row still needs something to show in the list.
@@ -5851,7 +5848,10 @@ function HubDistributors({ embedded = false } = {}) {
           placeholder={"Paste your data here… even just a list of phone numbers works, e.g.\n9876543210\n9123456780"}
           style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 12, fontFamily: "monospace", outline: "none", width: "100%", boxSizing: "border-box", resize: "vertical", marginBottom: 12 }} />
         <Field label="Default Hub (used for rows with no Hub column)" value={importDefaultHub} onChange={e => setImportDefaultHub(e.target.value)} placeholder="e.g. Ambattur Hub — optional" />
-        <Dropdown label="Default telecaller (used for rows with no Telecaller column)" value={importDefaultTc} onChange={e => setImportDefaultTc(e.target.value)} options={["Leave unassigned", ...TELECALLERS]} />
+        <Dropdown label="Approached By — Telecaller for this whole batch *" value={importDefaultTc} onChange={e => { setImportDefaultTc(e.target.value); setImportPreview(null); }} options={TELECALLERS} />
+        <div style={{ fontSize: 11, color: T.t3, marginTop: -8, marginBottom: 12, lineHeight: 1.4 }}>
+          Every row in this paste is marked as approached by <b style={{ color: T.t1 }}>{importDefaultTc}</b>, unless the paste itself has its own Telecaller column with different names per row.
+        </div>
 
         {!importPreview ? (
           <Btn label="Preview Import" full ghost onClick={runImportPreview} disabled={!importText.trim()} />
