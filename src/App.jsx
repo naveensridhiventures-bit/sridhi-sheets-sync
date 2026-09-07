@@ -150,6 +150,113 @@ function hubStageColor(stage) {
   return s ? s.color : T.t3;
 }
 
+// Maps a free-text calling/visit remark onto a Hub Distributor status, so a
+// bulk-imported row (or one carrying only a quick note) still lands on the
+// right pipeline stage instead of always defaulting to "New".
+function classifyHubRemark(raw) {
+  const s = (raw || "").toLowerCase().trim();
+  if (!s) return null;
+  if (s.includes("deal") || s.includes("accept") || s.includes("onboard") || s.includes("confirm")) return "Deal Accepted";
+  if (s.includes("different") || s.includes("other brand") || s.includes("custom") || s.includes("negotiat")) return "Demanding Something Different";
+  if (s.includes("visit")) return "Visited";
+  if (s.includes("interest")) return "Interested";
+  if (s.includes("wrong number") || s.includes("invalid number")) return "Wrong Number";
+  if (s.includes("busy")) return "Busy";
+  if (s.includes("ring") || s.includes("no response") || s.includes("not attend") || s.includes("not reachable") || s.includes("switch off") || s.includes("no answer")) return "Ring No Response";
+  if (s.includes("not interest") || s.includes("no need") || s.includes("rejected")) return "Not Interested";
+  if (s.trim()) return "Contacted"; // any other note still counts as a contact attempt
+  return null;
+}
+
+// Parses pasted bulk data into HubDistributor-shaped rows. Recognizes
+// headers by keyword (Hub/Name/Phone/Area/Address/Map/Details/Remark or
+// Status/Telecaller) in any order and in any subset — a row can be missing
+// every column except a phone number and still produces a usable record,
+// which is the whole point of a quick bulk paste from field notes.
+function parseHubBulkImport(text) {
+  const lines = text.split(/\r?\n/).map(l => l.replace(/\s+$/, "")).filter(l => l.trim() !== "");
+  if (!lines.length) return { rows: [], skipped: 0 };
+
+  const hasTab = lines[0].includes("\t");
+  const hasComma = lines.some(l => l.includes(","));
+  const delim = hasTab ? "\t" : (hasComma ? "," : null);
+  const rawRows = lines.map(l => delim ? parseDelimitedLine(l, delim) : [l.trim()]);
+
+  const headerCandidate = rawRows[0].map(h => h.toLowerCase().trim());
+  const findCol = (...keywords) => headerCandidate.findIndex(h => keywords.some(k => h.includes(k)));
+  const looksLikeHeader = delim && (
+    findCol("phone", "contact", "number") >= 0 || findCol("name") >= 0 ||
+    findCol("hub") >= 0 || findCol("area") >= 0 || findCol("telecaller") >= 0
+  ) && rawRows[0].every(c => !/^\+?[\d\s-]{7,}$/.test(c.trim())); // a header row shouldn't itself look like a phone number
+
+  let colMap = null, dataRows;
+  if (looksLikeHeader) {
+    colMap = {
+      hub: findCol("hub"),
+      name: findCol("customer", "name", "shop", "distributor"),
+      contact: findCol("phone", "number", "contact", "mobile"),
+      area: findCol("area"),
+      address: findCol("address", "location"),
+      mapLink: findCol("map"),
+      details: findCol("detail", "brand", "business"),
+      remark: findCol("remark", "status", "calling", "note"),
+      telecaller: findCol("telecaller", "caller", "assigned"),
+    };
+    dataRows = rawRows.slice(1);
+  } else if (delim) {
+    // No header detected — fall back to a progressive column order so a
+    // short paste (even just Name, Contact) still works sensibly.
+    const order = ["name", "contact", "area", "hub", "address", "mapLink", "telecaller"];
+    colMap = {};
+    order.forEach((key, i) => { colMap[key] = i; });
+    colMap.details = -1; colMap.remark = -1;
+    dataRows = rawRows;
+  } else {
+    dataRows = rawRows; // single column — classified per-line below
+  }
+
+  const get = (row, idx) => (idx !== undefined && idx >= 0 && idx < row.length) ? row[idx].trim() : "";
+  const digitsOf = (v) => (v || "").replace(/[^0-9]/g, "");
+  const looksLikePhone = (v) => digitsOf(v).length >= 7;
+
+  const rows = [];
+  let skipped = 0;
+  dataRows.forEach(row => {
+    let name, contact, hub, area, address, mapLink, details, remark, telecaller;
+    if (colMap) {
+      name = get(row, colMap.name);
+      contact = get(row, colMap.contact);
+      hub = get(row, colMap.hub);
+      area = get(row, colMap.area);
+      address = get(row, colMap.address);
+      mapLink = get(row, colMap.mapLink);
+      details = get(row, colMap.details);
+      remark = get(row, colMap.remark);
+      telecaller = get(row, colMap.telecaller);
+    } else {
+      // Single column, no delimiter at all — one value per line. If it
+      // reads as a phone number, treat the whole line as a contact-only
+      // row; otherwise treat it as a name-only row.
+      const val = row[0] || "";
+      if (looksLikePhone(val)) { contact = val; name = ""; }
+      else { name = val; contact = ""; }
+      hub = area = address = mapLink = details = remark = telecaller = "";
+    }
+
+    // A row needs at least a name OR a contact number to be worth anything;
+    // everything else — hub, area, address, remark — is genuinely optional.
+    if (!name && !contact) { if (row.some(c => (c || "").trim())) skipped++; return; }
+    if (/^(customer\s*)?name$/i.test(name) && !contact) { skipped++; return; } // stray header row
+
+    rows.push({
+      name: name || "", contact: contact || "",
+      hub: hub || "", area: area || "", address: address || "", mapLink: mapLink || "",
+      details: details || "", remark: remark || "", telecaller: telecaller || "",
+    });
+  });
+  return { rows, skipped };
+}
+
 // ── Bulk import (paste from Excel/Google Sheets) ───────────────────────────
 // Handles both tab-separated (default when pasting from a spreadsheet) and
 // comma-separated text, with basic support for quoted fields so a map link
@@ -4993,6 +5100,14 @@ function HubDistributors({ embedded = false } = {}) {
 
   const [detailEdit, setDetailEdit] = useState(blankForm);
 
+  // Bulk import
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importDefaultTc, setImportDefaultTc] = useState("Leave unassigned");
+  const [importDefaultHub, setImportDefaultHub] = useState("");
+  const [importPreview, setImportPreview] = useState(null); // { rows, skipped } | null
+  const [importing, setImporting] = useState(false);
+
   // Remark / status composer
   const [rmTelecaller, setRmTelecaller] = useState(TELECALLERS[0]);
   const [rmStatus, setRmStatus] = useState(HUB_STAGES[0].id);
@@ -5075,6 +5190,80 @@ function HubDistributors({ embedded = false } = {}) {
     setAddForm(blankForm);
     setShowAdd(false);
     setSelectedId(rec.id);
+  };
+
+  // ── Bulk import ──
+  // Accepts sparse pasted rows — down to just a phone number with nothing
+  // else — and either merges onto a matching existing distributor (matched
+  // by phone, falling back to name+hub) or creates a new minimal record.
+  // Re-pasting an updated sheet is safe: matches are merged, not duplicated,
+  // and existing details are never overwritten by a blank incoming cell.
+  const runImportPreview = () => setImportPreview(parseHubBulkImport(importText));
+  const commitImport = () => {
+    if (!importPreview || !importPreview.rows.length) return;
+    setImporting(true);
+    setRows(prev => {
+      const existing = [...(prev || [])];
+      importPreview.rows.forEach(ir => {
+        const phone = normalizePhone(ir.contact);
+        const matchIdx = existing.findIndex(e =>
+          (phone && normalizePhone(e.contact) === phone) ||
+          (!phone && ir.name && e.name.trim().toLowerCase() === ir.name.toLowerCase() && (e.hub || "").trim().toLowerCase() === (ir.hub || importDefaultHub || "").trim().toLowerCase())
+        );
+        let telecaller = TELECALLERS.find(t => t.toLowerCase() === ir.telecaller.toLowerCase()) || "";
+        if (!telecaller && importDefaultTc !== "Leave unassigned") telecaller = importDefaultTc;
+        const statusFromRemark = classifyHubRemark(ir.remark);
+        const areas = (ir.area || "").split(/[,/|]/).map(a => a.trim()).filter(Boolean).slice(0, MAX_HUB_AREAS);
+        // A contact-only row still needs something to show in the list.
+        const placeholderName = ir.contact ? ("Unnamed · " + ir.contact) : "Unnamed Distributor";
+        const displayName = ir.name || placeholderName;
+
+        if (matchIdx >= 0) {
+          const cur = existing[matchIdx];
+          const lastNote = (cur.remarks || []).length ? cur.remarks[cur.remarks.length - 1].text : null;
+          const newRemarks = [...(cur.remarks || [])];
+          const newStatus = statusFromRemark || cur.status;
+          if (ir.remark && ir.remark !== lastNote) {
+            newRemarks.push({ text: ir.remark, status: newStatus, telecaller: telecaller || cur.telecaller || "Import", at: Date.now() });
+          }
+          const curIsPlaceholder = !cur.name || cur.name === "Unnamed Distributor" || cur.name.startsWith("Unnamed · ");
+          existing[matchIdx] = {
+            ...cur,
+            name: (curIsPlaceholder && ir.name) ? ir.name : cur.name,
+            hub: cur.hub && cur.hub !== "Unassigned" ? cur.hub : (ir.hub || importDefaultHub || cur.hub || "Unassigned"),
+            areas: (cur.areas && cur.areas.length) ? cur.areas : areas,
+            address: cur.address || ir.address,
+            mapLink: cur.mapLink || ir.mapLink,
+            details: cur.details || ir.details,
+            contact: cur.contact || ir.contact,
+            telecaller: telecaller || cur.telecaller,
+            status: newStatus,
+            remarks: newRemarks,
+            lastRemarkAt: newRemarks.length ? newRemarks[newRemarks.length - 1].at : cur.lastRemarkAt,
+          };
+        } else {
+          const now = Date.now();
+          const initialStatus = statusFromRemark || "New";
+          const rec = {
+            id: Date.now() + "_" + Math.random().toString(36).slice(2, 7) + Math.random().toString(36).slice(2, 5),
+            hub: ir.hub || importDefaultHub || "Unassigned",
+            name: displayName,
+            contact: ir.contact || "",
+            areas,
+            address: ir.address || "", mapLink: ir.mapLink || "", details: ir.details || "",
+            status: initialStatus, telecaller: telecaller || "",
+            remarks: ir.remark ? [{ text: ir.remark, status: initialStatus, telecaller: telecaller || "Import", at: now }] : [],
+            createdAt: now, lastRemarkAt: ir.remark ? now : null,
+          };
+          existing.push(rec);
+        }
+      });
+      return existing;
+    });
+    setImporting(false);
+    setShowImport(false);
+    setImportText("");
+    setImportPreview(null);
   };
 
   const saveDetailEdit = (id) => {
@@ -5425,7 +5614,10 @@ function HubDistributors({ embedded = false } = {}) {
           <SyncBadge status={syncStatus} />
         </div>
         <Label sub={`${(rows || []).length} distributor${(rows || []).length === 1 ? "" : "s"} across ${Math.max(hubOptions.length - 1, 0)} hub${hubOptions.length - 1 === 1 ? "" : "s"} · remark, status & who approached them`}>🏢 Hub Distributors</Label>
-        <Btn label="+ Add Distributor" onClick={() => setShowAdd(true)} />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Btn label="+ Add Distributor" onClick={() => setShowAdd(true)} />
+          <Btn label="📥 Bulk Import" ghost onClick={() => { setShowImport(true); setImportPreview(null); }} />
+        </div>
       </Card>
 
       <Card accent={T.amber}>
@@ -5508,6 +5700,60 @@ function HubDistributors({ embedded = false } = {}) {
         ))}
         <Dropdown label="Approached By (Telecaller)" value={addForm.telecaller} onChange={e => setAddForm({ ...addForm, telecaller: e.target.value })} options={TELECALLERS} />
         <Btn label="Add Distributor" full onClick={addDistributor} disabled={!addForm.name.trim() || !addForm.hub.trim()} />
+      </Sheet>
+
+      <Sheet open={showImport} onClose={() => setShowImport(false)} title="Bulk Import Hub Distributors">
+        <div style={{ fontSize: 12, color: T.t2, marginBottom: 12, lineHeight: 1.5 }}>
+          Paste rows straight from Excel or Google Sheets — with or without
+          a header row. Any of these columns are recognized in any order:{" "}
+          <b>Hub, Name, Phone/Contact, Area, Address, Map Link, Details,
+          Remark/Status, Telecaller</b>. A row with only a phone number (or
+          only a name) is perfectly fine — it's still imported, just with
+          the other fields left blank for you to fill in later. Re-importing
+          an updated sheet is safe: rows are matched by phone number (or
+          name + hub) and merged into the existing distributor instead of
+          duplicated.
+        </div>
+        <textarea value={importText} onChange={e => { setImportText(e.target.value); setImportPreview(null); }} rows={8}
+          placeholder={"Paste your data here… even just a list of phone numbers works, e.g.\n9876543210\n9123456780"}
+          style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 12, fontFamily: "monospace", outline: "none", width: "100%", boxSizing: "border-box", resize: "vertical", marginBottom: 12 }} />
+        <Field label="Default Hub (used for rows with no Hub column)" value={importDefaultHub} onChange={e => setImportDefaultHub(e.target.value)} placeholder="e.g. Ambattur Hub — optional" />
+        <Dropdown label="Default telecaller (used for rows with no Telecaller column)" value={importDefaultTc} onChange={e => setImportDefaultTc(e.target.value)} options={["Leave unassigned", ...TELECALLERS]} />
+
+        {!importPreview ? (
+          <Btn label="Preview Import" full ghost onClick={runImportPreview} disabled={!importText.trim()} />
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+                <div style={{ fontSize: 18, fontWeight: 800, color: T.emerald }}>{importPreview.rows.length}</div>
+                <div style={{ fontSize: 9, color: T.t3, fontWeight: 700, textTransform: "uppercase" }}>Ready to Import</div>
+              </div>
+              {importPreview.skipped > 0 && (
+                <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: T.rose }}>{importPreview.skipped}</div>
+                  <div style={{ fontSize: 9, color: T.t3, fontWeight: 700, textTransform: "uppercase" }}>Skipped (blank row)</div>
+                </div>
+              )}
+            </div>
+            {importPreview.rows.length > 0 && (
+              <div style={{ maxHeight: 220, overflowY: "auto", border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 12 }}>
+                {importPreview.rows.slice(0, 8).map((row, i) => (
+                  <div key={i} style={{ padding: "8px 10px", borderBottom: i < Math.min(importPreview.rows.length, 8) - 1 ? `1px solid ${T.border}` : "none" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: T.t1 }}>{row.name || <span style={{ fontStyle: "italic", color: T.t3 }}>No name</span>} <span style={{ fontWeight: 400, color: T.t3 }}>{row.contact ? "· " + row.contact : ""}</span></div>
+                    <div style={{ fontSize: 10.5, color: T.t3, marginTop: 1 }}>{row.hub || "No hub"} {row.area ? "· " + row.area : ""} {row.remark ? "· " + row.remark : ""} {row.telecaller ? "· " + row.telecaller : ""}</div>
+                  </div>
+                ))}
+                {importPreview.rows.length > 8 && <div style={{ padding: "8px 10px", fontSize: 11, color: T.t3, fontStyle: "italic" }}>+ {importPreview.rows.length - 8} more…</div>}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn label="Edit Data" ghost onClick={() => setImportPreview(null)} />
+              <Btn label={importing ? "Importing…" : `Import ${importPreview.rows.length} Distributors`} color={T.emerald}
+                onClick={commitImport} disabled={importing || !importPreview.rows.length} />
+            </div>
+          </>
+        )}
       </Sheet>
     </div>
   );

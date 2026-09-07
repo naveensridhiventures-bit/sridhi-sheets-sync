@@ -121,6 +121,17 @@ id  hub  name  contact  areas  address  mapLink  details  status  telecaller  re
   as `MilkDistributors.telecallerRemarks` (JSON-encoded per entry, joined
   with ` || ` in the sheet cell). Saving a remark also updates the
   distributor's current `status` and `telecaller`.
+- **Bulk Import**: on the Hub Distributors screen, paste rows copied from
+  Excel/Google Sheets — with or without a header row. Recognized columns
+  (any order, any subset): Hub, Name, Phone/Contact, Area, Address, Map
+  Link, Details, Remark/Status, Telecaller. A row is imported even if it
+  has **only a phone number** (or only a name) — everything else is left
+  blank to fill in later; a plain list of phone numbers, one per line, also
+  works. An initial remark like "not interested" or "deal accepted" is
+  auto-classified onto the matching status. Re-importing an updated sheet
+  is safe: rows are matched by phone number (or name + hub) and merged into
+  the existing distributor rather than duplicated, and a blank incoming
+  cell never overwrites a value that's already there.
 - **Hub Distributors** screen (mobile: under "More"; desktop: sidebar) has
   its own report, filterable by hub, telecaller, and day/week/month/custom
   date range: a **PDF** (Team Overview — pipeline status breakdown, response
