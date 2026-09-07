@@ -5169,6 +5169,16 @@ function HubDistributors({ embedded = false } = {}) {
   const [hubFilter, setHubFilter] = useState("All");
   const [search, setSearch] = useState("");
 
+  // Bulk selection (for multi-delete)
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const toggleSelectMode = () => { setSelectMode(m => !m); setSelectedIds(new Set()); };
+  const toggleSelected = (id) => setSelectedIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
   const [detailEdit, setDetailEdit] = useState(blankForm);
 
   // Bulk import
@@ -5352,12 +5362,28 @@ function HubDistributors({ embedded = false } = {}) {
 
   // A remark always carries the status at the time it was logged — this is
   // what lets the report show "who approached them, what happened, when"
-  // in one line, and also updates the distributor's current status.
+  // in one line, and also updates the distributor's current status. A note
+  // isn't mandatory: if you're only reassigning the telecaller or changing
+  // the status, that alone is saved (with an auto-generated note) — you're
+  // no longer forced to type something just to change who approached them.
   const addRemark = (id) => {
-    if (!rmNote.trim()) { alert("Add a short remark before saving."); return; }
+    const cur = (rows || []).find(x => x.id === id);
+    const telecallerChanged = !!cur && rmTelecaller !== cur.telecaller;
+    const statusChanged = !!cur && rmStatus !== cur.status;
+    if (!rmNote.trim() && !telecallerChanged && !statusChanged) {
+      alert("Change the status, reassign the telecaller, or type a note before saving.");
+      return;
+    }
     if (!rmTelecaller) { alert("Select which telecaller approached them."); return; }
     const at = Date.now();
-    const entry = { text: rmNote.trim(), status: rmStatus, telecaller: rmTelecaller, at };
+    let text = rmNote.trim();
+    if (!text) {
+      const parts = [];
+      if (statusChanged) parts.push(`Status set to "${rmStatus}"`);
+      if (telecallerChanged) parts.push(`Reassigned to ${rmTelecaller}`);
+      text = parts.join(" · ") || "Updated";
+    }
+    const entry = { text, status: rmStatus, telecaller: rmTelecaller, at };
     setRows(prev => (prev || []).map(r => r.id === id ? {
       ...r, status: rmStatus, telecaller: rmTelecaller, remarks: [...(r.remarks || []), entry], lastRemarkAt: at,
     } : r));
@@ -5368,6 +5394,14 @@ function HubDistributors({ embedded = false } = {}) {
     if (!confirm(`Delete "${r.name}"? This cannot be undone.`)) return;
     setRows(prev => (prev || []).filter(x => x.id !== r.id));
     setSelectedId(null);
+  };
+
+  const bulkDeleteSelected = () => {
+    if (!selectedIds.size) return;
+    if (!confirm(`Delete ${selectedIds.size} selected distributor${selectedIds.size === 1 ? "" : "s"}? This cannot be undone.`)) return;
+    setRows(prev => (prev || []).filter(x => !selectedIds.has(x.id)));
+    setSelectedIds(new Set());
+    setSelectMode(false);
   };
 
   // ── Clean up messy rows ──
@@ -5743,9 +5777,11 @@ function HubDistributors({ embedded = false } = {}) {
             })}
           </div>
           <textarea value={rmNote} onChange={e => setRmNote(e.target.value)} rows={2}
-            placeholder="What happened on the call / visit…"
+            placeholder="What happened on the call / visit… (optional — you can also just change the telecaller or status above and save)"
             style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 13, fontFamily: FONT, outline: "none", width: "100%", boxSizing: "border-box", resize: "none" }} />
-          <div style={{ marginTop: 8 }}><Btn label="Save Remark" full onClick={() => addRemark(r.id)} disabled={!rmNote.trim()} /></div>
+          <div style={{ marginTop: 8 }}>
+            <Btn label="Save" full onClick={() => addRemark(r.id)} disabled={!rmNote.trim() && rmTelecaller === r.telecaller && rmStatus === r.status} />
+          </div>
         </Card>
       </div>
     );
@@ -5763,6 +5799,7 @@ function HubDistributors({ embedded = false } = {}) {
           <Btn label="+ Add Distributor" onClick={() => setShowAdd(true)} />
           <Btn label="📥 Bulk Import" ghost onClick={() => { setShowImport(true); setImportPreview(null); }} />
           <Btn label={cleaningUp ? "Cleaning…" : "🧹 Clean Up Data"} ghost small disabled={cleaningUp} onClick={cleanupAllRows} />
+          <Btn label={selectMode ? "✕ Cancel Select" : "☑️ Select"} ghost small onClick={toggleSelectMode} />
         </div>
       </Card>
 
@@ -5806,28 +5843,46 @@ function HubDistributors({ embedded = false } = {}) {
         ))}
       </div>
 
+      {selectMode && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: "8px 12px" }}>
+          <span style={{ fontSize: 12, color: T.t2, fontWeight: 700 }}>{selectedIds.size} selected</span>
+          <button onClick={() => setSelectedIds(new Set(filtered.map(r => r.id)))} style={{ background: "none", border: "none", color: T.accent, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>Select All ({filtered.length})</button>
+          <button onClick={() => setSelectedIds(new Set())} style={{ background: "none", border: "none", color: T.t3, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>Clear</button>
+          <div style={{ flex: 1 }} />
+          <Btn label={`🗑️ Delete Selected (${selectedIds.size})`} color={T.rose} small disabled={!selectedIds.size} onClick={bulkDeleteSelected} />
+        </div>
+      )}
+
       {!filtered.length ? (
         <div style={{ fontSize: 12.5, color: T.t3, fontStyle: "italic", padding: "10px 2px" }}>No distributors yet — add the first one above.</div>
       ) : filtered.map(r => {
         const latest = (r.remarks || [])[r.remarks.length - 1];
+        const isSelected = selectedIds.has(r.id);
         return (
-          <div key={r.id} onClick={() => setSelectedId(r.id)} style={{
-            background: T.card, border: `1px solid ${T.border}`, borderRadius: 14, padding: "12px 14px", cursor: "pointer",
+          <div key={r.id} onClick={() => selectMode ? toggleSelected(r.id) : setSelectedId(r.id)} style={{
+            background: T.card, border: `1px solid ${isSelected ? T.accent : T.border}`, borderRadius: 14, padding: "12px 14px", cursor: "pointer",
+            display: "flex", gap: 10, alignItems: "flex-start",
           }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 800, color: T.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</div>
-                <div style={{ fontSize: 11.5, color: T.t3, marginTop: 2 }}>{r.hub ? "🏢 " + r.hub : "No hub"} {r.telecaller ? "· " + r.telecaller : ""}</div>
-              </div>
-              <Chip small label={r.status} color={hubStageColor(r.status)} />
-            </div>
-            {(r.areas || []).length > 0 && (
-              <div style={{ fontSize: 10.5, color: T.t3, marginTop: 6 }}>Areas: {r.areas.join(", ")}</div>
+            {selectMode && (
+              <input type="checkbox" checked={isSelected} onChange={() => toggleSelected(r.id)} onClick={e => e.stopPropagation()}
+                style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0, cursor: "pointer", accentColor: T.accent }} />
             )}
-            {latest && <div style={{ fontSize: 11.5, color: T.t2, marginTop: 6 }}>{latest.text}</div>}
-            <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-              {r.mapLink && <div style={{ fontSize: 10.5, color: T.sky }}>📍 Location set</div>}
-              {r.lastRemarkAt && <div style={{ fontSize: 10.5, color: T.t4 }}>Updated {new Date(r.lastRemarkAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</div>}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: T.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</div>
+                  <div style={{ fontSize: 11.5, color: T.t3, marginTop: 2 }}>{r.hub ? "🏢 " + r.hub : "No hub"} {r.telecaller ? "· " + r.telecaller : ""}</div>
+                </div>
+                <Chip small label={r.status} color={hubStageColor(r.status)} />
+              </div>
+              {(r.areas || []).length > 0 && (
+                <div style={{ fontSize: 10.5, color: T.t3, marginTop: 6 }}>Areas: {r.areas.join(", ")}</div>
+              )}
+              {latest && <div style={{ fontSize: 11.5, color: T.t2, marginTop: 6 }}>{latest.text}</div>}
+              <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                {r.mapLink && <div style={{ fontSize: 10.5, color: T.sky }}>📍 Location set</div>}
+                {r.lastRemarkAt && <div style={{ fontSize: 10.5, color: T.t4 }}>Updated {new Date(r.lastRemarkAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</div>}
+              </div>
             </div>
           </div>
         );
