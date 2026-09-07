@@ -477,7 +477,7 @@ function useSheetSynced(_endpoint, _key, initialData) {
   return useSheets(_endpoint, initialData);
 }
 
-function SyncBadge({ status }) {
+function SyncBadge({ status, onRetry, error }) {
   if (!SYNC_ENABLED) return <Chip label="Offline copy" color={T.t3} />;
   const map = {
     loading: { label: "Loading…",   color: T.t2     },
@@ -487,6 +487,22 @@ function SyncBadge({ status }) {
     offline: { label: "Offline copy",color: T.t3    },
   };
   const s = map[status] || map.offline;
+  if (status === "error" && onRetry) {
+    // A stuck save is actionable, not just a spinner: show why (when the
+    // server told us) and a button to retry immediately instead of waiting
+    // out the backoff.
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <Chip label={s.label} color={s.color} />
+        {error && <span style={{ fontSize: 10.5, color: T.rose, fontWeight: 600 }}>{error}</span>}
+        <button onClick={onRetry} style={{
+          background: T.rose + "1A", border: `1px solid ${T.rose}44`, borderRadius: 8,
+          color: T.rose, padding: "3px 9px", fontSize: 10.5, fontWeight: 700,
+          cursor: "pointer", fontFamily: FONT,
+        }}>↻ Retry Sync</button>
+      </div>
+    );
+  }
   return <Chip label={s.label} color={s.color} />;
 }
 
@@ -5144,7 +5160,7 @@ function MilkDistributors({ embedded = false } = {}) {
 // which telecaller approached them and when. Built for a clean management
 // report (PDF + Excel) filterable by date range, telecaller, and hub.
 function HubDistributors({ embedded = false } = {}) {
-  const [rows, setRows, syncStatus] = useSheetSynced("hubDistributors", "hubDistributors", []);
+  const [rows, setRows, syncStatus, retrySync, syncError] = useSheetSynced("hubDistributors", "hubDistributors", []);
   const [selectedId, setSelectedId] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const blankForm = { hub: "", name: "", contact: "", address: "", mapLink: "", details: "", telecaller: TELECALLERS[0], area1: "", area2: "", area3: "", area4: "", area5: "" };
@@ -5740,7 +5756,7 @@ function HubDistributors({ embedded = false } = {}) {
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <Card accent={T.emerald}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <SyncBadge status={syncStatus} />
+          <SyncBadge status={syncStatus} onRetry={retrySync} error={syncError} />
         </div>
         <Label sub={`${(rows || []).length} distributor${(rows || []).length === 1 ? "" : "s"} across ${Math.max(hubOptions.length - 1, 0)} hub${hubOptions.length - 1 === 1 ? "" : "s"} · remark, status & who approached them`}>🏢 Hub Distributors</Label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

@@ -136,7 +136,18 @@ async function pushTab(tab, data, deletedIds) {
     headers: getHeaders(),
     body: JSON.stringify({ [tab]: data, deletedIds: deletedIds || [] }),
   });
-  if (!r.ok) throw new Error("HTTP " + r.status);
+  if (!r.ok) {
+    // Try to surface the server's actual error (e.g. "Unknown tab" when the
+    // Google Sheet tab hasn't been created yet, or a bad API key) instead of
+    // just an opaque HTTP status — this is what makes "Retrying save…"
+    // actionable instead of a permanent mystery.
+    let detail = "";
+    try {
+      const body = await r.clone().json();
+      detail = body && (body.error || body.message);
+    } catch { /* body wasn't JSON */ }
+    throw new Error(detail || ("HTTP " + r.status));
+  }
 }
 
 // Push with automatic retry + backoff. Always sends whatever is currently
@@ -144,7 +155,18 @@ async function pushTab(tab, data, deletedIds) {
 // a retry backoff still ends up sending the newest data, not a stale one.
 const _retryTimers = {};
 const _retryAttempt = {};
-function schedulePush(tab, data, setStatus) {
+const _lastError = {}; // tab -> human-readable message from the last failed push
+const _errorListeners = {}; // tab -> Set<fn>, notified whenever _lastError[tab] changes
+function notifyError(tab) {
+  (_errorListeners[tab] || new Set()).forEach((fn) => fn(_lastError[tab] || null));
+}
+function subscribeError(tab, fn) {
+  if (!_errorListeners[tab]) _errorListeners[tab] = new Set();
+  _errorListeners[tab].add(fn);
+  return () => _errorListeners[tab].delete(fn);
+}
+
+function schedulePush(tab, data, setStatus, { immediate = false } = {}) {
   savePending(tab, data);
   setStatus("syncing");
   clearTimeout(_retryTimers[tab]);
@@ -163,16 +185,31 @@ function schedulePush(tab, data, setStatus) {
         // The server has now actually removed these ids from the sheet, so
         // they no longer need to ride along on future pushes.
         clearDeleted(tab);
+        _lastError[tab] = null;
+        notifyError(tab);
         setStatus("synced");
       })
-      .catch(() => {
+      .catch((err) => {
         setStatus("error");
+        _lastError[tab] = (err && err.message) || "Sync failed";
+        notifyError(tab);
         _retryAttempt[tab] = (_retryAttempt[tab] || 0) + 1;
         const delay = Math.min(2000 * 2 ** _retryAttempt[tab], 30_000);
         _retryTimers[tab] = setTimeout(attemptPush, delay);
       });
   };
-  _retryTimers[tab] = setTimeout(attemptPush, 400);
+  _retryTimers[tab] = setTimeout(attemptPush, immediate ? 0 : 400);
+}
+
+// Lets a screen offer a "Retry Sync" button that retries right away instead
+// of waiting out the exponential backoff — same underlying push, just with
+// the timer reset to zero.
+function retryPushNow(tab, setStatus) {
+  const pending = loadPending(tab);
+  if (!pending) { setStatus("synced"); return; } // nothing outstanding to retry
+  clearTimeout(_retryTimers[tab]);
+  _retryAttempt[tab] = 0;
+  schedulePush(tab, pending.data, setStatus, { immediate: true });
 }
 
 export function useSheets(tab, initialData) {
@@ -183,6 +220,7 @@ export function useSheets(tab, initialData) {
     return Array.isArray(cached) ? cached : initialData;
   });
   const [status, setStatus] = useState(SYNC_ENABLED ? "loading" : "offline");
+  const [error, setError] = useState(() => _lastError[tab] || null);
 
   const skipPush    = useRef(true);
   const latestData  = useRef(data);
@@ -198,6 +236,12 @@ export function useSheets(tab, initialData) {
         setDataRaw(fresh);
       }
     });
+  }, [tab]);
+
+  // Surfaces the real reason a save keeps failing (e.g. "Unknown tab" when
+  // the sheet tab hasn't been created yet) instead of a bare "Retrying…".
+  useEffect(() => {
+    return subscribeError(tab, (msg) => setError(msg));
   }, [tab]);
 
   useEffect(() => {
@@ -285,7 +329,11 @@ export function useSheets(tab, initialData) {
     });
   };
 
-  return [data, setData, status];
+  // Manually force an immediate retry (skips the exponential backoff wait) —
+  // exposed to the UI as a "Retry Sync" action.
+  const retry = () => retryPushNow(tab, setStatus);
+
+  return [data, setData, status, retry, error];
 }
 
 export { SYNC_ENABLED };
