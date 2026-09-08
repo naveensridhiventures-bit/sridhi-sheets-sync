@@ -185,13 +185,21 @@ function classifyHubRemark(raw) {
   const s = (raw || "").toLowerCase().trim();
   if (!s) return null;
   if (s.includes("deal") || s.includes("accept") || s.includes("onboard") || s.includes("confirm")) return "Deal Accepted";
-  if (s.includes("different") || s.includes("other brand") || s.includes("custom") || s.includes("negotiat")) return "Demanding Something Different";
+  // Deliberately not just s.includes("custom") — that substring is inside
+  // the very common word "customer" and was misclassifying ordinary
+  // remarks that simply mention a customer.
+  if (s.includes("different") || s.includes("other brand") || s.includes("customiz") || s.includes("customis") || s.includes("custom made") || s.includes("custom order") || s.includes("negotiat")) return "Demanding Something Different";
+  // "Not interested" must be checked before the plain "interest(ed)" check
+  // below — it contains "interest" as a substring, so without this order
+  // every "not interested" remark was silently being classified as
+  // "Interested" instead, the opposite of what was typed. "intrest" also
+  // catches the common "intrested"/"intrest" typo in both directions.
+  if (/not\s*(interest|intrest)|no\s*need|rejected/.test(s)) return "Not Interested";
   if (s.includes("visit")) return "Visited";
-  if (s.includes("interest")) return "Interested";
+  if (/interest|intrest/.test(s)) return "Interested";
   if (s.includes("wrong number") || s.includes("invalid number")) return "Wrong Number";
   if (s.includes("busy")) return "Busy";
   if (s.includes("ring") || s.includes("no response") || s.includes("not attend") || s.includes("not reachable") || s.includes("switch off") || s.includes("no answer")) return "Ring No Response";
-  if (s.includes("not interest") || s.includes("no need") || s.includes("rejected")) return "Not Interested";
   if (s.trim()) return "Contacted"; // any other note still counts as a contact attempt
   return null;
 }
@@ -215,10 +223,19 @@ function extractPhoneAndRemainder(text) {
 // "not interested", "call back later" read as remarks; "Sri Lakshmi
 // Traders" reads as a name. Falls back to treating it as a name only when
 // nothing about it looks like a note.
-const HUB_REMARK_HINTS = /enquir|inquir|interest|not\s|wrong|busy|\bring\b|response|visit|deal|demand|call\s*back|callback|switch\s*off|no\s*answer|reachable|follow\s*up|later|pending|closed|reject/i;
+// "intr(e)st" catches the very common "intrested"/"intrest" typo alongside
+// the correctly-spelled "interest(ed)" — a real paste of
+// "remark : intrested location kovilambakam" was previously landing whole
+// in the Name field because the regex only matched the correct spelling.
+const HUB_REMARK_HINTS = /enquir|inquir|interest|intrest|not\s|wrong|busy|\bring\b|response|visit|deal|demand|call\s*back|callback|switch\s*off|no\s*answer|reachable|follow\s*up|later|pending|closed|reject|sample/i;
+// A line that literally starts with "remark" (with or without a colon) is
+// an unambiguous signal — whatever follows is a note, never a name, no
+// matter how it's spelled or worded.
+const REMARK_PREFIX = /^remarks?\s*[:\-]?\s*/i;
 function classifyNameOrRemark(text) {
   const s = (text || "").trim();
   if (!s) return { name: "", remark: "" };
+  if (REMARK_PREFIX.test(s)) return { name: "", remark: s.replace(REMARK_PREFIX, "").trim() || s };
   if (HUB_REMARK_HINTS.test(s)) return { name: "", remark: s };
   return { name: s, remark: "" };
 }
@@ -5398,6 +5415,21 @@ function HubDistributors({ embedded = false } = {}) {
   const addDistributor = () => {
     if (!addForm.name.trim()) { alert("Enter the distributor name."); return; }
     if (!addForm.hub.trim()) { alert("Enter the hub name."); return; }
+    // Bulk Import already refuses to duplicate a phone number — the manual
+    // Add form didn't, which is how the same contact ended up saved twice
+    // under slightly different hub spellings (e.g. "koyambadu" vs
+    // "koyambedu"). Same check here, but as a confirm rather than a hard
+    // block, since two genuinely different people can share a landline.
+    const phone = normalizePhone(addForm.contact);
+    if (phone) {
+      const dupe = (rows || []).find(r => normalizePhone(r.contact) === phone);
+      if (dupe) {
+        const proceed = confirm(
+          `"${dupe.name}" (${dupe.hub || "no hub"}) already has this phone number.\n\nAdd this as a separate distributor anyway? Tap Cancel to open the existing one instead.`
+        );
+        if (!proceed) { setShowAdd(false); setSelectedId(dupe.id); return; }
+      }
+    }
     const now = Date.now();
     const rec = {
       id: Date.now() + "_" + Math.random().toString(36).slice(2, 7),
@@ -5458,7 +5490,7 @@ function HubDistributors({ embedded = false } = {}) {
           const newRemarks = [...(cur.remarks || [])];
           const newStatus = statusFromRemark || cur.status;
           if (ir.remark && ir.remark !== lastNote) {
-            newRemarks.push({ text: ir.remark, status: newStatus, telecaller: telecaller || cur.telecaller || "Import", at: Date.now() });
+            newRemarks.push({ text: ir.remark, status: newStatus, telecaller: telecaller || cur.telecaller || "", at: Date.now() });
           }
           const curIsPlaceholder = !cur.name || cur.name === "Unnamed Distributor" || cur.name.startsWith("Unnamed · ");
           existing[matchIdx] = {
@@ -5486,7 +5518,7 @@ function HubDistributors({ embedded = false } = {}) {
             areas,
             address: ir.address || "", mapLink: ir.mapLink || "", details: ir.details || "",
             status: initialStatus, telecaller: telecaller || "",
-            remarks: ir.remark ? [{ text: ir.remark, status: initialStatus, telecaller: telecaller || "Import", at: now }] : [],
+            remarks: ir.remark ? [{ text: ir.remark, status: initialStatus, telecaller: telecaller || "", at: now }] : [],
             createdAt: now, lastRemarkAt: ir.remark ? now : null,
           };
           existing.push(rec);
@@ -5567,6 +5599,16 @@ function HubDistributors({ embedded = false } = {}) {
     let contact = r.contact || "";
     let foundRemark = "";
 
+    // A Name field that's actually a stray remark (e.g. "remark : intrested
+    // location kovilambakam", "give sample") — these slipped through an
+    // earlier version of the bulk-import parser that didn't catch common
+    // typos like "intrested". Re-run the same classifier now that it's
+    // fixed, and move it into a proper remark instead.
+    if (name && (REMARK_PREFIX.test(name) || HUB_REMARK_HINTS.test(name))) {
+      const split = classifyNameOrRemark(name);
+      if (split.remark) { foundRemark = split.remark; name = ""; changed = true; }
+    }
+
     if (contact) {
       const { phone, remainder } = extractPhoneAndRemainder(contact);
       if (phone && (phone !== contact)) {
@@ -5575,7 +5617,7 @@ function HubDistributors({ embedded = false } = {}) {
         if (remainder) {
           const split = classifyNameOrRemark(remainder);
           if (split.name && (!name || /^unnamed/i.test(name))) name = split.name;
-          if (split.remark) foundRemark = split.remark;
+          if (split.remark && !foundRemark) foundRemark = split.remark;
         }
       }
     }
@@ -5603,13 +5645,24 @@ function HubDistributors({ embedded = false } = {}) {
     let status = r.status;
     if (foundRemark && !remarks.some(rm => rm.text === foundRemark)) {
       const newStatus = classifyHubRemark(foundRemark) || status || "New";
-      remarks = [...remarks, { text: foundRemark, status: newStatus, telecaller: r.telecaller || "Import", at: Date.now() }];
+      remarks = [...remarks, { text: foundRemark, status: newStatus, telecaller: r.telecaller || "", at: Date.now() }];
       status = newStatus;
       changed = true;
     }
 
+    // "Import" was a leftover internal placeholder from an earlier version
+    // of bulk import — it's not a real telecaller and shouldn't appear
+    // as one in a report. Blank it out wherever it was written, on the
+    // record itself and on any individual remark.
+    let telecaller = r.telecaller;
+    if (telecaller === "Import") { telecaller = ""; changed = true; }
+    if (remarks.some(rm => rm.telecaller === "Import")) {
+      remarks = remarks.map(rm => rm.telecaller === "Import" ? { ...rm, telecaller: "" } : rm);
+      changed = true;
+    }
+
     if (!changed) return r;
-    return { ...r, name, contact, remarks, status, lastRemarkAt: remarks.length ? remarks[remarks.length - 1].at : r.lastRemarkAt };
+    return { ...r, name, contact, telecaller, remarks, status, lastRemarkAt: remarks.length ? remarks[remarks.length - 1].at : r.lastRemarkAt };
   };
 
   const [cleaningUp, setCleaningUp] = useState(false);
@@ -5623,6 +5676,48 @@ function HubDistributors({ embedded = false } = {}) {
       return cleaned;
     }));
     setTimeout(() => { setCleaningUp(false); alert(fixedCount ? `Fixed ${fixedCount} distributor${fixedCount === 1 ? "" : "s"}.` : "Nothing needed fixing — all rows already look clean."); }, 50);
+  };
+
+  // Collapses hubs that only differ by case or stray spacing — "UNKNOWN",
+  // "unknown", and "Unknown" are the same hub, just typed differently each
+  // time, and were fragmenting the By-Hub report into duplicate rows. This
+  // is deliberately conservative: it only merges exact matches once
+  // lowercased and trimmed, never genuinely different names (it won't
+  // guess that "AMBATTUR" and "AMBATTUR DISTRIBUTOR" are the same place —
+  // that needs a human decision, since merging wrongly would be worse than
+  // leaving it split).
+  const [normalizingHubs, setNormalizingHubs] = useState(false);
+  const normalizeHubNames = () => {
+    const groups = {};
+    (rows || []).forEach(r => {
+      const key = (r.hub || "").trim().toLowerCase();
+      if (!key) return;
+      groups[key] = groups[key] || [];
+      groups[key].push(r.hub.trim());
+    });
+    // Pick the most common exact casing within each group as the canonical
+    // spelling, so the merge doesn't arbitrarily impose Title Case on a hub
+    // name the team already types consistently one way.
+    const canonical = {};
+    let mergeCount = 0;
+    Object.entries(groups).forEach(([key, variants]) => {
+      const counts = {};
+      variants.forEach(v => { counts[v] = (counts[v] || 0) + 1; });
+      const distinctVariants = Object.keys(counts);
+      if (distinctVariants.length <= 1) return; // nothing to merge
+      const best = distinctVariants.sort((a, b) => counts[b] - counts[a])[0];
+      canonical[key] = best;
+      mergeCount += distinctVariants.length - 1;
+    });
+    if (!mergeCount) { alert("No case-only duplicate hub names found — nothing to merge."); return; }
+    const preview = Object.entries(canonical).map(([key, best]) => `${groups[key].filter((v, i, a) => a.indexOf(v) === i).join(" / ")}  →  "${best}"`).join("\n");
+    if (!confirm(`Merge these hub name variants (keeping the most-used spelling)?\n\n${preview}\n\nThis only merges exact matches that differ by case/spacing — it won't touch genuinely different hub names.`)) return;
+    setNormalizingHubs(true);
+    setRows(prev => (prev || []).map(r => {
+      const key = (r.hub || "").trim().toLowerCase();
+      return canonical[key] ? { ...r, hub: canonical[key] } : r;
+    }));
+    setTimeout(() => setNormalizingHubs(false), 50);
   };
 
   // ── PDF: Team Overview + detailed Activity Log (status, remark, telecaller, date & time) ──
@@ -6107,6 +6202,7 @@ function HubDistributors({ embedded = false } = {}) {
           <Btn label="+ Add Distributor" onClick={() => setShowAdd(true)} />
           <Btn label="📥 Bulk Import" ghost onClick={() => { setShowImport(true); setImportPreview(null); }} />
           <Btn label={cleaningUp ? "Cleaning…" : "🧹 Clean Up Data"} ghost small disabled={cleaningUp} onClick={cleanupAllRows} />
+          <Btn label={normalizingHubs ? "Merging…" : "🏢 Merge Duplicate Hubs"} ghost small disabled={normalizingHubs} onClick={normalizeHubNames} />
           <Btn label={selectMode ? "✕ Cancel Select" : "☑️ Select"} ghost small onClick={toggleSelectMode} />
         </div>
       </Card>
