@@ -785,6 +785,92 @@ function Dropdown({ label, value, onChange, options }) {
   );
 }
 
+// A real calendar grid that expands open below its trigger button — used
+// anywhere a date needs picking (currently: Hub Distributor visit
+// scheduling) instead of relying on the plain native date input, which
+// looks and behaves inconsistently across phones. `value`/`onChange` work
+// with plain "YYYY-MM-DD" strings, same as a native date input's value,
+// so it drops in as a straight swap. `min` (optional, "YYYY-MM-DD")
+// greys out and disables anything earlier.
+function CalendarDatePicker({ label, value, onChange, min }) {
+  const [open, setOpen] = useState(false);
+  const seed = value ? new Date(value + "T00:00:00") : new Date();
+  const [viewYear, setViewYear] = useState(seed.getFullYear());
+  const [viewMonth, setViewMonth] = useState(seed.getMonth()); // 0-11
+
+  useEffect(() => {
+    if (!open) return;
+    const d = value ? new Date(value + "T00:00:00") : new Date();
+    setViewYear(d.getFullYear());
+    setViewMonth(d.getMonth());
+  }, [open]); // eslint-disable-line
+
+  const monthLabel = new Date(viewYear, viewMonth, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  const firstDow = new Date(viewYear, viewMonth, 1).getDay(); // 0 = Sun
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const todayStr = todayISO();
+
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  const dateStrFor = (day) => `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const prevMonth = () => { if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); } else setViewMonth(m => m - 1); };
+  const nextMonth = () => { if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1); } else setViewMonth(m => m + 1); };
+  const navBtnStyle = { background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.t1, width: 30, height: 30, fontSize: 16, cursor: "pointer", fontFamily: FONT, lineHeight: 1 };
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      {label && <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>{label}</div>}
+      <button type="button" onClick={() => setOpen(o => !o)} style={{
+        width: "100%", textAlign: "left", background: T.surface, border: `1px solid ${open ? T.accent : T.border}`,
+        borderRadius: 10, color: value ? T.t1 : T.t3, padding: "10px 12px", fontSize: 13, fontFamily: FONT, cursor: "pointer",
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+      }}>
+        <span>{value ? new Date(value + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Tap to pick a date"}</span>
+        <span>📅</span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, background: T.card, border: `1px solid ${T.border}`, borderRadius: 14, padding: 12, animation: "fadeSlideIn 0.15s ease" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <button type="button" onClick={prevMonth} style={navBtnStyle}>‹</button>
+            <div style={{ fontSize: 13, fontWeight: 800, color: T.t1 }}>{monthLabel}</div>
+            <button type="button" onClick={nextMonth} style={navBtnStyle}>›</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, marginBottom: 2 }}>
+            {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+              <div key={i} style={{ textAlign: "center", fontSize: 10, color: T.t3, fontWeight: 700, padding: "4px 0" }}>{d}</div>
+            ))}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
+            {cells.map((day, i) => {
+              if (day === null) return <div key={i} />;
+              const ds = dateStrFor(day);
+              const isToday = ds === todayStr;
+              const isSelected = ds === value;
+              const isDisabled = !!min && ds < min;
+              return (
+                <button type="button" key={i} disabled={isDisabled} onClick={() => { onChange(ds); setOpen(false); }} style={{
+                  aspectRatio: "1", border: isToday && !isSelected ? `1px solid ${T.accent}88` : "1px solid transparent", borderRadius: 8,
+                  background: isSelected ? T.accent : "transparent",
+                  color: isDisabled ? T.t4 : isSelected ? "#060B16" : T.t1,
+                  fontSize: 12.5, fontWeight: isSelected || isToday ? 800 : 500,
+                  cursor: isDisabled ? "not-allowed" : "pointer", fontFamily: FONT,
+                  opacity: isDisabled ? 0.35 : 1,
+                }}>{day}</button>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button type="button" onClick={() => { onChange(todayISO()); setOpen(false); }} style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.t2, padding: "8px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>Today</button>
+            {value && <button type="button" onClick={() => { onChange(""); setOpen(false); }} style={{ flex: 1, background: T.rose + "18", border: `1px solid ${T.rose}44`, borderRadius: 8, color: T.rose, padding: "8px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>Clear Date</button>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Btn({ label, color=T.accent, onClick, full, ghost, small, disabled }) {
   return (
     <button onClick={disabled ? undefined : onClick} disabled={disabled} style={{
@@ -5816,7 +5902,7 @@ function HubDistributors({ embedded = false } = {}) {
                 )}
               </div>
               <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
-                <input type="date" value={visitDateEdit} onChange={e => setVisitDateEdit(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+                <CalendarDatePicker value={visitDateEdit} onChange={setVisitDateEdit} />
               </div>
               <Field value={visitNoteEdit} onChange={e => setVisitNoteEdit(e.target.value)} placeholder="What's the visit for? (optional)" />
               <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
@@ -6049,14 +6135,8 @@ function HubDistributors({ embedded = false } = {}) {
           <Field key={n} value={addForm[`area${n}`]} onChange={e => setAddForm({ ...addForm, [`area${n}`]: e.target.value })} placeholder={`Area ${n}`} />
         ))}
         <Dropdown label="Approached By (Telecaller)" value={addForm.telecaller} onChange={e => setAddForm({ ...addForm, telecaller: e.target.value })} options={TELECALLERS} />
-        <div style={{ fontSize: 11, color: T.t2, marginTop: 8, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>📅 Schedule a Visit (optional)</div>
-        <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
-          <div style={{ flex: 1 }}>
-            <input type="date" value={addForm.scheduledVisitAt} min={todayISO()}
-              onChange={e => setAddForm({ ...addForm, scheduledVisitAt: e.target.value })}
-              style={inputStyle} />
-          </div>
-        </div>
+        <CalendarDatePicker label="📅 Schedule a Visit (optional)" value={addForm.scheduledVisitAt} min={todayISO()}
+          onChange={(d) => setAddForm({ ...addForm, scheduledVisitAt: d })} />
         {addForm.scheduledVisitAt && (
           <Field value={addForm.scheduledVisitNote} onChange={e => setAddForm({ ...addForm, scheduledVisitNote: e.target.value })} placeholder="What's the visit for? (optional)" />
         )}
