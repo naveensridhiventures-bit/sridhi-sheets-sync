@@ -150,6 +150,34 @@ function hubStageColor(stage) {
   return s ? s.color : T.t3;
 }
 
+// Visit-reminder helpers — compared as plain "YYYY-MM-DD" strings (no
+// time-of-day) so "today" and "tomorrow" line up regardless of what time
+// it currently is. This is what powers the attractive reminder banner on
+// the Hub Distributors screen: a scheduled visit surfaces the moment it's
+// due today, the day before, or if it slipped past without being logged.
+function hubVisitUrgency(dateStr) {
+  if (!dateStr) return null;
+  const today = todayISO();
+  const tomorrow = localISO(new Date(Date.now() + 86400000));
+  if (dateStr < today) return "overdue";
+  if (dateStr === today) return "today";
+  if (dateStr === tomorrow) return "tomorrow";
+  return "upcoming";
+}
+function hubVisitUrgencyStyle(urgency) {
+  switch (urgency) {
+    case "overdue":  return { color: "#FCA5A5", label: "OVERDUE",  emoji: "🚨" };
+    case "today":    return { color: T.rose,    label: "TODAY",    emoji: "🔔" };
+    case "tomorrow": return { color: T.amber,   label: "TOMORROW", emoji: "⏰" };
+    default:         return { color: T.sky,     label: "UPCOMING", emoji: "📅" };
+  }
+}
+function formatVisitDate(dateStr) {
+  if (!dateStr) return "";
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+}
+
 // Maps a free-text calling/visit remark onto a Hub Distributor status, so a
 // bulk-imported row (or one carrying only a quick note) still lands on the
 // right pipeline stage instead of always defaulting to "New".
@@ -5163,7 +5191,7 @@ function HubDistributors({ embedded = false } = {}) {
   const [rows, setRows, syncStatus, retrySync, syncError] = useSheetSynced("hubDistributors", "hubDistributors", []);
   const [selectedId, setSelectedId] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
-  const blankForm = { hub: "", name: "", contact: "", address: "", mapLink: "", details: "", telecaller: TELECALLERS[0], area1: "", area2: "", area3: "", area4: "", area5: "" };
+  const blankForm = { hub: "", name: "", contact: "", address: "", mapLink: "", details: "", telecaller: TELECALLERS[0], area1: "", area2: "", area3: "", area4: "", area5: "", scheduledVisitAt: "", scheduledVisitNote: "" };
   const [addForm, setAddForm] = useState(blankForm);
   const [statusFilter, setStatusFilter] = useState("All");
   const [hubFilter, setHubFilter] = useState("All");
@@ -5198,6 +5226,11 @@ function HubDistributors({ embedded = false } = {}) {
   const [rmStatus, setRmStatus] = useState(HUB_STAGES[0].id);
   const [rmNote, setRmNote] = useState("");
 
+  // Scheduled visit composer — settable at creation or updated anytime
+  // later from the detail screen, independent of the remark timeline.
+  const [visitDateEdit, setVisitDateEdit] = useState("");
+  const [visitNoteEdit, setVisitNoteEdit] = useState("");
+
   // Report state
   const [reportPreset, setReportPreset] = useState("Today");
   const [reportFrom, setReportFrom] = useState(todayISO());
@@ -5226,6 +5259,17 @@ function HubDistributors({ embedded = false } = {}) {
     return ["All", ...Array.from(set).sort()];
   }, [rows]);
 
+  // Visits due today, tomorrow, or overdue — computed off the full list
+  // (not the current filter/search), so the reminder banner never hides a
+  // schedule just because you're mid-search or on a different status tab.
+  const dueVisits = useMemo(() => {
+    return (rows || [])
+      .map(r => ({ r, urgency: hubVisitUrgency(r.scheduledVisitAt) }))
+      .filter(x => x.urgency === "overdue" || x.urgency === "today" || x.urgency === "tomorrow")
+      .sort((a, b) => (a.r.scheduledVisitAt || "").localeCompare(b.r.scheduledVisitAt || ""));
+  }, [rows]);
+  const [showOnlyScheduled, setShowOnlyScheduled] = useState(false);
+
   const areasFromForm = (f) => [f.area1, f.area2, f.area3, f.area4, f.area5].map(a => (a || "").trim()).filter(Boolean).slice(0, MAX_HUB_AREAS);
 
   const selected = (rows || []).find(r => r.id === selectedId) || null;
@@ -5233,6 +5277,8 @@ function HubDistributors({ embedded = false } = {}) {
     if (selected) {
       setRmTelecaller(selected.telecaller || TELECALLERS[0]);
       setRmStatus(selected.status || HUB_STAGES[0].id);
+      setVisitDateEdit(selected.scheduledVisitAt || "");
+      setVisitNoteEdit(selected.scheduledVisitNote || "");
       const areas = selected.areas || [];
       setDetailEdit({
         hub: selected.hub || "", name: selected.name || "", contact: selected.contact || "",
@@ -5247,6 +5293,7 @@ function HubDistributors({ embedded = false } = {}) {
     let list = rows || [];
     if (statusFilter !== "All") list = list.filter(r => r.status === statusFilter);
     if (hubFilter !== "All") list = list.filter(r => (r.hub || "") === hubFilter);
+    if (showOnlyScheduled) list = list.filter(r => !!r.scheduledVisitAt);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter(r =>
@@ -5256,8 +5303,11 @@ function HubDistributors({ embedded = false } = {}) {
         (r.areas || []).some(a => (a || "").toLowerCase().includes(q))
       );
     }
+    if (showOnlyScheduled) {
+      return [...list].sort((a, b) => (a.scheduledVisitAt || "").localeCompare(b.scheduledVisitAt || ""));
+    }
     return [...list].sort((a, b) => (b.lastRemarkAt || b.createdAt || 0) - (a.lastRemarkAt || a.createdAt || 0));
-  }, [rows, statusFilter, hubFilter, search]);
+  }, [rows, statusFilter, hubFilter, search, showOnlyScheduled]);
 
   const addDistributor = () => {
     if (!addForm.name.trim()) { alert("Enter the distributor name."); return; }
@@ -5270,11 +5320,25 @@ function HubDistributors({ embedded = false } = {}) {
       address: addForm.address.trim(), mapLink: addForm.mapLink.trim(), details: addForm.details.trim(),
       status: "New", telecaller: addForm.telecaller, remarks: [],
       createdAt: now, lastRemarkAt: null,
+      scheduledVisitAt: addForm.scheduledVisitAt || null, scheduledVisitNote: addForm.scheduledVisitNote.trim(),
     };
     setRows(prev => [rec, ...(prev || [])]);
     setAddForm(blankForm);
     setShowAdd(false);
     setSelectedId(rec.id);
+  };
+
+  // Scheduled visit can be set at creation or updated any time later from
+  // the detail screen — saved independently of the remark timeline so
+  // rescheduling a visit doesn't require typing an unrelated call note.
+  const saveScheduledVisit = (id) => {
+    setRows(prev => (prev || []).map(r => r.id === id ? {
+      ...r, scheduledVisitAt: visitDateEdit || null, scheduledVisitNote: visitNoteEdit.trim(),
+    } : r));
+  };
+  const clearScheduledVisit = (id) => {
+    setVisitDateEdit(""); setVisitNoteEdit("");
+    setRows(prev => (prev || []).map(r => r.id === id ? { ...r, scheduledVisitAt: null, scheduledVisitNote: "" } : r));
   };
 
   // ── Bulk import ──
@@ -5691,6 +5755,8 @@ function HubDistributors({ embedded = false } = {}) {
           "Business Details": d.details || "",
           "Status": d.status || "",
           "Approached By (Telecaller)": d.telecaller || "",
+          "Scheduled Visit Date": d.scheduledVisitAt || "",
+          "Scheduled Visit Note": d.scheduledVisitNote || "",
           "Latest Remark": latest ? latest.text : "",
           "Latest Remark Date & Time": latest && latest.at ? new Date(latest.at).toLocaleString("en-IN") : "",
           "Full Remark History": remarks.map(r => `[${new Date(r.at).toLocaleString("en-IN")} · ${r.telecaller} · ${r.status}] ${r.text}`).join(" | "),
@@ -5734,6 +5800,32 @@ function HubDistributors({ embedded = false } = {}) {
             <button onClick={() => deleteDistributor(r)} style={{ flex: "1 1 100px", background: T.rose + "18", border: `1px solid ${T.rose}44`, borderRadius: 10, color: T.rose, padding: "9px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>🗑️ Delete</button>
           </div>
         </Card>
+
+        {(() => {
+          const urgency = hubVisitUrgency(r.scheduledVisitAt);
+          const us = urgency ? hubVisitUrgencyStyle(urgency) : null;
+          return (
+            <Card style={{
+              marginBottom: 14,
+              ...(us ? { background: us.color + "14", border: `1.5px solid ${us.color}66`, animation: (urgency === "today" || urgency === "overdue") ? "visitGlow 1.8s ease-in-out infinite" : "none" } : {}),
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                <Label sub="Set once, updated anytime — this is what powers your reminder">📅 Scheduled Visit</Label>
+                {us && (
+                  <span style={{ fontSize: 11, fontWeight: 800, color: us.color, letterSpacing: "0.03em", whiteSpace: "nowrap" }}>{us.emoji} {us.label}</span>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+                <input type="date" value={visitDateEdit} onChange={e => setVisitDateEdit(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+              </div>
+              <Field value={visitNoteEdit} onChange={e => setVisitNoteEdit(e.target.value)} placeholder="What's the visit for? (optional)" />
+              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                <Btn label="Save Visit Date" small onClick={() => saveScheduledVisit(r.id)} />
+                {r.scheduledVisitAt && <Btn label="Clear" small ghost color={T.rose} onClick={() => clearScheduledVisit(r.id)} />}
+              </div>
+            </Card>
+          );
+        })()}
 
         <Card style={{ marginBottom: 14 }}>
           <Label sub="Basic details — hub, location and the areas this distributor covers (up to 5)">Distributor Details</Label>
@@ -5803,6 +5895,47 @@ function HubDistributors({ embedded = false } = {}) {
         </div>
       </Card>
 
+      {dueVisits.length > 0 && (() => {
+        const overdueN = dueVisits.filter(x => x.urgency === "overdue").length;
+        const todayN = dueVisits.filter(x => x.urgency === "today").length;
+        const tomorrowN = dueVisits.filter(x => x.urgency === "tomorrow").length;
+        const headline = overdueN
+          ? `${overdueN} visit${overdueN === 1 ? "" : "s"} overdue!`
+          : todayN
+          ? `${todayN} visit${todayN === 1 ? "" : "s"} scheduled today!`
+          : `${tomorrowN} visit${tomorrowN === 1 ? "" : "s"} scheduled tomorrow`;
+        return (
+          <div style={{
+            background: "linear-gradient(135deg, #FB717522, #F59E0B18)",
+            border: `1.5px solid ${T.rose}55`, borderRadius: 16, padding: "14px 16px",
+            animation: (overdueN || todayN) ? "visitGlow 1.8s ease-in-out infinite" : "none",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <span style={{ fontSize: 20 }}>🔔</span>
+              <div style={{ fontSize: 14, fontWeight: 800, color: T.t1 }}>{headline}</div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {dueVisits.map(({ r, urgency }) => {
+                const us = hubVisitUrgencyStyle(urgency);
+                return (
+                  <div key={r.id} onClick={() => setSelectedId(r.id)} style={{
+                    display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
+                    background: T.card + "CC", border: `1px solid ${us.color}44`, borderRadius: 10, padding: "8px 10px",
+                  }}>
+                    <span style={{ fontSize: 15, flexShrink: 0 }}>{us.emoji}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: T.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</div>
+                      <div style={{ fontSize: 10.5, color: T.t3 }}>{r.hub || "No hub"} {r.scheduledVisitNote ? "· " + r.scheduledVisitNote : ""}</div>
+                    </div>
+                    <span style={{ fontSize: 10, fontWeight: 800, color: us.color, whiteSpace: "nowrap" }}>{us.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       <Card accent={T.amber}>
         <Label sub="Every remark is logged with status, telecaller and date & time — download a report to share with management">Hub Distributor Report</Label>
         <Dropdown label="Hub" value={reportHub} onChange={e => setReportHub(e.target.value)} options={hubOptions} />
@@ -5832,6 +5965,11 @@ function HubDistributors({ embedded = false } = {}) {
       {hubOptions.length > 1 && (
         <Dropdown label="Filter by Hub" value={hubFilter} onChange={e => setHubFilter(e.target.value)} options={hubOptions} />
       )}
+      <button onClick={() => setShowOnlyScheduled(v => !v)} style={{
+        alignSelf: "flex-start", background: showOnlyScheduled ? T.sky + "22" : T.surface,
+        border: `1px solid ${showOnlyScheduled ? T.sky : T.border}`, borderRadius: 20, padding: "6px 12px",
+        fontSize: 11.5, fontWeight: 700, color: showOnlyScheduled ? T.sky : T.t2, cursor: "pointer", fontFamily: FONT,
+      }}>📅 {showOnlyScheduled ? "Showing Scheduled Only" : "Show Scheduled Only"}</button>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
         {["All", ...HUB_STAGES.map(s => s.id)].map(s => (
           <button key={s} onClick={() => setStatusFilter(s)} style={{
@@ -5858,9 +5996,11 @@ function HubDistributors({ embedded = false } = {}) {
       ) : filtered.map(r => {
         const latest = (r.remarks || [])[r.remarks.length - 1];
         const isSelected = selectedIds.has(r.id);
+        const visitUrgency = hubVisitUrgency(r.scheduledVisitAt);
+        const visitStyle = visitUrgency ? hubVisitUrgencyStyle(visitUrgency) : null;
         return (
           <div key={r.id} onClick={() => selectMode ? toggleSelected(r.id) : setSelectedId(r.id)} style={{
-            background: T.card, border: `1px solid ${isSelected ? T.accent : T.border}`, borderRadius: 14, padding: "12px 14px", cursor: "pointer",
+            background: T.card, border: `1px solid ${isSelected ? T.accent : (visitStyle ? visitStyle.color + "66" : T.border)}`, borderRadius: 14, padding: "12px 14px", cursor: "pointer",
             display: "flex", gap: 10, alignItems: "flex-start",
           }}>
             {selectMode && (
@@ -5875,6 +6015,15 @@ function HubDistributors({ embedded = false } = {}) {
                 </div>
                 <Chip small label={r.status} color={hubStageColor(r.status)} />
               </div>
+              {visitStyle && (
+                <div style={{
+                  display: "inline-flex", alignItems: "center", gap: 5, marginTop: 7,
+                  background: visitStyle.color + "22", border: `1px solid ${visitStyle.color}55`, borderRadius: 20,
+                  padding: "3px 9px", fontSize: 10.5, fontWeight: 800, color: visitStyle.color,
+                }}>
+                  {visitStyle.emoji} {visitUrgency === "today" ? "Visit Today" : visitUrgency === "tomorrow" ? "Visit Tomorrow" : visitUrgency === "overdue" ? "Visit Overdue" : "Visit " + formatVisitDate(r.scheduledVisitAt)}
+                </div>
+              )}
               {(r.areas || []).length > 0 && (
                 <div style={{ fontSize: 10.5, color: T.t3, marginTop: 6 }}>Areas: {r.areas.join(", ")}</div>
               )}
@@ -5900,6 +6049,17 @@ function HubDistributors({ embedded = false } = {}) {
           <Field key={n} value={addForm[`area${n}`]} onChange={e => setAddForm({ ...addForm, [`area${n}`]: e.target.value })} placeholder={`Area ${n}`} />
         ))}
         <Dropdown label="Approached By (Telecaller)" value={addForm.telecaller} onChange={e => setAddForm({ ...addForm, telecaller: e.target.value })} options={TELECALLERS} />
+        <div style={{ fontSize: 11, color: T.t2, marginTop: 8, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>📅 Schedule a Visit (optional)</div>
+        <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+          <div style={{ flex: 1 }}>
+            <input type="date" value={addForm.scheduledVisitAt} min={todayISO()}
+              onChange={e => setAddForm({ ...addForm, scheduledVisitAt: e.target.value })}
+              style={inputStyle} />
+          </div>
+        </div>
+        {addForm.scheduledVisitAt && (
+          <Field value={addForm.scheduledVisitNote} onChange={e => setAddForm({ ...addForm, scheduledVisitNote: e.target.value })} placeholder="What's the visit for? (optional)" />
+        )}
         <Btn label="Add Distributor" full onClick={addDistributor} disabled={!addForm.name.trim() || !addForm.hub.trim()} />
       </Sheet>
 
@@ -10711,6 +10871,7 @@ export default function App() {
         select option { background: ${T.card}; color: ${T.t1}; }
         @keyframes pulse { 0%,100% { opacity:0.25; transform:scale(0.8); } 50% { opacity:1; transform:scale(1.1); } }
         @keyframes fadeSlideIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes visitGlow { 0%,100% { box-shadow: 0 0 0 0 rgba(251,113,133,0.35); } 50% { box-shadow: 0 0 0 6px rgba(251,113,133,0); } }
         input::placeholder { color: ${T.t3}; }
         textarea::placeholder { color: ${T.t3}; }
         input:-webkit-autofill { -webkit-box-shadow: 0 0 0 100px ${T.card} inset; -webkit-text-fill-color: ${T.t1}; }

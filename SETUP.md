@@ -105,7 +105,7 @@ id  name  contact  area  address  mapLink  status  telecaller  currentBrand  tel
 
 **HubDistributors** *(hub-wise distributor tracker: one row per distributor, remark + status trail, up to 5 areas)*
 ```
-id  hub  name  contact  areas  address  mapLink  details  status  telecaller  remarks  createdAt  lastRemarkAt
+id  hub  name  contact  areas  address  mapLink  details  status  telecaller  remarks  createdAt  lastRemarkAt  scheduledVisitAt  scheduledVisitNote
 ```
 - `hub` is the hub this distributor is grouped under (e.g. "Ambattur Hub",
   "Trichy Hub") — filterable on the Hub Distributors screen and in the report.
@@ -121,6 +121,16 @@ id  hub  name  contact  areas  address  mapLink  details  status  telecaller  re
   as `MilkDistributors.telecallerRemarks` (JSON-encoded per entry, joined
   with ` || ` in the sheet cell). Saving a remark also updates the
   distributor's current `status` and `telecaller`.
+- **Scheduled Visit reminders**: set a visit date (and optional note) on any
+  distributor, at creation or anytime later from its detail screen. An
+  attractive glowing banner appears at the top of the Hub Distributors list
+  the day of the visit, the day before, and if it's overdue — with a tap
+  straight through to that distributor. Each list card also shows a
+  color-coded "Visit Today / Tomorrow / Overdue" pill, and a "Show Scheduled
+  Only" filter lists just the ones with a date set, soonest first. No new
+  sheet tab needed — `scheduledVisitAt` (YYYY-MM-DD) and
+  `scheduledVisitNote` are just two extra columns on `HubDistributors`,
+  added automatically the next time any row is saved.
 - **Bulk Import**: on the Hub Distributors screen, paste rows copied from
   Excel/Google Sheets — with or without a header row. Recognized columns
   (any order, any subset): Hub, Name, Phone/Contact, Area, Address, Map
