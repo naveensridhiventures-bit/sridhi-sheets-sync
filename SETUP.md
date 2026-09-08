@@ -144,10 +144,14 @@ id  hub  name  contact  areas  address  mapLink  details  status  telecaller  re
   cell never overwrites a value that's already there.
 - **Hub Distributors** screen (mobile: under "More"; desktop: sidebar) has
   its own report, filterable by hub, telecaller, and day/week/month/custom
-  date range: a **PDF** (Team Overview — pipeline status breakdown, response
-  analysis, by-telecaller table — plus a detailed Activity Log page of every
-  remark with date & time) and an **Excel** export (one row per distributor
-  with full remark history) — both meant to be shared with management.
+  date range: a **PDF** — Team Overview (pipeline breakdown, response
+  analysis, by-telecaller and by-hub tables), a dedicated **Scheduled
+  Visits** page (overdue/today/tomorrow/upcoming, color-coded), a **Full
+  Distributor Directory** (every distributor's complete profile — contact,
+  areas, address, status, telecaller, visit date — regardless of the date
+  range), and a detailed **Activity Log** of every remark with date & time
+  — plus an **Excel** export (one row per distributor with full remark
+  history) — both meant to be shared with management.
 
 ---
 

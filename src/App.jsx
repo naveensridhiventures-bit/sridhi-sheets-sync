@@ -5634,11 +5634,15 @@ function HubDistributors({ embedded = false } = {}) {
       const NAVY = [8, 40, 25], TEAL = [23, 148, 74], AMBER = [180, 110, 5], INDIGO = [79, 70, 229];
       const GRID = [214, 220, 214], INK = [26, 32, 46], SUBTLE = [110, 118, 138];
       const POS = [34, 217, 138], NEG = [251, 113, 133], NEU = [251, 191, 36];
+      const hexToRgb = (hex) => hex && hex.startsWith("#")
+        ? [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)]
+        : SUBTLE;
+      const tint = (rgb, amt = 0.88) => rgb.map(c => Math.min(255, c + (255 - c) * amt));
       const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
       const pageW = doc.internal.pageSize.getWidth(), pageH = doc.internal.pageSize.getHeight(), margin = 32;
       const rangeLabel = reportFrom === reportTo ? formatDateReadable(reportFrom) : `${formatDateReadable(reportFrom)}  –  ${formatDateReadable(reportTo)}`;
 
-      const header = (title) => {
+      const header = (title, subtitle) => {
         const headerH = 74;
         doc.setFillColor(...NAVY); doc.rect(0, 0, pageW, headerH, "F");
         doc.setFillColor(...TEAL); doc.rect(0, headerH - 2, pageW, 2, "F");
@@ -5650,10 +5654,20 @@ function HubDistributors({ embedded = false } = {}) {
         doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(15);
         doc.text(title, textX, 30);
         doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(200, 214, 205);
-        doc.text(`${reportPreset} · ${rangeLabel}${reportHub !== "All" ? " · " + reportHub + " Hub" : ""}`, textX, 46);
+        doc.text(subtitle || `${reportPreset} · ${rangeLabel}${reportHub !== "All" ? " · " + reportHub + " Hub" : ""}`, textX, 46);
         doc.setFontSize(8);
         doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`, pageW - margin, 30, { align: "right" });
         return headerH + 20;
+      };
+      // A small colored section rule with a title — used to visually break
+      // the report into clearly labeled parts, the way a professional
+      // report has running headers rather than one undifferentiated wall
+      // of tables.
+      const sectionTitle = (text, y, color = NAVY) => {
+        doc.setFillColor(...color); doc.rect(margin, y - 9, 3, 12, "F");
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(...color);
+        doc.text(text, margin + 9, y);
+        return y + 12;
       };
       const footer = () => {
         const pageCount = doc.internal.getNumberOfPages();
@@ -5661,7 +5675,7 @@ function HubDistributors({ embedded = false } = {}) {
           doc.setPage(i);
           doc.setDrawColor(...GRID); doc.line(margin, pageH - 26, pageW - margin, pageH - 26);
           doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...SUBTLE);
-          doc.text("Sridhi Ventures · Hub Distributor Report", margin, pageH - 13);
+          doc.text("Sridhi Ventures · Hub Distributor Report · Confidential — Internal Use", margin, pageH - 13);
           doc.text(`Page ${i} of ${pageCount}`, pageW - margin, pageH - 13, { align: "right" });
         }
       };
@@ -5688,68 +5702,75 @@ function HubDistributors({ embedded = false } = {}) {
       });
       entries.sort((a, b) => a.at - b.at);
 
+      const scheduled = all.filter(d => !!d.scheduledVisitAt);
+      const dueSoon = scheduled
+        .map(d => ({ d, urgency: hubVisitUrgency(d.scheduledVisitAt) }))
+        .filter(x => x.urgency === "overdue" || x.urgency === "today" || x.urgency === "tomorrow")
+        .sort((a, b) => a.d.scheduledVisitAt.localeCompare(b.d.scheduledVisitAt));
+
       // ── Page 1: Team overview ──
       let y = header("Hub Distributors — Team Overview");
       const totalDistributors = all.length;
+      const totalHubs = new Set(all.map(d => (d.hub || "").trim()).filter(Boolean)).size;
       const stageBreakdown = HUB_STAGES.map(s => ({ ...s, count: all.filter(d => d.status === s.id).length }));
       const dealsAccepted = all.filter(d => d.status === "Deal Accepted").length;
       const chips = [
-        [`${totalDistributors} Total Distributors`, TEAL, [229, 248, 238]],
+        [`${totalDistributors} Distributors`, TEAL, [229, 248, 238]],
+        [`${totalHubs} Hubs`, NAVY, [222, 230, 226]],
         [`${entries.length} Remarks Logged`, INDIGO, [235, 234, 253]],
         [`${dealsAccepted} Deals Accepted`, AMBER, [254, 246, 224]],
+        [`${scheduled.length} Visits Scheduled`, [23, 130, 195], [219, 240, 252]],
       ];
-      let cx = margin;
-      chips.forEach(([label, color, tint]) => {
-        doc.setFont("helvetica", "bold"); doc.setFontSize(9.5);
-        const w = doc.getTextWidth(label) + 22;
-        doc.setFillColor(...tint); doc.setDrawColor(...color);
-        doc.roundedRect(cx, y, w, 24, 12, 12, "FD");
-        doc.setTextColor(...color); doc.text(label, cx + 11, y + 16);
-        cx += w + 8;
+      let cx = margin, cyRow = y;
+      chips.forEach(([label, color, tintC]) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(9);
+        const w = doc.getTextWidth(label) + 20;
+        if (cx + w > pageW - margin) { cx = margin; cyRow += 28; }
+        doc.setFillColor(...tintC); doc.setDrawColor(...color);
+        doc.roundedRect(cx, cyRow, w, 23, 11.5, 11.5, "FD");
+        doc.setTextColor(...color); doc.text(label, cx + 10, cyRow + 15.5);
+        cx += w + 7;
       });
-      y += 42;
+      y = cyRow + 40;
 
-      doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(...NAVY);
-      doc.text("PIPELINE STATUS", margin, y); y += 10;
+      y = sectionTitle("PIPELINE STATUS", y); y += 4;
       // Two rows of 5 — the fixed 10-stage pipeline doesn't fit legibly on one row.
       const perRow = 5, boxGap = 6;
       const sbw = (pageW - margin * 2 - (perRow - 1) * boxGap) / perRow;
+      const shortStageLabel = { "Demanding Something Different": "DEMANDING DIFF.", "Ring No Response": "RING/NO RESP." };
       stageBreakdown.forEach((s, i) => {
         const row = Math.floor(i / perRow), col = i % perRow;
         const bx = margin + col * (sbw + boxGap), by2 = y + row * 46;
-        const rgb = s.color.startsWith("#") ? [parseInt(s.color.slice(1, 3), 16), parseInt(s.color.slice(3, 5), 16), parseInt(s.color.slice(5, 7), 16)] : SUBTLE;
-        doc.setFillColor(...rgb.map(c => Math.min(255, c + (255 - c) * 0.88)));
-        doc.setDrawColor(...rgb);
-        doc.roundedRect(bx, by2, sbw, 40, 6, 6, "FD");
+        const rgb = hexToRgb(s.color);
+        doc.setFillColor(...tint(rgb)); doc.setDrawColor(...rgb);
+        doc.roundedRect(bx, by2, sbw, 42, 6, 6, "FD");
         doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.setTextColor(...rgb);
         doc.text(String(s.count), bx + 6, by2 + 18);
-        doc.setFont("helvetica", "normal"); doc.setFontSize(5.6); doc.setTextColor(...SUBTLE);
-        doc.text(s.id.toUpperCase(), bx + 6, by2 + 30, { maxWidth: sbw - 8 });
+        doc.setFont("helvetica", "normal"); doc.setFontSize(5.8); doc.setTextColor(...SUBTLE);
+        doc.text((shortStageLabel[s.id] || s.id).toUpperCase(), bx + 6, by2 + 30, { maxWidth: sbw - 8 });
       });
-      y += 46 * 2 + 12;
+      y += 46 * 2 + 10;
 
       const posCount = entries.filter(e => e.sentiment === "positive").length;
       const negCount = entries.filter(e => e.sentiment === "negative").length;
       const neuCount = entries.filter(e => e.sentiment === "neutral").length;
       const totalResp = posCount + negCount + neuCount;
-      doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(...NAVY);
-      doc.text("RESPONSE ANALYSIS (REMARKS IN RANGE)", margin, y); y += 10;
+      y = sectionTitle("RESPONSE ANALYSIS — REMARKS IN RANGE", y); y += 4;
       const statBoxes = [["Positive", posCount, POS], ["Negative", negCount, NEG], ["Neutral", neuCount, NEU]];
       const boxW = (pageW - margin * 2 - 16) / 3;
       statBoxes.forEach(([label, count, color], i) => {
         const bx = margin + i * (boxW + 8);
-        doc.setFillColor(...color.map(c => Math.min(255, c + (255 - c) * 0.88)));
-        doc.setDrawColor(...color);
-        doc.roundedRect(bx, y, boxW, 44, 8, 8, "FD");
-        doc.setFont("helvetica", "bold"); doc.setFontSize(19); doc.setTextColor(...color);
-        doc.text(String(count), bx + 12, y + 27);
+        doc.setFillColor(...tint(color)); doc.setDrawColor(...color);
+        doc.roundedRect(bx, y, boxW, 42, 8, 8, "FD");
+        doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(...color);
+        doc.text(String(count), bx + 12, y + 26);
         doc.setFont("helvetica", "bold"); doc.setFontSize(8.5);
         const pct = totalResp ? Math.round((count / totalResp) * 100) : 0;
-        doc.text(`${label.toUpperCase()} · ${pct}%`, bx + 12, y + 38);
+        doc.text(`${label.toUpperCase()} · ${pct}%`, bx + 12, y + 36);
       });
-      y += 56;
+      y += 54;
       if (totalResp) {
-        const barX = margin, barY = y, barW = pageW - margin * 2, barH = 12;
+        const barX = margin, barY = y, barW = pageW - margin * 2, barH = 11;
         let bx2 = barX;
         [[posCount, POS], [neuCount, NEU], [negCount, NEG]].forEach(([count, color]) => {
           if (!count) return;
@@ -5758,28 +5779,139 @@ function HubDistributors({ embedded = false } = {}) {
           bx2 += w;
         });
         doc.setDrawColor(...GRID); doc.roundedRect(barX, barY, barW, barH, 3, 3, "S");
-        y += barH + 22;
-      } else y += 8;
+        y += barH + 18;
+      } else y += 6;
 
-      doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(...NAVY);
-      doc.text("BY TELECALLER", margin, y); y += 8;
+      y = sectionTitle("BY TELECALLER", y);
       const tcRows = TELECALLERS.map(t => {
         const tEntries = entries.filter(e => e.by === t);
         const deals = tEntries.filter(e => e.status === "Deal Accepted").length;
         const notInt = tEntries.filter(e => e.status === "Not Interested").length;
-        return [t, all.filter(d => d.telecaller === t).length, tEntries.length, deals, notInt];
+        const visitsFor = all.filter(d => d.telecaller === t && d.scheduledVisitAt).length;
+        return [t, all.filter(d => d.telecaller === t).length, tEntries.length, deals, notInt, visitsFor];
       }).filter(row => row[1] > 0 || row[2] > 0);
       autoTable(doc, {
-        startY: y, margin: { top: 94, bottom: 40 },
-        head: [["Telecaller", "Distributors Assigned", "Remarks in Range", "Deal Accepted", "Not Interested"]],
-        body: tcRows.length ? tcRows : [["—", "—", "—", "—", "—"]], theme: "grid",
-        styles: { font: "helvetica", fontSize: 9, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK },
-        headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 },
+        startY: y + 6, margin: { top: 94, bottom: 40 },
+        head: [["Telecaller", "Assigned", "Remarks", "Deals", "Not Int.", "Visits Set"]],
+        body: tcRows.length ? tcRows : [["—", "—", "—", "—", "—", "—"]], theme: "grid",
+        styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5.5, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+        headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
         alternateRowStyles: { fillColor: [248, 250, 248] },
-        columnStyles: { 0: { fontStyle: "bold", cellWidth: 120 } },
+        columnStyles: { 0: { fontStyle: "bold", cellWidth: 130 } },
+      });
+      y = doc.lastAutoTable.finalY + 20;
+
+      // Keep the Hub breakdown on page 1 if it fits, otherwise let it flow —
+      // autoTable handles the page break, and re-draws the header itself.
+      y = sectionTitle("BY HUB", y);
+      const hubRows = Array.from(new Set(all.map(d => (d.hub || "Unassigned").trim() || "Unassigned"))).sort().map(h => {
+        const hubDs = all.filter(d => (d.hub || "Unassigned").trim() === h);
+        return [
+          h, hubDs.length,
+          hubDs.filter(d => d.status === "Deal Accepted").length,
+          hubDs.filter(d => d.status === "Not Interested").length,
+          hubDs.filter(d => !!d.scheduledVisitAt).length,
+        ];
+      });
+      autoTable(doc, {
+        startY: y + 6, margin: { top: 94, bottom: 40 },
+        head: [["Hub", "Distributors", "Deals Accepted", "Not Interested", "Visits Scheduled"]],
+        body: hubRows.length ? hubRows : [["—", "—", "—", "—", "—"]], theme: "grid",
+        styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5.5, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+        headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+        alternateRowStyles: { fillColor: [248, 250, 248] },
+        columnStyles: { 0: { fontStyle: "bold" } },
+        didDrawPage: () => header("Hub Distributors — Team Overview"),
       });
 
-      // ── Page 2+: detailed activity log ──
+      // ── Page: Upcoming & Overdue Visits — the headline feature, so it
+      // gets its own clearly-flagged section rather than being buried in a
+      // column of the activity log. ──
+      doc.addPage();
+      let vy = header("Hub Distributors — Scheduled Visits", `${scheduled.length} total scheduled · ${dueSoon.length} due within the next day (or overdue)`);
+      if (!scheduled.length) {
+        doc.setFont("helvetica", "normal"); doc.setFontSize(11); doc.setTextColor(...SUBTLE);
+        doc.text("No visits currently scheduled.", margin, vy + 10);
+      } else {
+        const overdueN = scheduled.filter(d => hubVisitUrgency(d.scheduledVisitAt) === "overdue").length;
+        const todayN = scheduled.filter(d => hubVisitUrgency(d.scheduledVisitAt) === "today").length;
+        const tomorrowN = scheduled.filter(d => hubVisitUrgency(d.scheduledVisitAt) === "tomorrow").length;
+        const upcomingN = scheduled.length - overdueN - todayN - tomorrowN;
+        const visitChips = [
+          [`${overdueN} Overdue`, [252, 165, 165]], [`${todayN} Today`, [251, 113, 133]],
+          [`${tomorrowN} Tomorrow`, AMBER], [`${upcomingN} Upcoming`, [23, 130, 195]],
+        ];
+        let vcx = margin;
+        visitChips.forEach(([label, color]) => {
+          doc.setFont("helvetica", "bold"); doc.setFontSize(9);
+          const w = doc.getTextWidth(label) + 20;
+          doc.setFillColor(...tint(color)); doc.setDrawColor(...color);
+          doc.roundedRect(vcx, vy, w, 23, 11.5, 11.5, "FD");
+          doc.setTextColor(...color); doc.text(label, vcx + 10, vy + 15.5);
+          vcx += w + 7;
+        });
+        vy += 38;
+
+        const sortedScheduled = [...scheduled].sort((a, b) => a.scheduledVisitAt.localeCompare(b.scheduledVisitAt));
+        autoTable(doc, {
+          startY: vy, margin: { top: 94, bottom: 40 },
+          head: [["Visit Date", "", "Distributor", "Hub", "Contact", "Telecaller", "Note"]],
+          body: sortedScheduled.map(d => {
+            const u = hubVisitUrgency(d.scheduledVisitAt);
+            const us = hubVisitUrgencyStyle(u);
+            return [formatVisitDate(d.scheduledVisitAt), us.label, d.name, d.hub || "—", d.contact || "—", d.telecaller || "—", d.scheduledVisitNote || "—"];
+          }),
+          theme: "grid",
+          styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5.5, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "top" },
+          headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+          alternateRowStyles: { fillColor: [248, 250, 248] },
+          columnStyles: { 0: { fontStyle: "bold", cellWidth: 62 }, 1: { cellWidth: 58 }, 2: { fontStyle: "bold" }, 6: { cellWidth: 110 } },
+          didParseCell: (data) => {
+            if (data.section === "body" && data.column.index === 1) {
+              const map = { OVERDUE: [252, 165, 165], TODAY: [251, 113, 133], TOMORROW: AMBER, UPCOMING: [23, 130, 195] };
+              const rgb = map[data.cell.raw] || SUBTLE;
+              data.cell.styles.textColor = rgb;
+              data.cell.styles.fillColor = tint(rgb, 0.9);
+              data.cell.styles.fontStyle = "bold";
+            }
+          },
+          didDrawPage: () => header("Hub Distributors — Scheduled Visits"),
+        });
+      }
+
+      // ── Page: Full Distributor Directory — every distributor with its
+      // complete profile, independent of the date range, so management
+      // gets the whole roster in one place rather than only what moved
+      // during the selected window. ──
+      doc.addPage();
+      let dy = header("Hub Distributors — Full Directory", `${all.length} distributor${all.length === 1 ? "" : "s"}${reportHub !== "All" ? " · " + reportHub + " Hub" : " · all hubs"}`);
+      const directorySorted = [...all].sort((a, b) => (a.hub || "").localeCompare(b.hub || "") || (a.name || "").localeCompare(b.name || ""));
+      autoTable(doc, {
+        startY: dy, margin: { top: 94, bottom: 40 },
+        head: [["Hub", "Distributor", "Contact", "Areas", "Status", "Telecaller", "Visit", "Address"]],
+        body: directorySorted.map(d => [
+          d.hub || "—", d.name || "—", d.contact || "—", (d.areas || []).join(", ") || "—",
+          d.status || "—", d.telecaller || "—",
+          d.scheduledVisitAt ? formatVisitDate(d.scheduledVisitAt) : "—",
+          d.address || "—",
+        ]),
+        theme: "grid",
+        styles: { font: "helvetica", fontSize: 7.8, cellPadding: 5, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "top" },
+        headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+        alternateRowStyles: { fillColor: [248, 250, 248] },
+        columnStyles: { 1: { fontStyle: "bold" }, 7: { cellWidth: 100 } },
+        didParseCell: (data) => {
+          if (data.section === "body" && data.column.index === 4) {
+            const rgb = hexToRgb(hubStageColor(data.cell.raw));
+            data.cell.styles.textColor = rgb;
+            data.cell.styles.fillColor = tint(rgb, 0.9);
+            data.cell.styles.fontStyle = "bold";
+          }
+        },
+        didDrawPage: () => header("Hub Distributors — Full Directory"),
+      });
+
+      // ── Page: detailed activity log — every remark in the selected range ──
       doc.addPage();
       let yy = header("Hub Distributors — Activity Log");
       if (!entries.length) {
@@ -5801,11 +5933,9 @@ function HubDistributors({ embedded = false } = {}) {
           columnStyles: { 2: { fontStyle: "bold" }, 6: { cellWidth: 130 } },
           didParseCell: (data) => {
             if (data.section === "body" && data.column.index === 5) {
-              const rawStatus = data.cell.raw;
-              const color = hubStageColor(rawStatus);
-              const rgb = color.startsWith("#") ? [parseInt(color.slice(1, 3), 16), parseInt(color.slice(3, 5), 16), parseInt(color.slice(5, 7), 16)] : SUBTLE;
+              const rgb = hexToRgb(hubStageColor(data.cell.raw));
               data.cell.styles.textColor = rgb;
-              data.cell.styles.fillColor = rgb.map(c => Math.min(255, c + (255 - c) * 0.9));
+              data.cell.styles.fillColor = tint(rgb, 0.9);
               data.cell.styles.fontStyle = "bold";
             }
           },
