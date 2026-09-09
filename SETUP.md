@@ -131,6 +131,16 @@ id  hub  name  contact  areas  address  mapLink  details  status  telecaller  re
   sheet tab needed — `scheduledVisitAt` (YYYY-MM-DD) and
   `scheduledVisitNote` are just two extra columns on `HubDistributors`,
   added automatically the next time any row is saved.
+- **Unopened lead highlighting**: any distributor with zero remarks logged
+  is a lead nobody has actually called yet — it shows with a glowing pink
+  border, a pink "🆕 Not Called Yet — Please Call & Update" badge, and the
+  name itself in pink instead of white, both in the list and on the detail
+  screen. The moment a telecaller saves their first remark it automatically
+  flips to normal styling — there's no separate "mark as opened" button,
+  saving a remark *is* what opens it. A **"Show Not Called Yet"** filter
+  toggle jumps straight to just those. Each telecaller also gets a
+  consistent, distinct color badge next to their name everywhere it
+  appears, so it's obvious at a glance whose lead is whose.
 - **Bulk Import**: on the Hub Distributors screen, paste rows copied from
   Excel/Google Sheets — with or without a header row. Recognized columns
   (any order, any subset): Hub, Name, Phone/Contact, Area, Address, Map

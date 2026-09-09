@@ -65,6 +65,21 @@ const LOST_REASONS = ["Not Delivered on Time", "Quality Not Good", "Outstanding"
 const EXISTING_CUSTOMER_STATUSES = ["Calling", "Interested", "Rejoined", "Own Making", "Not Reachable", "Not Interested"];
 const TELECALLERS = ["Thulasi", "Ramya", "Sabi (Intern)", "Azgar (Intern)", "Naveen HR"];
 
+// A stable, distinct color per telecaller — used anywhere a lead needs to
+// visibly show "who this belongs to" at a glance (e.g. Hub Distributors
+// cards), rather than plain grey text that blends together. Falls back to
+// hashing the name for anyone not in the fixed roster, so it never breaks
+// if new telecallers get added.
+const TELECALLER_COLOR_PALETTE = ["#38BDF8", "#FB7185", "#22D98A", "#FBBF24", "#818CF8", "#F472B6", "#2DD4BF"];
+function telecallerColor(name) {
+  if (!name) return "#7C8798";
+  const idx = TELECALLERS.indexOf(name);
+  if (idx >= 0) return TELECALLER_COLOR_PALETTE[idx % TELECALLER_COLOR_PALETTE.length];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return TELECALLER_COLOR_PALETTE[hash % TELECALLER_COLOR_PALETTE.length];
+}
+
 // Quick-pick remark tags for the Existing Customer call log. Each carries a
 // sentiment so calls can be rolled up into a Positive / Negative / Neutral
 // analysis per telecaller without anyone having to read every remark by hand.
@@ -5391,6 +5406,7 @@ function HubDistributors({ embedded = false } = {}) {
       .sort((a, b) => (a.r.scheduledVisitAt || "").localeCompare(b.r.scheduledVisitAt || ""));
   }, [rows]);
   const [showOnlyScheduled, setShowOnlyScheduled] = useState(false);
+  const [showOnlyUnopened, setShowOnlyUnopened] = useState(false);
 
   const areasFromForm = (f) => [f.area1, f.area2, f.area3, f.area4, f.area5].map(a => (a || "").trim()).filter(Boolean).slice(0, MAX_HUB_AREAS);
 
@@ -5417,6 +5433,7 @@ function HubDistributors({ embedded = false } = {}) {
     if (hubFilter !== "All") list = list.filter(r => (r.hub || "") === hubFilter);
     if (telecallerFilter !== "All") list = list.filter(r => (r.telecaller || "") === telecallerFilter);
     if (showOnlyScheduled) list = list.filter(r => !!r.scheduledVisitAt);
+    if (showOnlyUnopened) list = list.filter(r => (r.remarks || []).length === 0);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter(r =>
@@ -5430,7 +5447,7 @@ function HubDistributors({ embedded = false } = {}) {
       return [...list].sort((a, b) => (a.scheduledVisitAt || "").localeCompare(b.scheduledVisitAt || ""));
     }
     return [...list].sort((a, b) => (b.lastRemarkAt || b.createdAt || 0) - (a.lastRemarkAt || a.createdAt || 0));
-  }, [rows, statusFilter, hubFilter, telecallerFilter, search, showOnlyScheduled]);
+  }, [rows, statusFilter, hubFilter, telecallerFilter, search, showOnlyScheduled, showOnlyUnopened]);
 
   const addDistributor = () => {
     if (!addForm.name.trim()) { alert("Enter the distributor name."); return; }
@@ -6186,8 +6203,23 @@ function HubDistributors({ embedded = false } = {}) {
         <Card accent={hubStageColor(r.status)} style={{ marginBottom: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
             <div>
-              <div style={{ fontSize: 17, fontWeight: 800, color: T.t1 }}>{r.name}</div>
-              <div style={{ fontSize: 12, color: T.t3, marginTop: 2 }}>{r.hub ? "🏢 " + r.hub + " Hub" : "No hub set"} {r.contact ? "· " + r.contact : ""}</div>
+              <div style={{ fontSize: 17, fontWeight: 800, color: (r.remarks || []).length === 0 ? "#F472B6" : T.t1 }}>{r.name}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: T.t3 }}>{r.hub ? "🏢 " + r.hub + " Hub" : "No hub set"} {r.contact ? "· " + r.contact : ""}</span>
+                {r.telecaller && (
+                  <span style={{
+                    fontSize: 10.5, fontWeight: 800, color: telecallerColor(r.telecaller), background: telecallerColor(r.telecaller) + "1E",
+                    border: `1px solid ${telecallerColor(r.telecaller)}55`, borderRadius: 20, padding: "1px 8px",
+                  }}>{r.telecaller}</span>
+                )}
+              </div>
+              {(r.remarks || []).length === 0 && (
+                <div style={{
+                  display: "inline-flex", alignItems: "center", gap: 5, marginTop: 8,
+                  background: "#F472B622", border: "1px solid #F472B688", borderRadius: 20,
+                  padding: "3px 10px", fontSize: 10.5, fontWeight: 800, color: "#F472B6",
+                }}>🆕 Not Called Yet — Please Call &amp; Update</div>
+              )}
             </div>
             <Chip label={r.status} color={hubStageColor(r.status)} />
           </div>
@@ -6290,7 +6322,7 @@ function HubDistributors({ embedded = false } = {}) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <SyncBadge status={syncStatus} onRetry={retrySync} error={syncError} />
         </div>
-        <Label sub={`${(rows || []).length} distributor${(rows || []).length === 1 ? "" : "s"} across ${Math.max(hubOptions.length - 1, 0)} hub${hubOptions.length - 1 === 1 ? "" : "s"} · remark, status & who approached them`}>🏢 Hub Distributors</Label>
+        <Label sub={`${(rows || []).length} distributor${(rows || []).length === 1 ? "" : "s"} across ${Math.max(hubOptions.length - 1, 0)} hub${hubOptions.length - 1 === 1 ? "" : "s"}${(() => { const n = (rows || []).filter(r => (r.remarks || []).length === 0).length; return n ? ` · 🆕 ${n} not called yet` : ""; })()}`}>🏢 Hub Distributors</Label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Btn label="+ Add Distributor" onClick={() => setShowAdd(true)} />
           <Btn label="📥 Bulk Import" ghost onClick={() => { setShowImport(true); setImportPreview(null); }} />
@@ -6377,6 +6409,11 @@ function HubDistributors({ embedded = false } = {}) {
         border: `1px solid ${showOnlyScheduled ? T.sky : T.border}`, borderRadius: 20, padding: "6px 12px",
         fontSize: 11.5, fontWeight: 700, color: showOnlyScheduled ? T.sky : T.t2, cursor: "pointer", fontFamily: FONT,
       }}>📅 {showOnlyScheduled ? "Showing Scheduled Only" : "Show Scheduled Only"}</button>
+      <button onClick={() => setShowOnlyUnopened(v => !v)} style={{
+        alignSelf: "flex-start", background: showOnlyUnopened ? "#F472B622" : T.surface,
+        border: `1px solid ${showOnlyUnopened ? "#F472B6" : T.border}`, borderRadius: 20, padding: "6px 12px",
+        fontSize: 11.5, fontWeight: 700, color: showOnlyUnopened ? "#F472B6" : T.t2, cursor: "pointer", fontFamily: FONT,
+      }}>🆕 {showOnlyUnopened ? "Showing Not Called Yet" : "Show Not Called Yet"}</button>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
         {["All", ...HUB_STAGES.map(s => s.id)].map(s => (
           <button key={s} onClick={() => setStatusFilter(s)} style={{
@@ -6405,10 +6442,19 @@ function HubDistributors({ embedded = false } = {}) {
         const isSelected = selectedIds.has(r.id);
         const visitUrgency = hubVisitUrgency(r.scheduledVisitAt);
         const visitStyle = visitUrgency ? hubVisitUrgencyStyle(visitUrgency) : null;
+        // "Unopened" = nobody has ever logged a remark on this lead — the
+        // telecaller hasn't called/spoken yet. The moment they save their
+        // first remark it flips to "opened" automatically, no separate
+        // button to press — saving a remark IS pressing the option.
+        const isUnopened = (r.remarks || []).length === 0;
+        const tcColor = telecallerColor(r.telecaller);
         return (
           <div key={r.id} onClick={() => selectMode ? toggleSelected(r.id) : setSelectedId(r.id)} style={{
-            background: T.card, border: `1px solid ${isSelected ? T.accent : (visitStyle ? visitStyle.color + "66" : T.border)}`, borderRadius: 14, padding: "12px 14px", cursor: "pointer",
+            background: T.card,
+            border: `1.5px solid ${isSelected ? T.accent : isUnopened ? "#F472B6" : (visitStyle ? visitStyle.color + "66" : T.border)}`,
+            borderRadius: 14, padding: "12px 14px", cursor: "pointer",
             display: "flex", gap: 10, alignItems: "flex-start",
+            animation: (isUnopened && !isSelected) ? "newLeadGlow 2.2s ease-in-out infinite" : "none",
           }}>
             {selectMode && (
               <input type="checkbox" checked={isSelected} onChange={() => toggleSelected(r.id)} onClick={e => e.stopPropagation()}
@@ -6417,14 +6463,29 @@ function HubDistributors({ embedded = false } = {}) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: T.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</div>
-                  <div style={{ fontSize: 11.5, color: T.t3, marginTop: 2 }}>{r.hub ? "🏢 " + r.hub : "No hub"} {r.telecaller ? "· " + r.telecaller : ""}</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: isUnopened ? "#F472B6" : T.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11.5, color: T.t3 }}>{r.hub ? "🏢 " + r.hub : "No hub"}</span>
+                    {r.telecaller && (
+                      <span style={{
+                        fontSize: 10.5, fontWeight: 800, color: tcColor, background: tcColor + "1E",
+                        border: `1px solid ${tcColor}55`, borderRadius: 20, padding: "1px 8px",
+                      }}>{r.telecaller}</span>
+                    )}
+                  </div>
                 </div>
                 <Chip small label={r.status} color={hubStageColor(r.status)} />
               </div>
-              {visitStyle && (
+              {isUnopened && (
                 <div style={{
                   display: "inline-flex", alignItems: "center", gap: 5, marginTop: 7,
+                  background: "#F472B622", border: "1px solid #F472B688", borderRadius: 20,
+                  padding: "3px 10px", fontSize: 10.5, fontWeight: 800, color: "#F472B6",
+                }}>🆕 Not Called Yet — Please Call &amp; Update</div>
+              )}
+              {visitStyle && (
+                <div style={{
+                  display: "inline-flex", alignItems: "center", gap: 5, marginTop: 7, marginLeft: isUnopened ? 6 : 0,
                   background: visitStyle.color + "22", border: `1px solid ${visitStyle.color}55`, borderRadius: 20,
                   padding: "3px 9px", fontSize: 10.5, fontWeight: 800, color: visitStyle.color,
                 }}>
@@ -11349,6 +11410,7 @@ export default function App() {
         @keyframes fadeSlideIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
         @keyframes visitGlow { 0%,100% { box-shadow: 0 0 0 0 rgba(251,113,133,0.35); } 50% { box-shadow: 0 0 0 6px rgba(251,113,133,0); } }
         @keyframes shuffleBounce { 0% { transform: scale(1) rotate(0deg); } 30% { transform: scale(1.05) rotate(-2deg); } 60% { transform: scale(0.97) rotate(2deg); } 100% { transform: scale(1) rotate(0deg); } }
+        @keyframes newLeadGlow { 0%,100% { box-shadow: 0 0 0 0 rgba(244,114,182,0.4); } 50% { box-shadow: 0 0 8px 2px rgba(244,114,182,0.25); } }
         input::placeholder { color: ${T.t3}; }
         textarea::placeholder { color: ${T.t3}; }
         input:-webkit-autofill { -webkit-box-shadow: 0 0 0 100px ${T.card} inset; -webkit-text-fill-color: ${T.t1}; }
