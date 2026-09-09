@@ -6448,6 +6448,10 @@ function HubDistributors({ embedded = false } = {}) {
         // button to press — saving a remark IS pressing the option.
         const isUnopened = (r.remarks || []).length === 0;
         const tcColor = telecallerColor(r.telecaller);
+        // The number now always shows separately below, so the old
+        // "Unnamed · 88073 62044" placeholder would just repeat it right
+        // under the name — trim it back to plain "Unnamed" on the card.
+        const cardName = r.name && r.name.startsWith("Unnamed · ") ? "Unnamed" : (r.name || "Unnamed");
         return (
           <div key={r.id} onClick={() => selectMode ? toggleSelected(r.id) : setSelectedId(r.id)} style={{
             background: T.card,
@@ -6463,9 +6467,10 @@ function HubDistributors({ embedded = false } = {}) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: isUnopened ? "#F472B6" : T.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: isUnopened ? "#F472B6" : T.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{cardName}</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 11.5, color: T.t3 }}>{r.hub ? "🏢 " + r.hub : "No hub"}</span>
+                    <span style={{ fontSize: 11.5, fontWeight: 700, color: T.sky }}>🏢 {r.hub || "No hub"}</span>
+                    {r.contact && <span style={{ fontSize: 11.5, fontWeight: 700, color: T.emerald }}>📞 {r.contact}</span>}
                     {r.telecaller && (
                       <span style={{
                         fontSize: 10.5, fontWeight: 800, color: tcColor, background: tcColor + "1E",
