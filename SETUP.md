@@ -140,8 +140,18 @@ id  hub  name  contact  areas  address  mapLink  details  status  telecaller  re
   works. An initial remark like "not interested" or "deal accepted" is
   auto-classified onto the matching status. Re-importing an updated sheet
   is safe: rows are matched by phone number (or name + hub) and merged into
-  the existing distributor rather than duplicated, and a blank incoming
+  the existing distributor instead of duplicated, and a blank incoming
   cell never overwrites a value that's already there.
+- **Split & Assign**: paste a fresh batch of numbers (bulk or one at a
+  time — same flexible parsing as Bulk Import, sparse rows welcome) and
+  divide it evenly, round-robin, across whichever telecallers you select.
+  A **🔀 Shuffle** button re-randomizes who gets which number before you
+  commit (purely for fairness/fun — the split stays equal either way, only
+  the order changes), with a little bounce animation. Every new
+  distributor lands in the same list as everything else; a new
+  **Filter by Telecaller** dropdown on the main list lets each person
+  filter down to just their own assigned slice to work from. Numbers that
+  already exist as a distributor are automatically skipped, not duplicated.
 - **Hub Distributors** screen (mobile: under "More"; desktop: sidebar) has
   its own report, filterable by hub, telecaller, and day/week/month/custom
   date range: a **PDF** — Team Overview (pipeline breakdown, response

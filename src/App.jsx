@@ -5298,6 +5298,7 @@ function HubDistributors({ embedded = false } = {}) {
   const [addForm, setAddForm] = useState(blankForm);
   const [statusFilter, setStatusFilter] = useState("All");
   const [hubFilter, setHubFilter] = useState("All");
+  const [telecallerFilter, setTelecallerFilter] = useState("All");
   const [search, setSearch] = useState("");
 
   // Bulk selection (for multi-delete)
@@ -5323,6 +5324,24 @@ function HubDistributors({ embedded = false } = {}) {
   const [importDefaultHub, setImportDefaultHub] = useState("");
   const [importPreview, setImportPreview] = useState(null); // { rows, skipped } | null
   const [importing, setImporting] = useState(false);
+
+  // Split & Assign — paste a fresh batch of numbers (bulk or one at a
+  // time) and divide them evenly, round-robin, across whichever telecallers
+  // are selected. A Shuffle button re-randomizes who gets which number
+  // before committing, purely for fun/fairness — the split stays equal
+  // either way, only the assignment order changes.
+  const [showSplit, setShowSplit] = useState(false);
+  const [splitText, setSplitText] = useState("");
+  const [splitTelecallers, setSplitTelecallers] = useState(() => new Set(["Thulasi", "Sabi (Intern)", "Azgar (Intern)", "Naveen HR"]));
+  const [splitHub, setSplitHub] = useState("");
+  const [splitPreview, setSplitPreview] = useState(null); // { buckets: [{telecaller, contacts}], skipped, total } | null
+  const [splitCommitting, setSplitCommitting] = useState(false);
+  const [isShuffling, setIsShuffling] = useState(false);
+  const toggleSplitTelecaller = (t) => setSplitTelecallers(prev => {
+    const next = new Set(prev);
+    if (next.has(t)) next.delete(t); else next.add(t);
+    return next;
+  });
 
   // Remark / status composer
   const [rmTelecaller, setRmTelecaller] = useState(TELECALLERS[0]);
@@ -5396,6 +5415,7 @@ function HubDistributors({ embedded = false } = {}) {
     let list = rows || [];
     if (statusFilter !== "All") list = list.filter(r => r.status === statusFilter);
     if (hubFilter !== "All") list = list.filter(r => (r.hub || "") === hubFilter);
+    if (telecallerFilter !== "All") list = list.filter(r => (r.telecaller || "") === telecallerFilter);
     if (showOnlyScheduled) list = list.filter(r => !!r.scheduledVisitAt);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -5410,7 +5430,7 @@ function HubDistributors({ embedded = false } = {}) {
       return [...list].sort((a, b) => (a.scheduledVisitAt || "").localeCompare(b.scheduledVisitAt || ""));
     }
     return [...list].sort((a, b) => (b.lastRemarkAt || b.createdAt || 0) - (a.lastRemarkAt || a.createdAt || 0));
-  }, [rows, statusFilter, hubFilter, search, showOnlyScheduled]);
+  }, [rows, statusFilter, hubFilter, telecallerFilter, search, showOnlyScheduled]);
 
   const addDistributor = () => {
     if (!addForm.name.trim()) { alert("Enter the distributor name."); return; }
@@ -5530,6 +5550,79 @@ function HubDistributors({ embedded = false } = {}) {
     setShowImport(false);
     setImportText("");
     setImportPreview(null);
+  };
+
+  // ── Split & Assign ──
+  // Paste a fresh batch of numbers, pick which telecallers are working
+  // today, and divide the batch evenly (round-robin) between them —
+  // sparse rows (contact-only, no name) are welcome here just like Bulk
+  // Import. Every new record lands in the same Hub Distributors list as
+  // everything else, so once split, each telecaller just filters the main
+  // list down to their own name and works it like normal — nothing about
+  // status/remarks/reports is special-cased for a "split" record.
+  const buildSplitPreview = () => {
+    const telecallerList = Array.from(splitTelecallers);
+    if (!telecallerList.length) { alert("Select at least one telecaller to split between."); return; }
+    if (!splitText.trim()) { alert("Paste or type in the numbers first."); return; }
+    const parsed = parseHubBulkImport(splitText, "").rows;
+    const existingPhones = new Set((rows || []).map(r => normalizePhone(r.contact)).filter(Boolean));
+    const fresh = [];
+    let skipped = 0;
+    parsed.forEach(p => {
+      const phone = normalizePhone(p.contact);
+      if (phone && existingPhones.has(phone)) { skipped++; return; } // already a distributor — don't duplicate
+      fresh.push(p);
+    });
+    if (!fresh.length) { alert(skipped ? `All ${skipped} number(s) already exist as distributors — nothing new to split.` : "No valid numbers found in what was pasted."); return; }
+    const shuffled = [...fresh].sort(() => Math.random() - 0.5);
+    const buckets = telecallerList.map(t => ({ telecaller: t, contacts: [] }));
+    shuffled.forEach((p, i) => buckets[i % buckets.length].contacts.push(p));
+    setSplitPreview({ buckets, skipped, total: fresh.length });
+  };
+
+  // Re-randomizes who gets which number without changing the total split —
+  // a little animated flourish (isShuffling) makes it feel like a real
+  // shuffle rather than an instant silent re-sort.
+  const shuffleSplit = () => {
+    if (!splitPreview) return;
+    setIsShuffling(true);
+    setTimeout(() => {
+      setSplitPreview(prev => {
+        if (!prev) return prev;
+        const all = prev.buckets.flatMap(b => b.contacts);
+        const reshuffled = [...all].sort(() => Math.random() - 0.5);
+        const buckets = prev.buckets.map(b => ({ ...b, contacts: [] }));
+        reshuffled.forEach((p, i) => buckets[i % buckets.length].contacts.push(p));
+        return { ...prev, buckets };
+      });
+      setIsShuffling(false);
+    }, 380);
+  };
+
+  const commitSplit = () => {
+    if (!splitPreview || !splitPreview.total) return;
+    setSplitCommitting(true);
+    const now = Date.now();
+    const newRecs = [];
+    splitPreview.buckets.forEach(b => {
+      b.contacts.forEach(p => {
+        newRecs.push({
+          id: Date.now() + "_" + Math.random().toString(36).slice(2, 7) + Math.random().toString(36).slice(2, 5),
+          hub: splitHub.trim() || "Unassigned",
+          name: p.name || (p.contact ? "Unnamed · " + p.contact : "Unnamed Distributor"),
+          contact: p.contact || "",
+          areas: [], address: "", mapLink: "", details: "",
+          status: "New", telecaller: b.telecaller, remarks: [],
+          createdAt: now, lastRemarkAt: null, scheduledVisitAt: null, scheduledVisitNote: "",
+        });
+      });
+    });
+    setRows(prev => [...newRecs, ...(prev || [])]);
+    setSplitCommitting(false);
+    setShowSplit(false);
+    setSplitText("");
+    setSplitPreview(null);
+    alert(`Added ${newRecs.length} distributor${newRecs.length === 1 ? "" : "s"}, split evenly across ${splitPreview.buckets.length} telecaller${splitPreview.buckets.length === 1 ? "" : "s"}.`);
   };
 
   const saveDetailEdit = (id) => {
@@ -6201,6 +6294,7 @@ function HubDistributors({ embedded = false } = {}) {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Btn label="+ Add Distributor" onClick={() => setShowAdd(true)} />
           <Btn label="📥 Bulk Import" ghost onClick={() => { setShowImport(true); setImportPreview(null); }} />
+          <Btn label="🔀 Split & Assign" color={T.indigo} onClick={() => { setShowSplit(true); setSplitPreview(null); }} />
           <Btn label={cleaningUp ? "Cleaning…" : "🧹 Clean Up Data"} ghost small disabled={cleaningUp} onClick={cleanupAllRows} />
           <Btn label={normalizingHubs ? "Merging…" : "🏢 Merge Duplicate Hubs"} ghost small disabled={normalizingHubs} onClick={normalizeHubNames} />
           <Btn label={selectMode ? "✕ Cancel Select" : "☑️ Select"} ghost small onClick={toggleSelectMode} />
@@ -6277,6 +6371,7 @@ function HubDistributors({ embedded = false } = {}) {
       {hubOptions.length > 1 && (
         <Dropdown label="Filter by Hub" value={hubFilter} onChange={e => setHubFilter(e.target.value)} options={hubOptions} />
       )}
+      <Dropdown label="Filter by Telecaller — see just their assigned list" value={telecallerFilter} onChange={e => setTelecallerFilter(e.target.value)} options={["All", ...TELECALLERS]} />
       <button onClick={() => setShowOnlyScheduled(v => !v)} style={{
         alignSelf: "flex-start", background: showOnlyScheduled ? T.sky + "22" : T.surface,
         border: `1px solid ${showOnlyScheduled ? T.sky : T.border}`, borderRadius: 20, padding: "6px 12px",
@@ -6421,6 +6516,81 @@ function HubDistributors({ embedded = false } = {}) {
               <Btn label="Edit Data" ghost onClick={() => setImportPreview(null)} />
               <Btn label={importing ? "Importing…" : `Import ${importPreview.rows.length} Distributors`} color={T.emerald}
                 onClick={commitImport} disabled={importing || !importPreview.rows.length} />
+            </div>
+          </>
+        )}
+      </Sheet>
+
+      <Sheet open={showSplit} onClose={() => setShowSplit(false)} title="🔀 Split & Assign Numbers">
+        <div style={{ fontSize: 12, color: T.t2, marginBottom: 12, lineHeight: 1.5 }}>
+          Paste a fresh batch of numbers — bulk (one per line) or type them
+          in one by one — pick who's working today, and this splits the
+          batch evenly between them. Each new distributor lands in the main
+          list exactly like any other — the telecaller just filters by
+          their own name afterward to see their slice and work it as usual.
+        </div>
+        <textarea value={splitText} onChange={e => { setSplitText(e.target.value); setSplitPreview(null); }} rows={7}
+          placeholder={"9876543210\n9123456780\n9988776655\n…"}
+          style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 12, fontFamily: "monospace", outline: "none", width: "100%", boxSizing: "border-box", resize: "vertical", marginBottom: 12 }} />
+        <Field label="Default Hub (optional)" value={splitHub} onChange={e => setSplitHub(e.target.value)} placeholder="e.g. Ambattur Hub — leave blank for Unassigned" />
+        <div style={{ fontSize: 11, color: T.t2, marginTop: 4, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Split Between</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+          {TELECALLERS.map(t => {
+            const active = splitTelecallers.has(t);
+            return (
+              <button key={t} onClick={() => { toggleSplitTelecaller(t); setSplitPreview(null); }} style={{
+                background: active ? T.indigo + "22" : T.surface, border: `1px solid ${active ? T.indigo : T.border}`,
+                borderRadius: 20, padding: "7px 13px", fontSize: 12, fontWeight: 700,
+                color: active ? T.indigo : T.t3, cursor: "pointer", fontFamily: FONT,
+              }}>{active ? "✓ " : ""}{t}</button>
+            );
+          })}
+        </div>
+
+        {!splitPreview ? (
+          <Btn label="🔀 Split Equally" full color={T.indigo} onClick={buildSplitPreview} disabled={!splitText.trim() || !splitTelecallers.size} />
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+                <div style={{ fontSize: 18, fontWeight: 800, color: T.emerald }}>{splitPreview.total}</div>
+                <div style={{ fontSize: 9, color: T.t3, fontWeight: 700, textTransform: "uppercase" }}>To Split</div>
+              </div>
+              {splitPreview.skipped > 0 && (
+                <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: T.amber }}>{splitPreview.skipped}</div>
+                  <div style={{ fontSize: 9, color: T.t3, fontWeight: 700, textTransform: "uppercase" }}>Already Exist</div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+              {splitPreview.buckets.map((b, i) => {
+                const bucketColors = [T.emerald, T.sky, T.amber, T.rose, T.indigo, T.accent];
+                const bc = bucketColors[i % bucketColors.length];
+                return (
+                  <div key={b.telecaller} style={{
+                    background: bc + "14", border: `1.5px solid ${bc}55`, borderRadius: 12, padding: "10px 12px",
+                    animation: isShuffling ? "shuffleBounce 0.38s ease" : "none",
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: bc }}>{b.telecaller}</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: bc, background: bc + "22", borderRadius: 20, padding: "2px 9px" }}>{b.contacts.length} number{b.contacts.length === 1 ? "" : "s"}</div>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: T.t3, lineHeight: 1.6 }}>
+                      {b.contacts.slice(0, 6).map(c => c.name || c.contact).join(" · ")}
+                      {b.contacts.length > 6 && ` +${b.contacts.length - 6} more`}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn label={isShuffling ? "🎲 Shuffling…" : "🔀 Shuffle"} ghost color={T.indigo} disabled={isShuffling} onClick={shuffleSplit} />
+              <Btn label="Edit Data" ghost onClick={() => setSplitPreview(null)} />
+              <Btn label={splitCommitting ? "Adding…" : `✅ Add ${splitPreview.total} — Split Evenly`} color={T.emerald}
+                onClick={commitSplit} disabled={splitCommitting || !splitPreview.total} />
             </div>
           </>
         )}
@@ -11178,6 +11348,7 @@ export default function App() {
         @keyframes pulse { 0%,100% { opacity:0.25; transform:scale(0.8); } 50% { opacity:1; transform:scale(1.1); } }
         @keyframes fadeSlideIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
         @keyframes visitGlow { 0%,100% { box-shadow: 0 0 0 0 rgba(251,113,133,0.35); } 50% { box-shadow: 0 0 0 6px rgba(251,113,133,0); } }
+        @keyframes shuffleBounce { 0% { transform: scale(1) rotate(0deg); } 30% { transform: scale(1.05) rotate(-2deg); } 60% { transform: scale(0.97) rotate(2deg); } 100% { transform: scale(1) rotate(0deg); } }
         input::placeholder { color: ${T.t3}; }
         textarea::placeholder { color: ${T.t3}; }
         input:-webkit-autofill { -webkit-box-shadow: 0 0 0 100px ${T.card} inset; -webkit-text-fill-color: ${T.t1}; }
