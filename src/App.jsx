@@ -205,6 +205,26 @@ function formatVisitDate(dateStr) {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 }
 
+// Compact "last touched" label for a timestamp — used on the Hub Distributors
+// list card so the most recently worked record is instantly recognizable.
+// Minutes/hours today, "Yesterday", then a short day count, then falls back
+// to a plain date ("16 Sep") once it's old enough that exact recency stops
+// mattering.
+function formatUpdatedBadge(ts) {
+  if (!ts) return null;
+  const days = Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
+  if (days === 0) {
+    const mins = Math.floor((Date.now() - ts) / 60000);
+    if (mins < 1) return "Just now";
+    if (mins < 60) return mins + "m ago";
+    const hrs = Math.floor(mins / 60);
+    return hrs + "h ago";
+  }
+  if (days === 1) return "Yesterday";
+  if (days < 7) return days + "d ago";
+  return new Date(ts).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+}
+
 // Maps a free-text calling/visit remark onto a Hub Distributor status, so a
 // bulk-imported row (or one carrying only a quick note) still lands on the
 // right pipeline stage instead of always defaulting to "New".
@@ -5701,7 +5721,7 @@ function HubDistributors({ embedded = false } = {}) {
     if (!transferTarget) { alert("Pick who to transfer this to."); return; }
     const at = Date.now();
     setRows(prev => (prev || []).map(x => x.id === id ? {
-      ...x, transferTo: transferTarget, transferStatus: "pending", transferRequestedAt: at,
+      ...x, transferTo: transferTarget, transferStatus: "pending", transferRequestedAt: at, lastRemarkAt: at,
       remarks: [...(x.remarks || []), { text: `Requested transfer to ${transferTarget}`, status: x.status, telecaller: currentTelecaller || x.telecaller, at }],
     } : x));
     setTransferOpen(false); setTransferTarget("");
@@ -5709,7 +5729,7 @@ function HubDistributors({ embedded = false } = {}) {
   const cancelTransfer = (id) => {
     const at = Date.now();
     setRows(prev => (prev || []).map(x => x.id === id ? {
-      ...x, transferTo: null, transferStatus: null, transferRequestedAt: null,
+      ...x, transferTo: null, transferStatus: null, transferRequestedAt: null, lastRemarkAt: at,
       remarks: [...(x.remarks || []), { text: "Cancelled the transfer request", status: x.status, telecaller: currentTelecaller || x.telecaller, at }],
     } : x));
   };
@@ -5721,7 +5741,7 @@ function HubDistributors({ embedded = false } = {}) {
         ...x,
         transferHistory: [...(x.transferHistory || []), { from: x.telecaller, to: currentTelecaller, at }],
         telecaller: currentTelecaller,
-        transferTo: null, transferStatus: null, transferRequestedAt: null,
+        transferTo: null, transferStatus: null, transferRequestedAt: null, lastRemarkAt: at,
         remarks: [...(x.remarks || []), { text: `Accepted transfer from ${x.telecaller}`, status: x.status, telecaller: currentTelecaller, at }],
       };
     }));
@@ -5729,7 +5749,7 @@ function HubDistributors({ embedded = false } = {}) {
   const declineTransfer = (id) => {
     const at = Date.now();
     setRows(prev => (prev || []).map(x => x.id === id ? {
-      ...x, transferTo: null, transferStatus: null, transferRequestedAt: null,
+      ...x, transferTo: null, transferStatus: null, transferRequestedAt: null, lastRemarkAt: at,
       remarks: [...(x.remarks || []), { text: `${currentTelecaller} declined the transfer`, status: x.status, telecaller: currentTelecaller, at }],
     } : x));
     closeDetail(); // it was never theirs — send them back to their own list
@@ -6610,7 +6630,22 @@ function HubDistributors({ embedded = false } = {}) {
                     )}
                   </div>
                 </div>
-                <Chip small label={r.status} color={hubStageColor(r.status)} />
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5 }}>
+                  <Chip small label={r.status} color={hubStageColor(r.status)} />
+                  {r.lastRemarkAt && (() => {
+                    const d = daysSince(r.lastRemarkAt);
+                    const badgeColor = d === 0 ? T.emerald : d === 1 ? T.sky : d < 7 ? T.amber : T.t3;
+                    return (
+                      <div style={{
+                        display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
+                        background: `linear-gradient(90deg, ${badgeColor}2E, ${badgeColor}14)`,
+                        border: `1px solid ${badgeColor}77`, borderRadius: 20,
+                        padding: "2px 9px", fontSize: 9.5, fontWeight: 800, color: badgeColor,
+                        letterSpacing: "0.02em",
+                      }}>⚡ {formatUpdatedBadge(r.lastRemarkAt)}</div>
+                    );
+                  })()}
+                </div>
               </div>
               {isUnopened && (
                 <div style={{
@@ -6634,7 +6669,6 @@ function HubDistributors({ embedded = false } = {}) {
               {latest && <div style={{ fontSize: 11.5, color: T.t2, marginTop: 6 }}>{latest.text}</div>}
               <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
                 {r.mapLink && <div style={{ fontSize: 10.5, color: T.sky }}>📍 Location set</div>}
-                {r.lastRemarkAt && <div style={{ fontSize: 10.5, color: T.t4 }}>Updated {new Date(r.lastRemarkAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</div>}
               </div>
             </div>
           </div>
