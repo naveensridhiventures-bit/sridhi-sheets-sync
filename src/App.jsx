@@ -65,6 +65,18 @@ const LOST_REASONS = ["Not Delivered on Time", "Quality Not Good", "Outstanding"
 const EXISTING_CUSTOMER_STATUSES = ["Calling", "Interested", "Rejoined", "Own Making", "Not Reachable", "Not Interested"];
 const TELECALLERS = ["Thulasi", "Ramya", "Sabi (Intern)", "Azgar (Intern)", "Naveen HR"];
 
+// ── Personal secret keys ────────────────────────────────────────────────
+// Every time the app is opened it asks for one of these keys before showing
+// any data. Match is exact (no trimming beyond surrounding whitespace) so
+// punctuation-only keys still work. Add a new "name: key" pair here to
+// onboard someone else — no other code needs to change.
+const SECRET_KEYS = {
+  "?":  "Thulasi",
+  "!!": "Azgar (Intern)",
+  "#$": "Sabi (Intern)",
+  "<>": "Naveen HR",
+};
+
 // A stable, distinct color per telecaller — used anywhere a lead needs to
 // visibly show "who this belongs to" at a glance (e.g. Hub Distributors
 // cards), rather than plain grey text that blends together. Falls back to
@@ -6470,7 +6482,7 @@ function HubDistributors({ embedded = false } = {}) {
                   <div style={{ fontSize: 14, fontWeight: 800, color: isUnopened ? "#F472B6" : T.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{cardName}</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
                     <span style={{ fontSize: 11.5, fontWeight: 700, color: T.sky }}>🏢 {r.hub || "No hub"}</span>
-                    {r.contact && <span style={{ fontSize: 11.5, fontWeight: 700, color: T.emerald }}>📞 {r.contact}</span>}
+                    {/* Contact number intentionally hidden on the list card — visible only after opening the distributor. */}
                     {r.telecaller && (
                       <span style={{
                         fontSize: 10.5, fontWeight: 800, color: tcColor, background: tcColor + "1E",
@@ -11230,6 +11242,71 @@ function IntroVideo({ onDone }) {
   );
 }
 
+// ─── KEY GATE ───────────────────────────────────────────────────────────
+// Shown before anything else, every single time the app is opened (nothing
+// is remembered between opens, by design). One input, auto-focused, submits
+// on Enter — kept deliberately tiny so it never slows anyone down.
+function KeyGate({ onUnlock }) {
+  const [value, setValue] = useState("");
+  const [error, setError] = useState(false);
+  const [show, setShow] = useState(false);
+  const inputRef = useRef(null);
+
+  useEffect(() => { inputRef.current && inputRef.current.focus(); }, []);
+
+  const tryUnlock = () => {
+    if (!value) return;
+    const name = SECRET_KEYS[value.trim()];
+    if (name) {
+      onUnlock(name);
+    } else {
+      setError(true);
+      setValue("");
+      inputRef.current && inputRef.current.focus();
+      setTimeout(() => setError(false), 450);
+    }
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: FONT }}>
+      <style>{`
+        @keyframes keyGateShake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-9px); } 40% { transform: translateX(9px); } 60% { transform: translateX(-6px); } 80% { transform: translateX(6px); } }
+      `}</style>
+      <div style={{ position: "fixed", top: "18%", left: "50%", transform: "translateX(-50%)", width: 320, height: 320, borderRadius: "50%", background: `radial-gradient(circle, ${T.accentGlow} 0%, transparent 65%)`, pointerEvents: "none" }} />
+      <div style={{ position: "relative", zIndex: 1, fontSize: 38, marginBottom: 14 }}>🔐</div>
+      <div style={{ position: "relative", zIndex: 1, fontSize: 17, fontWeight: 900, color: T.t1, letterSpacing: "-0.02em" }}>Enter Your Secret Key</div>
+      <div style={{ position: "relative", zIndex: 1, fontSize: 12, color: T.t3, marginTop: 5, marginBottom: 22, textAlign: "center", maxWidth: 260 }}>Your personal key unlocks the data. Nobody else's key works on your data, and this stays locked until you enter it.</div>
+      <div style={{ position: "relative", zIndex: 1, width: "100%", maxWidth: 260, animation: error ? "keyGateShake 0.4s ease" : "none" }}>
+        <div style={{ position: "relative" }}>
+          <input
+            ref={inputRef}
+            type={show ? "text" : "password"}
+            value={value}
+            onChange={e => setValue(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") tryUnlock(); }}
+            placeholder="Secret key"
+            autoFocus
+            style={{
+              width: "100%", boxSizing: "border-box", background: T.card,
+              border: `1.5px solid ${error ? T.rose : T.borderHi}`, borderRadius: 14,
+              padding: "15px 44px 15px 16px", fontSize: 19, fontWeight: 800, color: T.t1,
+              textAlign: "center", letterSpacing: "0.06em", fontFamily: FONT, outline: "none",
+            }}
+          />
+          <button onClick={() => setShow(s => !s)} tabIndex={-1} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: T.t3, cursor: "pointer", fontSize: 16, padding: 6 }}>{show ? "🙈" : "👁️"}</button>
+        </div>
+        {error && <div style={{ color: T.rose, fontSize: 12, fontWeight: 700, marginTop: 9, textAlign: "center" }}>Wrong key — try again</div>}
+        <button onClick={tryUnlock} disabled={!value} style={{
+          marginTop: 16, width: "100%", background: value ? T.accent : T.card,
+          border: value ? "none" : `1px solid ${T.border}`, borderRadius: 12,
+          color: value ? "#060B16" : T.t3, padding: "13px", fontSize: 14, fontWeight: 800,
+          cursor: value ? "pointer" : "not-allowed", fontFamily: FONT,
+        }}>Unlock</button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [activeTab, setActiveTabRaw] = useState(() => {
     try { return localStorage.getItem("bos_activeTab") || "dashboard"; } catch { return "dashboard"; }
@@ -11237,6 +11314,9 @@ export default function App() {
   const [role, setRoleRaw] = useState(() => {
     try { return localStorage.getItem("bos_role") || null; } catch { return null; }
   });
+  // Who unlocked this open of the app — never persisted on purpose, so the
+  // secret key is asked for again every single time the app is opened.
+  const [unlockedBy, setUnlockedBy] = useState(null);
   const [showIntro, setShowIntro] = useState(() => {
     try { return !sessionStorage.getItem("bos_intro_seen"); } catch { return true; }
   });
@@ -11304,6 +11384,11 @@ export default function App() {
       </div>
     </div>
   ) : null;
+
+  // ── SECRET KEY GATE (always first — nothing renders before this passes) ──
+  if (!unlockedBy) {
+    return <KeyGate onUnlock={setUnlockedBy} />;
+  }
 
   // ── LOGIN ──
   if (!role) {
@@ -11441,7 +11526,7 @@ export default function App() {
               📲 Install
             </button>
           )}
-          <div style={{ background:T.accentSub, border:`1px solid ${T.accentGlow}`, borderRadius:8, padding:"4px 10px", fontSize:11, fontWeight:700, color:T.accent }}>{role}</div>
+          <div style={{ background:T.accentSub, border:`1px solid ${T.accentGlow}`, borderRadius:8, padding:"4px 10px", fontSize:11, fontWeight:700, color:T.accent }}>{unlockedBy ? unlockedBy + " · " + role : role}</div>
           <button onClick={() => setRole(null)} style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, color:T.t3, padding:"4px 10px", fontSize:11, cursor:"pointer", fontFamily:FONT, fontWeight:600 }}>Exit</button>
         </div>
       </div>
