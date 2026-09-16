@@ -5320,6 +5320,17 @@ function MilkDistributors({ embedded = false } = {}) {
 function HubDistributors({ embedded = false } = {}) {
   const [rows, setRows, syncStatus, retrySync, syncError] = useSheetSynced("hubDistributors", "hubDistributors", []);
   const [selectedId, setSelectedId] = useState(null);
+  // ── Per-record access control ──────────────────────────────────────────
+  // Nobody can open a specific distributor without proving they're either
+  // the telecaller it's currently assigned to, or the telecaller a pending
+  // transfer is addressed to. Nothing here is remembered — every tap on a
+  // row asks for the key fresh, even for a record you just closed.
+  const [pendingOpen, setPendingOpen] = useState(null);   // record awaiting key entry
+  const [openKeyValue, setOpenKeyValue] = useState("");
+  const [openKeyError, setOpenKeyError] = useState("");   // "" | "wrong" | "notyours"
+  const [currentTelecaller, setCurrentTelecaller] = useState(null); // who is verified & viewing `selected`
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferTarget, setTransferTarget] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const blankForm = { hub: "", name: "", contact: "", address: "", mapLink: "", details: "", telecaller: TELECALLERS[0], area1: "", area2: "", area3: "", area4: "", area5: "", scheduledVisitAt: "", scheduledVisitNote: "" };
   const [addForm, setAddForm] = useState(blankForm);
@@ -5476,7 +5487,7 @@ function HubDistributors({ embedded = false } = {}) {
         const proceed = confirm(
           `"${dupe.name}" (${dupe.hub || "no hub"}) already has this phone number.\n\nAdd this as a separate distributor anyway? Tap Cancel to open the existing one instead.`
         );
-        if (!proceed) { setShowAdd(false); setSelectedId(dupe.id); return; }
+        if (!proceed) { setShowAdd(false); requestOpen(dupe); return; }
       }
     }
     const now = Date.now();
@@ -5492,6 +5503,7 @@ function HubDistributors({ embedded = false } = {}) {
     setRows(prev => [rec, ...(prev || [])]);
     setAddForm(blankForm);
     setShowAdd(false);
+    setCurrentTelecaller(rec.telecaller);
     setSelectedId(rec.id);
   };
 
@@ -5664,32 +5676,83 @@ function HubDistributors({ embedded = false } = {}) {
     } : r));
   };
 
-  // A remark always carries the status at the time it was logged — this is
-  // what lets the report show "who approached them, what happened, when"
-  // in one line, and also updates the distributor's current status. A note
-  // isn't mandatory: if you're only reassigning the telecaller or changing
-  // the status, that alone is saved (with an auto-generated note) — you're
-  // no longer forced to type something just to change who approached them.
+  // ── Open a record only after its owner's (or incoming transfer target's) key is verified ──
+  const requestOpen = (r) => { setPendingOpen(r); setOpenKeyValue(""); setOpenKeyError(""); };
+  const closeKeyPrompt = () => { setPendingOpen(null); setOpenKeyValue(""); setOpenKeyError(""); };
+  const submitOpenKey = () => {
+    if (!openKeyValue) return;
+    const name = SECRET_KEYS[openKeyValue.trim()];
+    if (!name) { setOpenKeyError("wrong"); setOpenKeyValue(""); return; }
+    const r = pendingOpen;
+    const isOwner = name === r.telecaller;
+    const isIncoming = r.transferStatus === "pending" && r.transferTo === name;
+    if (!isOwner && !isIncoming) { setOpenKeyError("notyours"); setOpenKeyValue(""); return; }
+    setCurrentTelecaller(name);
+    setSelectedId(r.id);
+    closeKeyPrompt();
+  };
+  const closeDetail = () => { setSelectedId(null); setCurrentTelecaller(null); };
+
+  // ── Transfer / accept workflow ──────────────────────────────────────────
+  // Ownership only ever changes at the moment of Accept — sending a transfer
+  // just proposes it. Every accepted transfer is appended to transferHistory
+  // permanently, so "who this came from" is never lost even much later.
+  const sendTransfer = (id) => {
+    if (!transferTarget) { alert("Pick who to transfer this to."); return; }
+    const at = Date.now();
+    setRows(prev => (prev || []).map(x => x.id === id ? {
+      ...x, transferTo: transferTarget, transferStatus: "pending", transferRequestedAt: at,
+      remarks: [...(x.remarks || []), { text: `Requested transfer to ${transferTarget}`, status: x.status, telecaller: currentTelecaller || x.telecaller, at }],
+    } : x));
+    setTransferOpen(false); setTransferTarget("");
+  };
+  const cancelTransfer = (id) => {
+    const at = Date.now();
+    setRows(prev => (prev || []).map(x => x.id === id ? {
+      ...x, transferTo: null, transferStatus: null, transferRequestedAt: null,
+      remarks: [...(x.remarks || []), { text: "Cancelled the transfer request", status: x.status, telecaller: currentTelecaller || x.telecaller, at }],
+    } : x));
+  };
+  const acceptTransfer = (id) => {
+    const at = Date.now();
+    setRows(prev => (prev || []).map(x => {
+      if (x.id !== id) return x;
+      return {
+        ...x,
+        transferHistory: [...(x.transferHistory || []), { from: x.telecaller, to: currentTelecaller, at }],
+        telecaller: currentTelecaller,
+        transferTo: null, transferStatus: null, transferRequestedAt: null,
+        remarks: [...(x.remarks || []), { text: `Accepted transfer from ${x.telecaller}`, status: x.status, telecaller: currentTelecaller, at }],
+      };
+    }));
+  };
+  const declineTransfer = (id) => {
+    const at = Date.now();
+    setRows(prev => (prev || []).map(x => x.id === id ? {
+      ...x, transferTo: null, transferStatus: null, transferRequestedAt: null,
+      remarks: [...(x.remarks || []), { text: `${currentTelecaller} declined the transfer`, status: x.status, telecaller: currentTelecaller, at }],
+    } : x));
+    closeDetail(); // it was never theirs — send them back to their own list
+  };
+
+  // A remark always carries the status at the time it was logged, and who
+  // logged it (used to colour it) — this is what lets the report show "who
+  // approached them, what happened, when" in one line. Reassigning who owns
+  // a distributor no longer happens here: that only happens through Transfer
+  // + Accept below, so a record never changes hands without the other
+  // telecaller's key confirming they took it.
   const addRemark = (id) => {
     const cur = (rows || []).find(x => x.id === id);
-    const telecallerChanged = !!cur && rmTelecaller !== cur.telecaller;
     const statusChanged = !!cur && rmStatus !== cur.status;
-    if (!rmNote.trim() && !telecallerChanged && !statusChanged) {
-      alert("Change the status, reassign the telecaller, or type a note before saving.");
+    if (!rmNote.trim() && !statusChanged) {
+      alert("Change the status or type a note before saving.");
       return;
     }
-    if (!rmTelecaller) { alert("Select which telecaller approached them."); return; }
     const at = Date.now();
-    let text = rmNote.trim();
-    if (!text) {
-      const parts = [];
-      if (statusChanged) parts.push(`Status set to "${rmStatus}"`);
-      if (telecallerChanged) parts.push(`Reassigned to ${rmTelecaller}`);
-      text = parts.join(" · ") || "Updated";
-    }
-    const entry = { text, status: rmStatus, telecaller: rmTelecaller, at };
+    const text = rmNote.trim() || `Status set to "${rmStatus}"`;
+    const entry = { text, status: rmStatus, telecaller: currentTelecaller || cur.telecaller, at };
     setRows(prev => (prev || []).map(r => r.id === id ? {
-      ...r, status: rmStatus, telecaller: rmTelecaller, remarks: [...(r.remarks || []), entry], lastRemarkAt: at,
+      ...r, status: rmStatus, remarks: [...(r.remarks || []), entry], lastRemarkAt: at,
     } : r));
     setRmNote("");
   };
@@ -5697,7 +5760,7 @@ function HubDistributors({ embedded = false } = {}) {
   const deleteDistributor = (r) => {
     if (!confirm(`Delete "${r.name}"? This cannot be undone.`)) return;
     setRows(prev => (prev || []).filter(x => x.id !== r.id));
-    setSelectedId(null);
+    closeDetail();
   };
 
   const bulkDeleteSelected = () => {
@@ -6208,9 +6271,32 @@ function HubDistributors({ embedded = false } = {}) {
   // ── Detail view ──
   if (selected) {
     const r = selected;
+    const iAmOwner = currentTelecaller && currentTelecaller === r.telecaller;
+    const incomingForMe = currentTelecaller && r.transferStatus === "pending" && r.transferTo === currentTelecaller;
+    // Safety net: if the record changed hands (or the key session was lost)
+    // while this was open, don't silently keep showing someone else's data.
+    if (!iAmOwner && !incomingForMe) {
+      return (
+        <div>
+          <button onClick={closeDetail} style={{ background: "none", border: "none", color: T.accent, fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 12, fontFamily: FONT }}>← Back to list</button>
+          <Card><div style={{ fontSize: 12.5, color: T.t2 }}>This no longer belongs to your key — it's now assigned to <b style={{ color: T.t1 }}>{r.telecaller || "someone else"}</b>. Go back and re-enter a key to open it again.</div></Card>
+        </div>
+      );
+    }
     return (
       <div>
-        <button onClick={() => setSelectedId(null)} style={{ background: "none", border: "none", color: T.accent, fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 12, fontFamily: FONT }}>← Back to list</button>
+        <button onClick={closeDetail} style={{ background: "none", border: "none", color: T.accent, fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 12, fontFamily: FONT }}>← Back to list</button>
+
+        {incomingForMe && (
+          <Card style={{ marginBottom: 14, background: T.amber + "14", border: `1.5px solid ${T.amber}66` }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: T.amber, marginBottom: 4 }}>🔁 Transfer Request</div>
+            <div style={{ fontSize: 12, color: T.t2, marginBottom: 10 }}><b style={{ color: telecallerColor(r.telecaller) }}>{r.telecaller}</b> wants to hand this distributor to you. Accept it to make it yours — until then you can't log remarks on it.</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn label="✅ Accept" small onClick={() => acceptTransfer(r.id)} />
+              <Btn label="Decline" small ghost color={T.rose} onClick={() => declineTransfer(r.id)} />
+            </div>
+          </Card>
+        )}
 
         <Card accent={hubStageColor(r.status)} style={{ marginBottom: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
@@ -6224,7 +6310,15 @@ function HubDistributors({ embedded = false } = {}) {
                     border: `1px solid ${telecallerColor(r.telecaller)}55`, borderRadius: 20, padding: "1px 8px",
                   }}>{r.telecaller}</span>
                 )}
+                {r.transferStatus === "pending" && (
+                  <span style={{ fontSize: 10.5, fontWeight: 800, color: T.amber, background: T.amber + "1E", border: `1px solid ${T.amber}55`, borderRadius: 20, padding: "1px 8px" }}>🔁 Pending → {r.transferTo}</span>
+                )}
               </div>
+              {(r.transferHistory || []).length > 0 && (
+                <div style={{ fontSize: 10.5, color: T.t3, marginTop: 6 }}>
+                  🔁 {r.transferHistory.map((t, i) => `${t.from} → ${t.to}`).join("  ·  ")}
+                </div>
+              )}
               {(r.remarks || []).length === 0 && (
                 <div style={{
                   display: "inline-flex", alignItems: "center", gap: 5, marginTop: 8,
@@ -6245,8 +6339,15 @@ function HubDistributors({ embedded = false } = {}) {
           <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
             {r.contact && <button onClick={() => window.open("tel:" + r.contact)} style={{ flex: "1 1 100px", background: T.emerald + "22", border: `1px solid ${T.emerald}44`, borderRadius: 10, color: T.emerald, padding: "9px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>📞 Call</button>}
             {r.mapLink && <button onClick={() => window.open(r.mapLink, "_blank")} style={{ flex: "1 1 100px", background: T.sky + "22", border: `1px solid ${T.sky}44`, borderRadius: 10, color: T.sky, padding: "9px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>📍 Open Map</button>}
+            {iAmOwner && r.transferStatus !== "pending" && (
+              <button onClick={() => { setTransferTarget(""); setTransferOpen(true); }} style={{ flex: "1 1 100px", background: T.amber + "22", border: `1px solid ${T.amber}44`, borderRadius: 10, color: T.amber, padding: "9px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>🔁 Transfer</button>
+            )}
+            {iAmOwner && r.transferStatus === "pending" && (
+              <button onClick={() => cancelTransfer(r.id)} style={{ flex: "1 1 100px", background: T.t3 + "22", border: `1px solid ${T.t3}44`, borderRadius: 10, color: T.t2, padding: "9px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>Cancel Transfer</button>
+            )}
             <button onClick={() => deleteDistributor(r)} style={{ flex: "1 1 100px", background: T.rose + "18", border: `1px solid ${T.rose}44`, borderRadius: 10, color: T.rose, padding: "9px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>🗑️ Delete</button>
           </div>
+
         </Card>
 
         {(() => {
@@ -6293,37 +6394,55 @@ function HubDistributors({ embedded = false } = {}) {
         <Card style={{ marginBottom: 14 }}>
           <Label sub={`${(r.remarks || []).length} remark${(r.remarks || []).length === 1 ? "" : "s"} logged`}>Remarks & Status</Label>
           {(r.remarks || []).length === 0 && <div style={{ fontSize: 12, color: T.t3, marginBottom: 10 }}>No remarks logged yet.</div>}
-          {(r.remarks || []).slice().reverse().map((rm, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0", borderBottom: i < r.remarks.length - 1 ? `1px solid ${T.border}` : "none" }}>
-              <span style={{ width: 8, height: 8, borderRadius: 999, marginTop: 5, flexShrink: 0, background: hubStageColor(rm.status) }} />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 12, color: T.t2 }}><b style={{ color: T.t1 }}>{rm.status}</b>{rm.text ? " — " + rm.text : ""}</div>
-                <div style={{ fontSize: 10, color: T.t4, marginTop: 1 }}>{rm.telecaller} · {new Date(rm.at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+          {(r.remarks || []).slice().reverse().map((rm, i) => {
+            const rmColor = telecallerColor(rm.telecaller);
+            return (
+              <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 8px 8px 10px", marginBottom: 4, borderLeft: `3px solid ${rmColor}`, background: rmColor + "0F", borderRadius: 6 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 999, marginTop: 5, flexShrink: 0, background: hubStageColor(rm.status) }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, color: T.t2 }}><b style={{ color: T.t1 }}>{rm.status}</b>{rm.text ? " — " + rm.text : ""}</div>
+                  <div style={{ fontSize: 10, color: rmColor, marginTop: 1, fontWeight: 800 }}>{rm.telecaller} · {new Date(rm.at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+                </div>
               </div>
-            </div>
-          ))}
-          <Dropdown label="Approached By (Telecaller)" value={rmTelecaller} onChange={e => setRmTelecaller(e.target.value)} options={TELECALLERS} />
-          <div style={{ fontSize: 11, color: T.t2, marginTop: 2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Status</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-            {HUB_STAGES.map(s => {
-              const active = rmStatus === s.id;
-              return (
-                <button key={s.id} onClick={() => setRmStatus(s.id)} style={{
-                  background: active ? s.color + "22" : T.surface, border: `1px solid ${active ? s.color : T.border}`,
-                  borderRadius: 20, padding: "6px 12px", fontSize: 11, fontWeight: 700,
-                  color: active ? s.color : T.t2, cursor: "pointer", fontFamily: FONT,
-                }}>{s.id}</button>
-              );
-            })}
-          </div>
-          <textarea value={rmNote} onChange={e => setRmNote(e.target.value)} rows={2}
-            placeholder="What happened on the call / visit… (optional — you can also just change the telecaller or status above and save)"
-            style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 13, fontFamily: FONT, outline: "none", width: "100%", boxSizing: "border-box", resize: "none" }} />
-          <div style={{ marginTop: 8 }}>
-            <Btn label="Save" full onClick={() => addRemark(r.id)} disabled={!rmNote.trim() && rmTelecaller === r.telecaller && rmStatus === r.status} />
-          </div>
+            );
+          })}
+          {incomingForMe ? (
+            <div style={{ fontSize: 12, color: T.t3, marginTop: 10, fontStyle: "italic" }}>Accept the transfer above before logging a remark on this one.</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 11, color: T.t2, marginTop: 10, marginBottom: 2 }}>Logging as <b style={{ color: telecallerColor(currentTelecaller) }}>{currentTelecaller}</b> · to hand this to someone else, use 🔁 Transfer above</div>
+              <div style={{ fontSize: 11, color: T.t2, marginTop: 8, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Status</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                {HUB_STAGES.map(s => {
+                  const active = rmStatus === s.id;
+                  return (
+                    <button key={s.id} onClick={() => setRmStatus(s.id)} style={{
+                      background: active ? s.color + "22" : T.surface, border: `1px solid ${active ? s.color : T.border}`,
+                      borderRadius: 20, padding: "6px 12px", fontSize: 11, fontWeight: 700,
+                      color: active ? s.color : T.t2, cursor: "pointer", fontFamily: FONT,
+                    }}>{s.id}</button>
+                  );
+                })}
+              </div>
+              <textarea value={rmNote} onChange={e => setRmNote(e.target.value)} rows={2}
+                placeholder="What happened on the call / visit… (optional — you can also just change the status above and save)"
+                style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 13, fontFamily: FONT, outline: "none", width: "100%", boxSizing: "border-box", resize: "none" }} />
+              <div style={{ marginTop: 8 }}>
+                <Btn label="Save" full onClick={() => addRemark(r.id)} disabled={!rmNote.trim() && rmStatus === r.status} />
+              </div>
+            </>
+          )}
         </Card>
+
+        <Sheet open={transferOpen} onClose={() => setTransferOpen(false)} title="Transfer This Distributor">
+          <div style={{ fontSize: 12, color: T.t3, marginBottom: 12 }}>They'll need to open it with their own key and accept before it becomes theirs — it stays yours until then.</div>
+          <Dropdown label="Transfer to" value={transferTarget} onChange={e => setTransferTarget(e.target.value)} options={TELECALLERS.filter(t => t !== r.telecaller)} />
+          <div style={{ marginTop: 12 }}>
+            <Btn label="Send Transfer Request" full onClick={() => sendTransfer(r.id)} disabled={!transferTarget} />
+          </div>
+        </Sheet>
       </div>
+
     );
   }
 
@@ -6465,7 +6584,7 @@ function HubDistributors({ embedded = false } = {}) {
         // under the name — trim it back to plain "Unnamed" on the card.
         const cardName = r.name && r.name.startsWith("Unnamed · ") ? "Unnamed" : (r.name || "Unnamed");
         return (
-          <div key={r.id} onClick={() => selectMode ? toggleSelected(r.id) : setSelectedId(r.id)} style={{
+          <div key={r.id} onClick={() => selectMode ? toggleSelected(r.id) : requestOpen(r)} style={{
             background: T.card,
             border: `1.5px solid ${isSelected ? T.accent : isUnopened ? "#F472B6" : (visitStyle ? visitStyle.color + "66" : T.border)}`,
             borderRadius: 14, padding: "12px 14px", cursor: "pointer",
@@ -6672,6 +6791,37 @@ function HubDistributors({ embedded = false } = {}) {
             </div>
           </>
         )}
+      </Sheet>
+
+      <Sheet open={!!pendingOpen} onClose={closeKeyPrompt} title="Enter Your Key">
+        <div style={{ fontSize: 12.5, color: T.t3, marginBottom: 14 }}>
+          {pendingOpen && (
+            pendingOpen.transferStatus === "pending"
+              ? `"${pendingOpen.name || "This distributor"}" is currently ${pendingOpen.telecaller}'s, with a pending transfer. Enter your key to open it.`
+              : `"${pendingOpen.name || "This distributor"}" belongs to ${pendingOpen.telecaller || "an unassigned telecaller"}. Enter your key to open it.`
+          )}
+        </div>
+        <input
+          type="password"
+          value={openKeyValue}
+          onChange={e => { setOpenKeyValue(e.target.value); setOpenKeyError(""); }}
+          onKeyDown={e => { if (e.key === "Enter") submitOpenKey(); }}
+          autoFocus
+          placeholder="Secret key"
+          style={{
+            width: "100%", boxSizing: "border-box", background: T.surface,
+            border: `1.5px solid ${openKeyError ? T.rose : T.border}`, borderRadius: 12,
+            padding: "13px 14px", fontSize: 17, fontWeight: 800, color: T.t1,
+            textAlign: "center", letterSpacing: "0.05em", fontFamily: FONT, outline: "none",
+          }}
+        />
+        {openKeyError === "wrong" && <div style={{ color: T.rose, fontSize: 12, fontWeight: 700, marginTop: 9 }}>Wrong key — try again.</div>}
+        {openKeyError === "notyours" && pendingOpen && (
+          <div style={{ color: T.rose, fontSize: 12, fontWeight: 700, marginTop: 9 }}>This data belongs to {pendingOpen.telecaller || "another telecaller"} — you can't open someone else's data.</div>
+        )}
+        <div style={{ marginTop: 14 }}>
+          <Btn label="Unlock" full onClick={submitOpenKey} disabled={!openKeyValue} />
+        </div>
       </Sheet>
     </div>
   );
@@ -11242,71 +11392,6 @@ function IntroVideo({ onDone }) {
   );
 }
 
-// ─── KEY GATE ───────────────────────────────────────────────────────────
-// Shown before anything else, every single time the app is opened (nothing
-// is remembered between opens, by design). One input, auto-focused, submits
-// on Enter — kept deliberately tiny so it never slows anyone down.
-function KeyGate({ onUnlock }) {
-  const [value, setValue] = useState("");
-  const [error, setError] = useState(false);
-  const [show, setShow] = useState(false);
-  const inputRef = useRef(null);
-
-  useEffect(() => { inputRef.current && inputRef.current.focus(); }, []);
-
-  const tryUnlock = () => {
-    if (!value) return;
-    const name = SECRET_KEYS[value.trim()];
-    if (name) {
-      onUnlock(name);
-    } else {
-      setError(true);
-      setValue("");
-      inputRef.current && inputRef.current.focus();
-      setTimeout(() => setError(false), 450);
-    }
-  };
-
-  return (
-    <div style={{ minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: FONT }}>
-      <style>{`
-        @keyframes keyGateShake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-9px); } 40% { transform: translateX(9px); } 60% { transform: translateX(-6px); } 80% { transform: translateX(6px); } }
-      `}</style>
-      <div style={{ position: "fixed", top: "18%", left: "50%", transform: "translateX(-50%)", width: 320, height: 320, borderRadius: "50%", background: `radial-gradient(circle, ${T.accentGlow} 0%, transparent 65%)`, pointerEvents: "none" }} />
-      <div style={{ position: "relative", zIndex: 1, fontSize: 38, marginBottom: 14 }}>🔐</div>
-      <div style={{ position: "relative", zIndex: 1, fontSize: 17, fontWeight: 900, color: T.t1, letterSpacing: "-0.02em" }}>Enter Your Secret Key</div>
-      <div style={{ position: "relative", zIndex: 1, fontSize: 12, color: T.t3, marginTop: 5, marginBottom: 22, textAlign: "center", maxWidth: 260 }}>Your personal key unlocks the data. Nobody else's key works on your data, and this stays locked until you enter it.</div>
-      <div style={{ position: "relative", zIndex: 1, width: "100%", maxWidth: 260, animation: error ? "keyGateShake 0.4s ease" : "none" }}>
-        <div style={{ position: "relative" }}>
-          <input
-            ref={inputRef}
-            type={show ? "text" : "password"}
-            value={value}
-            onChange={e => setValue(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") tryUnlock(); }}
-            placeholder="Secret key"
-            autoFocus
-            style={{
-              width: "100%", boxSizing: "border-box", background: T.card,
-              border: `1.5px solid ${error ? T.rose : T.borderHi}`, borderRadius: 14,
-              padding: "15px 44px 15px 16px", fontSize: 19, fontWeight: 800, color: T.t1,
-              textAlign: "center", letterSpacing: "0.06em", fontFamily: FONT, outline: "none",
-            }}
-          />
-          <button onClick={() => setShow(s => !s)} tabIndex={-1} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: T.t3, cursor: "pointer", fontSize: 16, padding: 6 }}>{show ? "🙈" : "👁️"}</button>
-        </div>
-        {error && <div style={{ color: T.rose, fontSize: 12, fontWeight: 700, marginTop: 9, textAlign: "center" }}>Wrong key — try again</div>}
-        <button onClick={tryUnlock} disabled={!value} style={{
-          marginTop: 16, width: "100%", background: value ? T.accent : T.card,
-          border: value ? "none" : `1px solid ${T.border}`, borderRadius: 12,
-          color: value ? "#060B16" : T.t3, padding: "13px", fontSize: 14, fontWeight: 800,
-          cursor: value ? "pointer" : "not-allowed", fontFamily: FONT,
-        }}>Unlock</button>
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
   const [activeTab, setActiveTabRaw] = useState(() => {
     try { return localStorage.getItem("bos_activeTab") || "dashboard"; } catch { return "dashboard"; }
@@ -11314,9 +11399,6 @@ export default function App() {
   const [role, setRoleRaw] = useState(() => {
     try { return localStorage.getItem("bos_role") || null; } catch { return null; }
   });
-  // Who unlocked this open of the app — never persisted on purpose, so the
-  // secret key is asked for again every single time the app is opened.
-  const [unlockedBy, setUnlockedBy] = useState(null);
   const [showIntro, setShowIntro] = useState(() => {
     try { return !sessionStorage.getItem("bos_intro_seen"); } catch { return true; }
   });
@@ -11384,11 +11466,6 @@ export default function App() {
       </div>
     </div>
   ) : null;
-
-  // ── SECRET KEY GATE (always first — nothing renders before this passes) ──
-  if (!unlockedBy) {
-    return <KeyGate onUnlock={setUnlockedBy} />;
-  }
 
   // ── LOGIN ──
   if (!role) {
@@ -11526,7 +11603,7 @@ export default function App() {
               📲 Install
             </button>
           )}
-          <div style={{ background:T.accentSub, border:`1px solid ${T.accentGlow}`, borderRadius:8, padding:"4px 10px", fontSize:11, fontWeight:700, color:T.accent }}>{unlockedBy ? unlockedBy + " · " + role : role}</div>
+          <div style={{ background:T.accentSub, border:`1px solid ${T.accentGlow}`, borderRadius:8, padding:"4px 10px", fontSize:11, fontWeight:700, color:T.accent }}>{role}</div>
           <button onClick={() => setRole(null)} style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, color:T.t3, padding:"4px 10px", fontSize:11, cursor:"pointer", fontFamily:FONT, fontWeight:600 }}>Exit</button>
         </div>
       </div>
