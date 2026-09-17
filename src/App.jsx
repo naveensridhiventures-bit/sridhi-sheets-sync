@@ -6441,6 +6441,27 @@ function HubDistributors({ embedded = false } = {}) {
       const telecallersToPrint = reportTelecaller === "All" ? TELECALLERS : [reportTelecaller];
       const rangeLabel2 = reportFrom === reportTo ? formatDateReadable(reportFrom) : `${formatDateReadable(reportFrom)} – ${formatDateReadable(reportTo)}`;
 
+      // A telecaller calling from this sheet needs two kinds of history at a
+      // glance: the best thing ever said about this lead (so they know it's
+      // worth the call) and the most recent thing said (so they don't repeat
+      // a dead conversation) — then a genuinely blank box to add today's.
+      const lastPositiveFor = (r) => {
+        const list = r.remarks || [];
+        for (let i = list.length - 1; i >= 0; i--) {
+          if (HUB_STATUS_SENTIMENT[list[i].status] === "positive") {
+            const p = list[i];
+            return `${p.status}${p.text ? " — " + p.text : ""}`;
+          }
+        }
+        return "—";
+      };
+      const lastRemarkFor = (r) => {
+        const list = r.remarks || [];
+        if (!list.length) return "No remarks yet";
+        const last = list[list.length - 1];
+        return `${last.status}${last.text ? " — " + last.text : ""}`;
+      };
+
       telecallersToPrint.forEach((tc, tcIdx) => {
         if (tcIdx > 0) doc.addPage();
         const list = (rows || []).filter(r => r.telecaller === tc && r.status !== "Wrong Number");
@@ -6452,20 +6473,28 @@ function HubDistributors({ embedded = false } = {}) {
         doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(210, 220, 214);
         doc.text(`${rangeLabel2}  ·  ${list.length} distributor${list.length === 1 ? "" : "s"} to call`, margin, 42);
 
-        const head = [["#", "Distributor", "Hub", "Contact", "Status", ...blankCols]];
+        const head = [["#", "Distributor", "Hub", "Contact", "Positive Remark", "Last Remark", "Status", ...blankCols]];
         const body = list.map((r, i) => [
-          String(i + 1), r.name || "Unnamed", r.hub || "—", r.contact || "—", r.status || "—",
+          String(i + 1), r.name || "Unnamed", r.hub || "—", r.contact || "—",
+          lastPositiveFor(r), lastRemarkFor(r), r.status || "—",
           ...blankCols.map(() => ""),
         ]);
+        const blankStartIdx = 7;
         autoTable(doc, {
           startY: 74, margin: { top: 74, bottom: 30 },
-          head, body: body.length ? body : [["—", "No distributors assigned to " + tc, "—", "—", "—", ...blankCols.map(() => "")]],
+          head, body: body.length ? body : [["—", "No distributors assigned to " + tc, "—", "—", "—", "—", "—", ...blankCols.map(() => "")]],
           theme: "grid",
-          styles: { font: "helvetica", fontSize: 8, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK, minCellHeight: 26 },
-          headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
-          columnStyles: { 0: { cellWidth: 20 }, 1: { cellWidth: 120, fontStyle: "bold" }, 2: { cellWidth: 80 }, 3: { cellWidth: 75 }, 4: { cellWidth: 65 } },
+          styles: { font: "helvetica", fontSize: 7.5, cellPadding: 5, lineColor: GRID, lineWidth: 0.6, textColor: INK, minCellHeight: 26, overflow: "linebreak" },
+          headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 8 },
+          columnStyles: {
+            0: { cellWidth: 16 }, 1: { cellWidth: 82, fontStyle: "bold" }, 2: { cellWidth: 52 }, 3: { cellWidth: 58 },
+            4: { cellWidth: 92 }, 5: { cellWidth: 92 }, 6: { cellWidth: 46 },
+          },
           didParseCell: (data) => {
-            if (data.section === "body" && data.column.index >= 5) data.cell.styles.minCellHeight = 34;
+            if (data.section === "body" && data.column.index >= blankStartIdx) data.cell.styles.minCellHeight = 34;
+            if (data.section === "body" && data.column.index === 4 && data.cell.raw !== "—") {
+              data.cell.styles.textColor = [15, 118, 71]; data.cell.styles.fontStyle = "bold";
+            }
           },
         });
 
@@ -6745,7 +6774,7 @@ function HubDistributors({ embedded = false } = {}) {
           <Btn label={generatingExcel ? "Generating…" : "📊 Excel"} ghost color={T.amber} disabled={generatingExcel} onClick={downloadHubExcel} />
           <Btn label={generatingCallSheet ? "Generating…" : "🖨️ Telecaller Call Sheet"} ghost color={T.emerald} disabled={generatingCallSheet} onClick={downloadCallSheet} />
         </div>
-        <div style={{ fontSize: 10.5, color: T.t3, marginTop: 6 }}>Call Sheet prints one page per telecaller (or just the one selected above) with the phone number and a blank box per {reportPreset === "Today" || reportFrom === reportTo ? "day" : reportPreset === "This Week" ? "day of the week" : "week"} to write in after each call.</div>
+        <div style={{ fontSize: 10.5, color: T.t3, marginTop: 6 }}>Call Sheet prints one page per telecaller (or just the one selected above) with the phone number, their best positive remark, their last remark, and a blank box per {reportPreset === "Today" || reportFrom === reportTo ? "day" : reportPreset === "This Week" ? "day of the week" : "week"} to write in after each call.</div>
       </Card>
 
       <Card accent={T.indigo}>
