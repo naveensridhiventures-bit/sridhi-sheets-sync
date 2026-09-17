@@ -5419,6 +5419,9 @@ function HubDistributors({ embedded = false } = {}) {
   const [reportHub, setReportHub] = useState("All");
   const [generatingReport, setGeneratingReport] = useState(false);
   const [generatingExcel, setGeneratingExcel] = useState(false);
+  const [showRebalance, setShowRebalance] = useState(false);
+  const [rebalancePreview, setRebalancePreview] = useState(null);
+  const [generatingCallSheet, setGeneratingCallSheet] = useState(false);
 
   const applyReportPreset = (preset) => {
     setReportPreset(preset);
@@ -6288,6 +6291,130 @@ function HubDistributors({ embedded = false } = {}) {
     }
   };
 
+  // ── Rebalance existing data ─────────────────────────────────────────────
+  // A distributor with any positive remark in its history (Interested,
+  // Visited, Deal Accepted) already has a relationship with its current
+  // telecaller — those are left alone. Everything else (New, Contacted with
+  // no positive outcome yet, Not Interested, etc.) is eligible and gets
+  // split evenly, round-robin, across every telecaller.
+  const isProtectedHubRecord = (r) => {
+    if (HUB_STATUS_SENTIMENT[r.status] === "positive") return true;
+    return (r.remarks || []).some(rm => HUB_STATUS_SENTIMENT[rm.status] === "positive");
+  };
+  const openRebalance = () => {
+    const all = rows || [];
+    const protectedRecs = all.filter(isProtectedHubRecord);
+    const eligible = all.filter(r => !isProtectedHubRecord(r));
+    const afterCounts = {};
+    TELECALLERS.forEach(t => { afterCounts[t] = protectedRecs.filter(r => r.telecaller === t).length; });
+    eligible.forEach((r, i) => {
+      const t = TELECALLERS[i % TELECALLERS.length];
+      afterCounts[t] = (afterCounts[t] || 0) + 1;
+    });
+    setRebalancePreview({
+      protectedCount: protectedRecs.length,
+      eligibleCount: eligible.length,
+      eligibleIds: eligible.map(r => r.id),
+      afterCounts,
+    });
+    setShowRebalance(true);
+  };
+  const commitRebalance = () => {
+    if (!rebalancePreview || !rebalancePreview.eligibleCount) return;
+    const at = Date.now();
+    const idToNewOwner = new Map();
+    rebalancePreview.eligibleIds.forEach((id, i) => idToNewOwner.set(id, TELECALLERS[i % TELECALLERS.length]));
+    setRows(prev => (prev || []).map(r => {
+      const newOwner = idToNewOwner.get(r.id);
+      if (!newOwner || newOwner === r.telecaller) return r;
+      return {
+        ...r,
+        telecaller: newOwner,
+        transferHistory: [...(r.transferHistory || []), { from: r.telecaller, to: newOwner, at }],
+        lastRemarkAt: at,
+        remarks: [...(r.remarks || []), { text: `Rebalanced — equal split (previously ${r.telecaller})`, status: r.status, telecaller: newOwner, at }],
+      };
+    }));
+    setShowRebalance(false); setRebalancePreview(null);
+    alert(`Rebalanced ${rebalancePreview.eligibleCount} distributor${rebalancePreview.eligibleCount === 1 ? "" : "s"} evenly. ${rebalancePreview.protectedCount} with a positive remark were left untouched.`);
+  };
+
+  // ── Printable telecaller call sheet ─────────────────────────────────────
+  // A working paper for one telecaller (or one page per telecaller, for
+  // everyone) — their currently assigned distributors, with the current
+  // status for context, and genuinely blank ruled boxes to write in by hand
+  // after each call: one box per day for a short range, one per week for a
+  // longer one, so the same sheet covers a day, a week, or a month.
+  const downloadCallSheet = async () => {
+    if (generatingCallSheet) return;
+    setGeneratingCallSheet(true);
+    try {
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+      const NAVY = [8, 40, 25], TEAL = [23, 148, 74], GRID = [214, 220, 214], INK = [26, 32, 46], SUBTLE = [110, 118, 138];
+      const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
+      const pageW = doc.internal.pageSize.getWidth(), pageH = doc.internal.pageSize.getHeight(), margin = 26;
+
+      const from = new Date(reportFrom + "T00:00:00"), to = new Date(reportTo + "T00:00:00");
+      const spanDays = Math.max(1, Math.round((to - from) / 86400000) + 1);
+      let blankCols = [];
+      if (spanDays <= 1) {
+        blankCols = [formatDateReadable(reportFrom)];
+      } else if (spanDays <= 7) {
+        for (let i = 0; i < spanDays; i++) {
+          const d = new Date(from); d.setDate(from.getDate() + i);
+          blankCols.push(d.toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short" }));
+        }
+      } else {
+        const weeks = Math.ceil(spanDays / 7);
+        for (let i = 0; i < weeks; i++) blankCols.push(`Week ${i + 1}`);
+      }
+
+      const telecallersToPrint = reportTelecaller === "All" ? TELECALLERS : [reportTelecaller];
+      const rangeLabel2 = reportFrom === reportTo ? formatDateReadable(reportFrom) : `${formatDateReadable(reportFrom)} – ${formatDateReadable(reportTo)}`;
+
+      telecallersToPrint.forEach((tc, tcIdx) => {
+        if (tcIdx > 0) doc.addPage();
+        const list = (rows || []).filter(r => r.telecaller === tc && r.status !== "Wrong Number");
+
+        doc.setFillColor(...NAVY); doc.rect(0, 0, pageW, 58, "F");
+        doc.setFillColor(...TEAL); doc.rect(0, 56, pageW, 2, "F");
+        doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(15);
+        doc.text(`${tc} — Call Sheet`, margin, 26);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(210, 220, 214);
+        doc.text(`${rangeLabel2}  ·  ${list.length} distributor${list.length === 1 ? "" : "s"} to call`, margin, 42);
+
+        const head = [["#", "Distributor", "Hub", "Contact", "Status", ...blankCols]];
+        const body = list.map((r, i) => [
+          String(i + 1), r.name || "Unnamed", r.hub || "—", r.contact || "—", r.status || "—",
+          ...blankCols.map(() => ""),
+        ]);
+        autoTable(doc, {
+          startY: 74, margin: { top: 74, bottom: 30 },
+          head, body: body.length ? body : [["—", "No distributors assigned to " + tc, "—", "—", "—", ...blankCols.map(() => "")]],
+          theme: "grid",
+          styles: { font: "helvetica", fontSize: 8, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK, minCellHeight: 26 },
+          headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+          columnStyles: { 0: { cellWidth: 20 }, 1: { cellWidth: 120, fontStyle: "bold" }, 2: { cellWidth: 80 }, 3: { cellWidth: 75 }, 4: { cellWidth: 65 } },
+          didParseCell: (data) => {
+            if (data.section === "body" && data.column.index >= 5) data.cell.styles.minCellHeight = 34;
+          },
+        });
+
+        const fy = pageH - 16;
+        doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...SUBTLE);
+        doc.text("Sridhi Ventures · Telecaller Call Sheet · write the outcome of each call directly in the boxes above", margin, fy);
+        doc.text(`Page ${tcIdx + 1} of ${telecallersToPrint.length}`, pageW - margin, fy, { align: "right" });
+      });
+
+      const fileTag = reportTelecaller === "All" ? "AllTelecallers" : reportTelecaller.replace(/[^A-Za-z0-9]/g, "");
+      doc.save(`CallSheet_${fileTag}_${reportFrom}_to_${reportTo}.pdf`);
+    } catch (e) {
+      alert("Couldn't generate the call sheet: " + (e?.message || e));
+    } finally {
+      setGeneratingCallSheet(false);
+    }
+  };
+
   // ── Detail view ──
   if (selected) {
     const r = selected;
@@ -6544,11 +6671,46 @@ function HubDistributors({ embedded = false } = {}) {
             <div style={{ flex: 1 }}><div style={{ fontSize: 10.5, color: T.t3, marginBottom: 4, fontWeight: 600 }}>TO</div><input type="date" value={reportTo} max={todayISO()} onChange={e => { setReportTo(e.target.value); setReportPreset("Custom"); }} style={inputStyle} /></div>
           </div>
         )}
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Btn label={generatingReport ? "Generating…" : "🧾 PDF Report"} color={T.amber} disabled={generatingReport} onClick={downloadHubReport} />
           <Btn label={generatingExcel ? "Generating…" : "📊 Excel"} ghost color={T.amber} disabled={generatingExcel} onClick={downloadHubExcel} />
+          <Btn label={generatingCallSheet ? "Generating…" : "🖨️ Telecaller Call Sheet"} ghost color={T.emerald} disabled={generatingCallSheet} onClick={downloadCallSheet} />
         </div>
+        <div style={{ fontSize: 10.5, color: T.t3, marginTop: 6 }}>Call Sheet prints one page per telecaller (or just the one selected above) with the phone number and a blank box per {reportPreset === "Today" || reportFrom === reportTo ? "day" : reportPreset === "This Week" ? "day of the week" : "week"} to write in after each call.</div>
       </Card>
+
+      <Card accent={T.indigo}>
+        <Label sub="Distributors with a positive remark (Interested / Visited / Deal Accepted) stay with their current telecaller — only the rest get split evenly">Rebalance Existing Data</Label>
+        <Btn label="⚖️ Preview Equal Split" color={T.indigo} onClick={openRebalance} />
+      </Card>
+
+      <Sheet open={showRebalance} onClose={() => { setShowRebalance(false); setRebalancePreview(null); }} title="⚖️ Rebalance Existing Data">
+        {rebalancePreview && (
+          <>
+            <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+              <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, textAlign: "center" }}>
+                <div style={{ fontSize: 20, fontWeight: 800, color: T.emerald }}>{rebalancePreview.protectedCount}</div>
+                <div style={{ fontSize: 10, color: T.t3, marginTop: 2 }}>Have a positive remark — untouched</div>
+              </div>
+              <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, textAlign: "center" }}>
+                <div style={{ fontSize: 20, fontWeight: 800, color: T.indigo }}>{rebalancePreview.eligibleCount}</div>
+                <div style={{ fontSize: 10, color: T.t3, marginTop: 2 }}>Will be split evenly</div>
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: T.t2, fontWeight: 600, marginBottom: 8 }}>After rebalancing, each telecaller will have:</div>
+            {TELECALLERS.map(t => (
+              <div key={t} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 2px", borderBottom: `1px solid ${T.border}` }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: telecallerColor(t) }}>{t}</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: T.t1 }}>{rebalancePreview.afterCounts[t] || 0}</span>
+              </div>
+            ))}
+            <div style={{ marginTop: 16 }}>
+              <Btn label={`✅ Rebalance ${rebalancePreview.eligibleCount} Distributor${rebalancePreview.eligibleCount === 1 ? "" : "s"}`} color={T.indigo} full
+                onClick={commitRebalance} disabled={!rebalancePreview.eligibleCount} />
+            </div>
+          </>
+        )}
+      </Sheet>
 
       <Field label="Search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, hub, area, contact…" />
       {hubOptions.length > 1 && (
