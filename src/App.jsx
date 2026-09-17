@@ -5421,6 +5421,9 @@ function HubDistributors({ embedded = false } = {}) {
   const [generatingExcel, setGeneratingExcel] = useState(false);
   const [showRebalance, setShowRebalance] = useState(false);
   const [rebalancePreview, setRebalancePreview] = useState(null);
+  const [rebalanceIncluded, setRebalanceIncluded] = useState(() => TELECALLERS.reduce((o, t) => ({ ...o, [t]: true }), {}));
+  const [rebalanceManual, setRebalanceManual] = useState(false);
+  const [manualNeeds, setManualNeeds] = useState({});
   const [generatingCallSheet, setGeneratingCallSheet] = useState(false);
 
   const applyReportPreset = (preset) => {
@@ -6293,36 +6296,40 @@ function HubDistributors({ embedded = false } = {}) {
 
   // ── Rebalance existing data ─────────────────────────────────────────────
   // Two things must both be true when this is done:
-  //  1) Every telecaller ends up with the same total count (fully equal
-  //     split), and
+  //  1) Every INCLUDED telecaller ends up with the same total count (fully
+  //     equal split), and
   //  2) Nobody's previous positive remark (Interested / Visited / Deal
   //     Accepted) ever moves away from them — those relationships are
   //     never touched.
+  // A telecaller can be excluded entirely (the tick-list below) — e.g.
+  // Ramya isn't available right now, so nothing of hers moves and she
+  // receives none of the new pool; her existing records, positive or not,
+  // are left completely alone and don't count toward anyone else's split.
   // Those two only work together if the *new* (non-positive) leads are
-  // handed out unevenly on purpose: someone who already holds a lot of
-  // positive leads gets fewer new ones, someone who holds few gets more —
-  // so everyone's final total lands on the same number (or as close as the
-  // numbers allow, when a telecaller's own positives alone already exceed
-  // a fair share).
+  // handed out unevenly on purpose among the included telecallers: someone
+  // who already holds a lot of positive leads gets fewer new ones, someone
+  // who holds few gets more — so everyone's final total lands on the same
+  // number (or as close as the numbers allow). A manual mode is also
+  // available to type in exact counts per telecaller instead.
   const isProtectedHubRecord = (r) => {
     if (HUB_STATUS_SENTIMENT[r.status] === "positive") return true;
     return (r.remarks || []).some(rm => HUB_STATUS_SENTIMENT[rm.status] === "positive");
   };
-  const computeRebalancePlan = () => {
-    const all = rows || [];
-    const positiveByTc = {}; TELECALLERS.forEach(t => { positiveByTc[t] = 0; });
+  const computeRebalancePlan = (activeTc) => {
+    const all = (rows || []).filter(r => activeTc.includes(r.telecaller));
+    const positiveByTc = {}; activeTc.forEach(t => { positiveByTc[t] = 0; });
     const eligible = [];
     all.forEach(r => {
       if (isProtectedHubRecord(r)) positiveByTc[r.telecaller] = (positiveByTc[r.telecaller] || 0) + 1;
       else eligible.push(r);
     });
-    const idealTotal = all.length / (TELECALLERS.length || 1);
+    const idealTotal = all.length / (activeTc.length || 1);
     // Already holding at least a fair share of positives? Keep exactly what
     // they have and give them none of the new pool.
-    const overflow = TELECALLERS.filter(t => positiveByTc[t] >= idealTotal);
-    const underGroup = TELECALLERS.filter(t => !overflow.includes(t));
+    const overflow = activeTc.filter(t => positiveByTc[t] >= idealTotal);
+    const underGroup = activeTc.filter(t => !overflow.includes(t));
 
-    const need = {}; TELECALLERS.forEach(t => { need[t] = 0; });
+    const need = {}; activeTc.forEach(t => { need[t] = 0; });
     if (underGroup.length) {
       const positivesInUnder = underGroup.reduce((s, t) => s + positiveByTc[t], 0);
       const fairFinal = (eligible.length + positivesInUnder) / underGroup.length;
@@ -6337,19 +6344,41 @@ function HubDistributors({ embedded = false } = {}) {
       let i = 0;
       while (leftover > 0) { need[underGroup[i % underGroup.length]] += 1; leftover--; i++; }
     }
-    const afterCounts = {}; TELECALLERS.forEach(t => { afterCounts[t] = positiveByTc[t] + need[t]; });
-    return { positiveByTc, eligible, need, afterCounts, overflow };
+    const afterCounts = {}; activeTc.forEach(t => { afterCounts[t] = positiveByTc[t] + need[t]; });
+    return { activeTc, positiveByTc, eligible, need, afterCounts, overflow };
   };
   const openRebalance = () => {
-    setRebalancePreview(computeRebalancePlan());
+    const activeTc = TELECALLERS.filter(t => rebalanceIncluded[t]);
+    if (!activeTc.length) { alert("Tick at least one telecaller to rebalance."); return; }
+    const plan = computeRebalancePlan(activeTc);
+    setRebalancePreview(plan);
+    setManualNeeds(plan.need);
     setShowRebalance(true);
   };
+  const toggleRebalanceIncluded = (t) => {
+    setRebalanceIncluded(prev => {
+      const next = { ...prev, [t]: !prev[t] };
+      const activeTc = TELECALLERS.filter(x => next[x]);
+      if (activeTc.length) {
+        const plan = computeRebalancePlan(activeTc);
+        setRebalancePreview(plan);
+        setManualNeeds(plan.need);
+      }
+      return next;
+    });
+  };
+  const manualTotal = Object.values(manualNeeds).reduce((s, v) => s + (Number(v) || 0), 0);
   const commitRebalance = () => {
     if (!rebalancePreview || !rebalancePreview.eligible.length) return;
-    const { eligible, need } = rebalancePreview;
+    const need = rebalanceManual ? manualNeeds : rebalancePreview.need;
+    if (rebalanceManual && manualTotal > rebalancePreview.eligible.length) {
+      alert(`Those counts add up to ${manualTotal}, but there are only ${rebalancePreview.eligible.length} new leads to give out. Reduce one or more counts.`);
+      return;
+    }
+    const { eligible } = rebalancePreview;
     const at = Date.now();
     const queue = [];
-    TELECALLERS.forEach(t => { for (let i = 0; i < need[t]; i++) queue.push(t); });
+    rebalancePreview.activeTc.forEach(t => { for (let i = 0; i < (Number(need[t]) || 0); i++) queue.push(t); });
     const shuffled = [...eligible].sort(() => Math.random() - 0.5); // mix hubs across telecallers rather than assigning in list order
     const idToNewOwner = new Map();
     shuffled.forEach((r, i) => { if (queue[i]) idToNewOwner.set(r.id, queue[i]); });
@@ -6366,8 +6395,8 @@ function HubDistributors({ embedded = false } = {}) {
         remarks: [...(r.remarks || []), { text: `Rebalanced — equal split (previously ${r.telecaller})`, status: r.status, telecaller: newOwner, at }],
       };
     }));
-    setShowRebalance(false); setRebalancePreview(null);
-    alert(`Rebalanced ${moved} distributor${moved === 1 ? "" : "s"}. Everyone's final total is equal (or as close as the numbers allow) — nobody's previous positive leads moved.`);
+    setShowRebalance(false); setRebalancePreview(null); setRebalanceManual(false);
+    alert(`Rebalanced ${moved} distributor${moved === 1 ? "" : "s"} among ${rebalancePreview.activeTc.join(", ")}. Nobody's previous positive leads moved, and anyone unticked was left completely untouched.`);
   };
 
   // ── Printable telecaller call sheet ─────────────────────────────────────
@@ -6715,12 +6744,44 @@ function HubDistributors({ embedded = false } = {}) {
         <Btn label="⚖️ Preview Equal Split" color={T.indigo} onClick={openRebalance} />
       </Card>
 
-      <Sheet open={showRebalance} onClose={() => { setShowRebalance(false); setRebalancePreview(null); }} title="⚖️ Rebalance Existing Data">
+      <Sheet open={showRebalance} onClose={() => { setShowRebalance(false); setRebalancePreview(null); setRebalanceManual(false); }} title="⚖️ Rebalance Existing Data">
+        <div style={{ fontSize: 11, color: T.t2, fontWeight: 600, marginBottom: 6 }}>Include in this rebalance</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+          {TELECALLERS.map(t => {
+            const on = rebalanceIncluded[t];
+            return (
+              <button key={t} onClick={() => toggleRebalanceIncluded(t)} style={{
+                display: "flex", alignItems: "center", gap: 6,
+                background: on ? telecallerColor(t) + "1E" : T.surface,
+                border: `1.5px solid ${on ? telecallerColor(t) : T.border}`, borderRadius: 20,
+                padding: "6px 12px", fontSize: 12, fontWeight: 700,
+                color: on ? telecallerColor(t) : T.t3, cursor: "pointer", fontFamily: FONT,
+              }}>{on ? "✅" : "⬜"} {t}</button>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 10.5, color: T.t3, marginBottom: 14 }}>Untick anyone unavailable (on leave, etc.) — they'll be left completely alone, nothing of theirs moves and they get none of the new leads.</div>
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          <button onClick={() => setRebalanceManual(false)} style={{
+            flex: 1, background: !rebalanceManual ? T.indigo : "transparent", color: !rebalanceManual ? "#fff" : T.t2,
+            border: `1px solid ${!rebalanceManual ? T.indigo : T.border}`, borderRadius: 10, padding: "8px 10px",
+            fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+          }}>⚖️ Auto Equal Split</button>
+          <button onClick={() => setRebalanceManual(true)} style={{
+            flex: 1, background: rebalanceManual ? T.indigo : "transparent", color: rebalanceManual ? "#fff" : T.t2,
+            border: `1px solid ${rebalanceManual ? T.indigo : T.border}`, borderRadius: 10, padding: "8px 10px",
+            fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+          }}>✍️ Manual Counts</button>
+        </div>
+
         {rebalancePreview && (
           <>
             <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
               <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, textAlign: "center" }}>
-                <div style={{ fontSize: 20, fontWeight: 800, color: T.emerald }}>{(rows || []).length - rebalancePreview.eligible.length}</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: T.emerald }}>
+                  {rebalancePreview.activeTc.reduce((s, t) => s + rebalancePreview.positiveByTc[t], 0)}
+                </div>
                 <div style={{ fontSize: 10, color: T.t3, marginTop: 2 }}>Positive remarks — never move</div>
               </div>
               <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, textAlign: "center" }}>
@@ -6728,22 +6789,49 @@ function HubDistributors({ embedded = false } = {}) {
                 <div style={{ fontSize: 10, color: T.t3, marginTop: 2 }}>New leads to hand out</div>
               </div>
             </div>
-            <div style={{ fontSize: 11, color: T.t2, fontWeight: 600, marginBottom: 8 }}>Positives kept + new leads given, per telecaller:</div>
-            {TELECALLERS.map(t => {
-              const isOver = rebalancePreview.overflow.includes(t);
-              return (
-                <div key={t} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 2px", borderBottom: `1px solid ${T.border}` }}>
-                  <div>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: telecallerColor(t) }}>{t}</span>
-                    <div style={{ fontSize: 10, color: T.t3, marginTop: 1 }}>
-                      {rebalancePreview.positiveByTc[t]} positive kept {rebalancePreview.need[t] > 0 ? `+ ${rebalancePreview.need[t]} new` : ""}
-                      {isOver ? " · already above fair share" : ""}
+
+            {!rebalanceManual ? (
+              <>
+                <div style={{ fontSize: 11, color: T.t2, fontWeight: 600, marginBottom: 8 }}>Positives kept + new leads given, per telecaller:</div>
+                {rebalancePreview.activeTc.map(t => {
+                  const isOver = rebalancePreview.overflow.includes(t);
+                  return (
+                    <div key={t} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 2px", borderBottom: `1px solid ${T.border}` }}>
+                      <div>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: telecallerColor(t) }}>{t}</span>
+                        <div style={{ fontSize: 10, color: T.t3, marginTop: 1 }}>
+                          {rebalancePreview.positiveByTc[t]} positive kept {rebalancePreview.need[t] > 0 ? `+ ${rebalancePreview.need[t]} new` : ""}
+                          {isOver ? " · already above fair share" : ""}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 15, fontWeight: 800, color: T.t1 }}>{rebalancePreview.afterCounts[t] || 0}</span>
                     </div>
+                  );
+                })}
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 11, color: T.t2, fontWeight: 600, marginBottom: 8 }}>Type how many new leads each telecaller should get:</div>
+                {rebalancePreview.activeTc.map(t => (
+                  <div key={t} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 2px", borderBottom: `1px solid ${T.border}`, gap: 10 }}>
+                    <div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: telecallerColor(t) }}>{t}</span>
+                      <div style={{ fontSize: 10, color: T.t3, marginTop: 1 }}>{rebalancePreview.positiveByTc[t]} positive kept</div>
+                    </div>
+                    <input type="number" min={0} max={rebalancePreview.eligible.length} value={manualNeeds[t] ?? 0}
+                      onChange={e => setManualNeeds(prev => ({ ...prev, [t]: Math.max(0, Number(e.target.value) || 0) }))}
+                      style={{ width: 64, boxSizing: "border-box", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: "6px 8px", fontSize: 13, fontWeight: 700, color: T.t1, textAlign: "center", fontFamily: FONT, outline: "none" }} />
                   </div>
-                  <span style={{ fontSize: 15, fontWeight: 800, color: T.t1 }}>{rebalancePreview.afterCounts[t] || 0}</span>
+                ))}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: manualTotal > rebalancePreview.eligible.length ? T.rose : T.t2 }}>
+                    {manualTotal} of {rebalancePreview.eligible.length} new leads allocated
+                  </span>
+                  <button onClick={() => setManualNeeds(rebalancePreview.need)} style={{ background: "none", border: "none", color: T.indigo, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>Reset to equal</button>
                 </div>
-              );
-            })}
+              </>
+            )}
+
             <div style={{ marginTop: 16 }}>
               <Btn label={`✅ Rebalance ${rebalancePreview.eligible.length} New Lead${rebalancePreview.eligible.length === 1 ? "" : "s"}`} color={T.indigo} full
                 onClick={commitRebalance} disabled={!rebalancePreview.eligible.length} />
