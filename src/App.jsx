@@ -6292,41 +6292,72 @@ function HubDistributors({ embedded = false } = {}) {
   };
 
   // ── Rebalance existing data ─────────────────────────────────────────────
-  // A distributor with any positive remark in its history (Interested,
-  // Visited, Deal Accepted) already has a relationship with its current
-  // telecaller — those are left alone. Everything else (New, Contacted with
-  // no positive outcome yet, Not Interested, etc.) is eligible and gets
-  // split evenly, round-robin, across every telecaller.
+  // Two things must both be true when this is done:
+  //  1) Every telecaller ends up with the same total count (fully equal
+  //     split), and
+  //  2) Nobody's previous positive remark (Interested / Visited / Deal
+  //     Accepted) ever moves away from them — those relationships are
+  //     never touched.
+  // Those two only work together if the *new* (non-positive) leads are
+  // handed out unevenly on purpose: someone who already holds a lot of
+  // positive leads gets fewer new ones, someone who holds few gets more —
+  // so everyone's final total lands on the same number (or as close as the
+  // numbers allow, when a telecaller's own positives alone already exceed
+  // a fair share).
   const isProtectedHubRecord = (r) => {
     if (HUB_STATUS_SENTIMENT[r.status] === "positive") return true;
     return (r.remarks || []).some(rm => HUB_STATUS_SENTIMENT[rm.status] === "positive");
   };
-  const openRebalance = () => {
+  const computeRebalancePlan = () => {
     const all = rows || [];
-    const protectedRecs = all.filter(isProtectedHubRecord);
-    const eligible = all.filter(r => !isProtectedHubRecord(r));
-    const afterCounts = {};
-    TELECALLERS.forEach(t => { afterCounts[t] = protectedRecs.filter(r => r.telecaller === t).length; });
-    eligible.forEach((r, i) => {
-      const t = TELECALLERS[i % TELECALLERS.length];
-      afterCounts[t] = (afterCounts[t] || 0) + 1;
+    const positiveByTc = {}; TELECALLERS.forEach(t => { positiveByTc[t] = 0; });
+    const eligible = [];
+    all.forEach(r => {
+      if (isProtectedHubRecord(r)) positiveByTc[r.telecaller] = (positiveByTc[r.telecaller] || 0) + 1;
+      else eligible.push(r);
     });
-    setRebalancePreview({
-      protectedCount: protectedRecs.length,
-      eligibleCount: eligible.length,
-      eligibleIds: eligible.map(r => r.id),
-      afterCounts,
-    });
+    const idealTotal = all.length / (TELECALLERS.length || 1);
+    // Already holding at least a fair share of positives? Keep exactly what
+    // they have and give them none of the new pool.
+    const overflow = TELECALLERS.filter(t => positiveByTc[t] >= idealTotal);
+    const underGroup = TELECALLERS.filter(t => !overflow.includes(t));
+
+    const need = {}; TELECALLERS.forEach(t => { need[t] = 0; });
+    if (underGroup.length) {
+      const positivesInUnder = underGroup.reduce((s, t) => s + positiveByTc[t], 0);
+      const fairFinal = (eligible.length + positivesInUnder) / underGroup.length;
+      const base = Math.floor(fairFinal);
+      let distributed = 0;
+      underGroup.forEach(t => {
+        const give = Math.max(0, base - positiveByTc[t]);
+        need[t] = give;
+        distributed += give;
+      });
+      let leftover = eligible.length - distributed;
+      let i = 0;
+      while (leftover > 0) { need[underGroup[i % underGroup.length]] += 1; leftover--; i++; }
+    }
+    const afterCounts = {}; TELECALLERS.forEach(t => { afterCounts[t] = positiveByTc[t] + need[t]; });
+    return { positiveByTc, eligible, need, afterCounts, overflow };
+  };
+  const openRebalance = () => {
+    setRebalancePreview(computeRebalancePlan());
     setShowRebalance(true);
   };
   const commitRebalance = () => {
-    if (!rebalancePreview || !rebalancePreview.eligibleCount) return;
+    if (!rebalancePreview || !rebalancePreview.eligible.length) return;
+    const { eligible, need } = rebalancePreview;
     const at = Date.now();
+    const queue = [];
+    TELECALLERS.forEach(t => { for (let i = 0; i < need[t]; i++) queue.push(t); });
+    const shuffled = [...eligible].sort(() => Math.random() - 0.5); // mix hubs across telecallers rather than assigning in list order
     const idToNewOwner = new Map();
-    rebalancePreview.eligibleIds.forEach((id, i) => idToNewOwner.set(id, TELECALLERS[i % TELECALLERS.length]));
+    shuffled.forEach((r, i) => { if (queue[i]) idToNewOwner.set(r.id, queue[i]); });
+    let moved = 0;
     setRows(prev => (prev || []).map(r => {
       const newOwner = idToNewOwner.get(r.id);
       if (!newOwner || newOwner === r.telecaller) return r;
+      moved++;
       return {
         ...r,
         telecaller: newOwner,
@@ -6336,7 +6367,7 @@ function HubDistributors({ embedded = false } = {}) {
       };
     }));
     setShowRebalance(false); setRebalancePreview(null);
-    alert(`Rebalanced ${rebalancePreview.eligibleCount} distributor${rebalancePreview.eligibleCount === 1 ? "" : "s"} evenly. ${rebalancePreview.protectedCount} with a positive remark were left untouched.`);
+    alert(`Rebalanced ${moved} distributor${moved === 1 ? "" : "s"}. Everyone's final total is equal (or as close as the numbers allow) — nobody's previous positive leads moved.`);
   };
 
   // ── Printable telecaller call sheet ─────────────────────────────────────
@@ -6689,24 +6720,33 @@ function HubDistributors({ embedded = false } = {}) {
           <>
             <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
               <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, textAlign: "center" }}>
-                <div style={{ fontSize: 20, fontWeight: 800, color: T.emerald }}>{rebalancePreview.protectedCount}</div>
-                <div style={{ fontSize: 10, color: T.t3, marginTop: 2 }}>Have a positive remark — untouched</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: T.emerald }}>{(rows || []).length - rebalancePreview.eligible.length}</div>
+                <div style={{ fontSize: 10, color: T.t3, marginTop: 2 }}>Positive remarks — never move</div>
               </div>
               <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, textAlign: "center" }}>
-                <div style={{ fontSize: 20, fontWeight: 800, color: T.indigo }}>{rebalancePreview.eligibleCount}</div>
-                <div style={{ fontSize: 10, color: T.t3, marginTop: 2 }}>Will be split evenly</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: T.indigo }}>{rebalancePreview.eligible.length}</div>
+                <div style={{ fontSize: 10, color: T.t3, marginTop: 2 }}>New leads to hand out</div>
               </div>
             </div>
-            <div style={{ fontSize: 11, color: T.t2, fontWeight: 600, marginBottom: 8 }}>After rebalancing, each telecaller will have:</div>
-            {TELECALLERS.map(t => (
-              <div key={t} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 2px", borderBottom: `1px solid ${T.border}` }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: telecallerColor(t) }}>{t}</span>
-                <span style={{ fontSize: 13, fontWeight: 800, color: T.t1 }}>{rebalancePreview.afterCounts[t] || 0}</span>
-              </div>
-            ))}
+            <div style={{ fontSize: 11, color: T.t2, fontWeight: 600, marginBottom: 8 }}>Positives kept + new leads given, per telecaller:</div>
+            {TELECALLERS.map(t => {
+              const isOver = rebalancePreview.overflow.includes(t);
+              return (
+                <div key={t} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 2px", borderBottom: `1px solid ${T.border}` }}>
+                  <div>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: telecallerColor(t) }}>{t}</span>
+                    <div style={{ fontSize: 10, color: T.t3, marginTop: 1 }}>
+                      {rebalancePreview.positiveByTc[t]} positive kept {rebalancePreview.need[t] > 0 ? `+ ${rebalancePreview.need[t]} new` : ""}
+                      {isOver ? " · already above fair share" : ""}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 15, fontWeight: 800, color: T.t1 }}>{rebalancePreview.afterCounts[t] || 0}</span>
+                </div>
+              );
+            })}
             <div style={{ marginTop: 16 }}>
-              <Btn label={`✅ Rebalance ${rebalancePreview.eligibleCount} Distributor${rebalancePreview.eligibleCount === 1 ? "" : "s"}`} color={T.indigo} full
-                onClick={commitRebalance} disabled={!rebalancePreview.eligibleCount} />
+              <Btn label={`✅ Rebalance ${rebalancePreview.eligible.length} New Lead${rebalancePreview.eligible.length === 1 ? "" : "s"}`} color={T.indigo} full
+                onClick={commitRebalance} disabled={!rebalancePreview.eligible.length} />
             </div>
           </>
         )}
