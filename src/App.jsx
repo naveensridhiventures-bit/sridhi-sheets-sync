@@ -6302,9 +6302,10 @@ function HubDistributors({ embedded = false } = {}) {
   //     Accepted) ever moves away from them — those relationships are
   //     never touched.
   // A telecaller can be excluded entirely (the tick-list below) — e.g.
-  // Ramya isn't available right now, so nothing of hers moves and she
-  // receives none of the new pool; her existing records, positive or not,
-  // are left completely alone and don't count toward anyone else's split.
+  // Ramya isn't available right now, so she's pulled out of the split:
+  // everything currently in her name (positive or not) goes back into the
+  // shared pool and gets handed out among whoever's still ticked, so she
+  // ends up with nothing and nobody's data sits idle under her name.
   // Those two only work together if the *new* (non-positive) leads are
   // handed out unevenly on purpose among the included telecallers: someone
   // who already holds a lot of positive leads gets fewer new ones, someone
@@ -6316,14 +6317,22 @@ function HubDistributors({ embedded = false } = {}) {
     return (r.remarks || []).some(rm => HUB_STATUS_SENTIMENT[rm.status] === "positive");
   };
   const computeRebalancePlan = (activeTc) => {
-    const all = (rows || []).filter(r => activeTc.includes(r.telecaller));
     const positiveByTc = {}; activeTc.forEach(t => { positiveByTc[t] = 0; });
     const eligible = [];
-    all.forEach(r => {
-      if (isProtectedHubRecord(r)) positiveByTc[r.telecaller] = (positiveByTc[r.telecaller] || 0) + 1;
-      else eligible.push(r);
+    (rows || []).forEach(r => {
+      // A record currently owned by someone NOT in this rebalance (unticked,
+      // e.g. Ramya while unavailable) always goes into the shared pool to be
+      // handed out to the included telecallers — even if it was positive,
+      // since it isn't being "protected" for someone who isn't part of this
+      // split. Only an INCLUDED telecaller's own positive leads are kept.
+      if (activeTc.includes(r.telecaller) && isProtectedHubRecord(r)) {
+        positiveByTc[r.telecaller] += 1;
+      } else {
+        eligible.push(r);
+      }
     });
-    const idealTotal = all.length / (activeTc.length || 1);
+    const totalConsidered = activeTc.reduce((s, t) => s + positiveByTc[t], 0) + eligible.length;
+    const idealTotal = totalConsidered / (activeTc.length || 1);
     // Already holding at least a fair share of positives? Keep exactly what
     // they have and give them none of the new pool.
     const overflow = activeTc.filter(t => positiveByTc[t] >= idealTotal);
@@ -6396,7 +6405,7 @@ function HubDistributors({ embedded = false } = {}) {
       };
     }));
     setShowRebalance(false); setRebalancePreview(null); setRebalanceManual(false);
-    alert(`Rebalanced ${moved} distributor${moved === 1 ? "" : "s"} among ${rebalancePreview.activeTc.join(", ")}. Nobody's previous positive leads moved, and anyone unticked was left completely untouched.`);
+    alert(`Rebalanced ${moved} distributor${moved === 1 ? "" : "s"} among ${rebalancePreview.activeTc.join(", ")}. Anyone unticked now has none of this data — it was pulled back into the pool and handed out to the rest.`);
   };
 
   // ── Printable telecaller call sheet ─────────────────────────────────────
@@ -6760,7 +6769,7 @@ function HubDistributors({ embedded = false } = {}) {
             );
           })}
         </div>
-        <div style={{ fontSize: 10.5, color: T.t3, marginBottom: 14 }}>Untick anyone unavailable (on leave, etc.) — they'll be left completely alone, nothing of theirs moves and they get none of the new leads.</div>
+        <div style={{ fontSize: 10.5, color: T.t3, marginBottom: 14 }}>Untick anyone unavailable (on leave, etc.) — everything currently in their name goes back into the pool and gets handed out among whoever's left ticked, so they end up with none.</div>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
           <button onClick={() => setRebalanceManual(false)} style={{
