@@ -3852,6 +3852,50 @@ function HomeCustomers() {
   const [distributorDraft, setDistributorDraft] = useState("");
   const [busyPdf, setBusyPdf] = useState(false);
 
+  // ── Per-record access control (same "key" system as Hub Distributors) ──
+  // Opening any lead asks for the owning telecaller's personal key first.
+  // Nothing is remembered between taps — every open is checked fresh.
+  const [pendingOpen, setPendingOpen] = useState(null);
+  const [openKeyValue, setOpenKeyValue] = useState("");
+  const [openKeyError, setOpenKeyError] = useState(""); // "" | "wrong" | "notyours"
+  const [currentTelecaller, setCurrentTelecaller] = useState(null);
+
+  // ── Bulk selection (for bulk message / contact export) ──
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const toggleSelectMode = () => { setSelectMode(m => !m); setSelectedIds(new Set()); };
+  const toggleSelected = (id) => setSelectedIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  // ── Bulk Import (paste from Excel/Sheets, same parser as Hub Distributors) ──
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importDefaultTc, setImportDefaultTc] = useState(TELECALLERS[0]);
+  const [importPreview, setImportPreview] = useState(null); // { rows, skipped } | null
+  const [importing, setImporting] = useState(false);
+
+  // ── Split Equally — paste a fresh batch of contacts and divide them
+  // evenly, round-robin, across whichever telecallers are selected.
+  const [showSplit, setShowSplit] = useState(false);
+  const [splitText, setSplitText] = useState("");
+  const [splitTelecallers, setSplitTelecallers] = useState(() => new Set(TELECALLERS));
+  const [splitArea, setSplitArea] = useState("");
+  const [splitPreview, setSplitPreview] = useState(null); // { buckets, skipped, total } | null
+  const [splitCommitting, setSplitCommitting] = useState(false);
+  const [isShuffling, setIsShuffling] = useState(false);
+  const toggleSplitTelecaller = (t) => setSplitTelecallers(prev => {
+    const next = new Set(prev);
+    if (next.has(t)) next.delete(t); else next.add(t);
+    return next;
+  });
+
+  // ── Bulk Message / Export Contacts ──
+  const [showBulkMsg, setShowBulkMsg] = useState(false);
+  const [bulkMsgText, setBulkMsgText] = useState("Hi {name}, this is Sridhi Ventures — ");
+
   const all = rows || [];
   const knownAreas = useMemo(() => {
     const set = new Set();
@@ -3980,6 +4024,183 @@ function HomeCustomers() {
     const url = normalizeMapLink(c.mapLink);
     if (url) window.open(url, "_blank", "noopener");
   };
+
+  // ── Open a record only after its owning telecaller's key is verified ──
+  const requestOpen = (c) => { setPendingOpen(c); setOpenKeyValue(""); setOpenKeyError(""); };
+  const closeKeyPrompt = () => { setPendingOpen(null); setOpenKeyValue(""); setOpenKeyError(""); };
+  const submitOpenKey = () => {
+    if (!openKeyValue) return;
+    const name = SECRET_KEYS[openKeyValue.trim()];
+    if (!name) { setOpenKeyError("wrong"); setOpenKeyValue(""); return; }
+    const c = pendingOpen;
+    if (name !== c.telecaller) { setOpenKeyError("notyours"); setOpenKeyValue(""); return; }
+    setCurrentTelecaller(name);
+    setSelectedId(c.id);
+    closeKeyPrompt();
+  };
+  const closeDetail = () => { setSelectedId(null); setCurrentTelecaller(null); };
+
+  // ── Bulk Import — same parser Hub Distributors uses (Name/Phone/Area/
+  // Address/Map/Remark/Telecaller columns, in any order, header or not).
+  // Re-pasting an updated sheet is safe: matched by phone number and
+  // merged into the existing lead instead of duplicated.
+  const runImportPreview = () => setImportPreview(parseHubBulkImport(importText, importDefaultTc));
+  const commitImport = () => {
+    if (!importPreview || !importPreview.rows.length) return;
+    setImporting(true);
+    setRows(prev => {
+      const existing = [...(prev || [])];
+      importPreview.rows.forEach(ir => {
+        const phone = phoneKey(ir.contact);
+        const matchIdx = existing.findIndex(e =>
+          (phone && phone.length >= 10 && phoneKey(e.contact) === phone) ||
+          (!phone && ir.name && (e.name || "").trim().toLowerCase() === ir.name.toLowerCase())
+        );
+        const telecaller = TELECALLERS.find(t => t.toLowerCase() === (ir.telecaller || "").toLowerCase()) || importDefaultTc;
+        const area = normalizeAreaName(ir.area, knownAreas);
+        const now = Date.now();
+        if (matchIdx >= 0) {
+          const cur = existing[matchIdx];
+          const lastNote = (cur.remarks || []).length ? (cur.remarks[cur.remarks.length - 1].text || cur.remarks[cur.remarks.length - 1]) : null;
+          const newRemarks = [...(cur.remarks || [])];
+          if (ir.remark && ir.remark !== lastNote) {
+            newRemarks.push({ text: `[${homeStamp(now)} · ${telecaller}] ${ir.remark}`, note: ir.remark, telecaller, at: now });
+          }
+          existing[matchIdx] = {
+            ...cur,
+            name: cur.name || ir.name || cur.name,
+            area: cur.area || area,
+            address: cur.address || ir.address || "",
+            mapLink: cur.mapLink || normalizeMapLink(ir.mapLink) || "",
+            contact: cur.contact || ir.contact || "",
+            telecaller: cur.telecaller || telecaller,
+            remarks: newRemarks,
+            lastRemarkAt: newRemarks.length ? now : cur.lastRemarkAt,
+          };
+        } else {
+          const firstEntry = { text: `[${homeStamp(now)} · ${telecaller}] Lead added (Bulk Import)${ir.remark ? " — " + ir.remark : ""}`, note: ir.remark || "Lead added (Bulk Import)", telecaller, at: now };
+          existing.push({
+            id: homeId(),
+            name: ir.name || (ir.contact ? "Unnamed · " + ir.contact : "Unnamed Lead"),
+            contact: ir.contact || "",
+            area, address: ir.address || "", mapLink: normalizeMapLink(ir.mapLink) || "",
+            leadType: "Home", source: "Bulk Import",
+            status: HOME_STATUSES[0], telecaller, distributor: "",
+            remarks: [firstEntry], lastRemarkAt: now, createdAt: now,
+          });
+        }
+      });
+      return existing;
+    });
+    setImporting(false);
+    setShowImport(false);
+    setImportText("");
+    setImportPreview(null);
+  };
+
+  // ── Split Equally — paste a fresh batch of contacts, pick who's working
+  // today, and divide the batch evenly (round-robin) between them. Each
+  // new lead lands in the main list exactly like any other.
+  const buildSplitPreview = () => {
+    const telecallerList = Array.from(splitTelecallers);
+    if (!telecallerList.length) { alert("Select at least one telecaller to split between."); return; }
+    if (!splitText.trim()) { alert("Paste or type in the numbers first."); return; }
+    const parsed = parseHubBulkImport(splitText, "").rows;
+    const existingPhones = new Set(all.map(c => phoneKey(c.contact)).filter(k => k.length >= 10));
+    const fresh = [];
+    let skipped = 0;
+    parsed.forEach(p => {
+      const key = phoneKey(p.contact);
+      if (key.length >= 10 && existingPhones.has(key)) { skipped++; return; } // already a lead — don't duplicate
+      fresh.push(p);
+    });
+    if (!fresh.length) { alert(skipped ? `All ${skipped} number(s) already exist as leads — nothing new to split.` : "No valid numbers found in what was pasted."); return; }
+    const shuffled = [...fresh].sort(() => Math.random() - 0.5);
+    const buckets = telecallerList.map(t => ({ telecaller: t, contacts: [] }));
+    shuffled.forEach((p, i) => buckets[i % buckets.length].contacts.push(p));
+    setSplitPreview({ buckets, skipped, total: fresh.length });
+  };
+  const shuffleSplit = () => {
+    if (!splitPreview) return;
+    setIsShuffling(true);
+    setTimeout(() => {
+      setSplitPreview(prev => {
+        if (!prev) return prev;
+        const flat = prev.buckets.flatMap(b => b.contacts);
+        const reshuffled = [...flat].sort(() => Math.random() - 0.5);
+        const buckets = prev.buckets.map(b => ({ ...b, contacts: [] }));
+        reshuffled.forEach((p, i) => buckets[i % buckets.length].contacts.push(p));
+        return { ...prev, buckets };
+      });
+      setIsShuffling(false);
+    }, 380);
+  };
+  const commitSplit = () => {
+    if (!splitPreview || !splitPreview.total) return;
+    setSplitCommitting(true);
+    const now = Date.now();
+    const area = normalizeAreaName(splitArea, knownAreas);
+    const newRecs = [];
+    splitPreview.buckets.forEach(b => {
+      b.contacts.forEach(p => {
+        const firstEntry = { text: `[${homeStamp(now)} · ${b.telecaller}] Lead added (Split Import)`, note: "Lead added (Split Import)", telecaller: b.telecaller, at: now };
+        newRecs.push({
+          id: homeId(),
+          name: p.name || (p.contact ? "Unnamed · " + p.contact : "Unnamed Lead"),
+          contact: p.contact || "",
+          area, address: "", mapLink: "",
+          leadType: "Home", source: "Instagram Ad",
+          status: HOME_STATUSES[0], telecaller: b.telecaller, distributor: "",
+          remarks: [firstEntry], lastRemarkAt: now, createdAt: now,
+        });
+      });
+    });
+    setRows([...newRecs, ...all]);
+    setSplitCommitting(false);
+    setShowSplit(false);
+    setSplitText("");
+    setSplitPreview(null);
+    alert(`Added ${newRecs.length} lead${newRecs.length === 1 ? "" : "s"}, split evenly across ${splitPreview.buckets.length} telecaller${splitPreview.buckets.length === 1 ? "" : "s"}.`);
+  };
+
+  // ── Bulk contacts export / bulk WhatsApp message ──
+  // Targets whatever is checked in Select mode, or falls back to every
+  // currently filtered lead with a phone number.
+  const bulkTargets = useMemo(() => {
+    const base = selectedIds.size ? filtered.filter(c => selectedIds.has(c.id)) : filtered;
+    return base.filter(c => phoneKey(c.contact).length >= 10);
+  }, [filtered, selectedIds]);
+
+  const exportContactsVCF = () => {
+    if (!bulkTargets.length) { alert("No contacts with a phone number in the current selection."); return; }
+    const vcf = bulkTargets.map(c => {
+      const num = "+91" + phoneKey(c.contact);
+      const addr = [c.address, c.area].filter(Boolean).join(", ");
+      return `BEGIN:VCARD\nVERSION:3.0\nFN:${(c.name || "Unnamed").replace(/\r?\n/g, " ")}\nTEL;TYPE=CELL:${num}\nADR:;;${addr.replace(/,/g, "\\,")};;;;\nEND:VCARD`;
+    }).join("\n");
+    const blob = new Blob([vcf], { type: "text/vcard" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `Home-Customers-Contacts_${fileTag()}.vcf`; a.click();
+    URL.revokeObjectURL(url);
+  };
+  const exportContactsExcel = () => {
+    if (!bulkTargets.length) { alert("No contacts with a phone number in the current selection."); return; }
+    const data = bulkTargets.map(c => ({ "Name": c.name, "Contact": "+91" + phoneKey(c.contact), "Area": c.area || "", "Status": c.status || HOME_STATUSES[0] }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Contacts");
+    XLSX.writeFile(wb, `Home-Customers-Contacts_${fileTag()}.xlsx`);
+  };
+  const copyAllNumbers = () => {
+    if (!bulkTargets.length) { alert("No contacts with a phone number in the current selection."); return; }
+    const list = bulkTargets.map(c => "+91" + phoneKey(c.contact)).join("\n");
+    navigator.clipboard?.writeText(list).then(
+      () => alert(`Copied ${bulkTargets.length} number${bulkTargets.length === 1 ? "" : "s"} to clipboard.`),
+      () => alert("Couldn't copy — your browser blocked clipboard access.")
+    );
+  };
+  const bulkMessageFor = (c) => bulkMsgText.replace(/\{name\}/gi, c.name || "there");
+  const sendBulkOne = (c) => window.open(`https://wa.me/91${phoneKey(c.contact)}?text=${encodeURIComponent(bulkMessageFor(c))}`, "_blank", "noopener");
 
   const filterLabel = () => {
     const bits = [];
@@ -4206,7 +4427,7 @@ function HomeCustomers() {
     const tel = c.contact ? String(c.contact).replace(/[^0-9]/g, "") : "";
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingBottom: 80 }}>
-        <button onClick={() => setSelectedId(null)}
+        <button onClick={closeDetail}
           style={{ background: "none", border: "none", color: T.accent, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT, textAlign: "left", padding: "4px 0" }}>
           ← Back to Home Customers
         </button>
@@ -4322,6 +4543,10 @@ function HomeCustomers() {
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <Btn label="+ Add Lead" onClick={() => { setForm(emptyForm()); setShowAdd(true); }} />
+          <Btn label="📥 Bulk Import" ghost onClick={() => { setShowImport(true); setImportPreview(null); }} />
+          <Btn label="🔀 Split Equally" color={T.indigo} onClick={() => { setShowSplit(true); setSplitPreview(null); }} />
+          <Btn label="📇 Bulk Message" ghost color={T.emerald} onClick={() => setShowBulkMsg(true)} />
+          <Btn label={selectMode ? "✕ Cancel Select" : "☑️ Select"} ghost small onClick={toggleSelectMode} />
           <Btn label={busyPdf ? "Preparing…" : "📄 PDF"} ghost onClick={downloadPDF} />
           <Btn label="📊 Excel" ghost onClick={downloadExcel} />
           <SyncBadge status={syncStatus} onRetry={retrySync} error={syncError} />
@@ -4358,8 +4583,15 @@ function HomeCustomers() {
         </div>
       </Card>
 
-      <div style={{ fontSize: 11, color: T.t3, fontWeight: 600, padding: "0 4px" }}>
-        {filtered.length} lead{filtered.length === 1 ? "" : "s"}{filterLabel() ? " · " + filterLabel() : ""}{search ? ` · “${search}”` : ""} · PDF/Excel export exactly what's shown
+      <div style={{ fontSize: 11, color: T.t3, fontWeight: 600, padding: "0 4px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span>{filtered.length} lead{filtered.length === 1 ? "" : "s"}{filterLabel() ? " · " + filterLabel() : ""}{search ? ` · “${search}”` : ""} · PDF/Excel export exactly what's shown</span>
+        {selectMode && (
+          <>
+            <span style={{ color: T.emerald, fontWeight: 700 }}>· {selectedIds.size} selected</span>
+            <button onClick={() => setSelectedIds(new Set(filtered.map(c => c.id)))} style={{ background: "none", border: "none", color: T.accent, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: FONT, padding: 0 }}>Select all filtered</button>
+            {selectedIds.size > 0 && <button onClick={() => setSelectedIds(new Set())} style={{ background: "none", border: "none", color: T.t3, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: FONT, padding: 0 }}>Clear</button>}
+          </>
+        )}
       </div>
 
       {all.length === 0 && (
@@ -4373,11 +4605,15 @@ function HomeCustomers() {
         const st = c.status || HOME_STATUSES[0];
         const last = homeLastRemarkText(c);
         return (
-          <div key={c.id} onClick={() => { setSelectedId(c.id); setDistributorDraft(c.distributor || ""); }}
-            style={{ background: T.card, border: `1px solid ${T.border}`, borderLeft: `4px solid ${HOME_STATUS_COLOR[st] || T.border}`, borderRadius: 14, padding: 14, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-            <div style={{ minWidth: 0 }}>
+          <div key={c.id} onClick={() => { if (selectMode) toggleSelected(c.id); else { setDistributorDraft(c.distributor || ""); requestOpen(c); } }}
+            style={{ background: T.card, border: `1px solid ${selectMode && selectedIds.has(c.id) ? T.emerald : T.border}`, borderLeft: `4px solid ${HOME_STATUS_COLOR[st] || T.border}`, borderRadius: 14, padding: 14, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+            {selectMode && (
+              <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelected(c.id)} onClick={e => e.stopPropagation()}
+                style={{ width: 18, height: 18, flexShrink: 0, marginTop: 2 }} />
+            )}
+            <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: T.t1 }}>{c.name}{(c.leadType || "Home") === "Mixed" && <span style={{ marginLeft: 6 }}><Chip label="Mixed" color={T.indigo} small /></span>}</div>
-              <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>{c.area || "No area yet"}{c.distributor ? ` · 🚚 ${c.distributor}` : ""}</div>
+              <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>{c.area || "No area yet"}{c.distributor ? ` · 🚚 ${c.distributor}` : ""}{c.telecaller ? ` · 👤 ${c.telecaller}` : ""}</div>
               {c.contact && <div style={{ fontSize: 11, color: T.accent, marginTop: 2, fontWeight: 600 }}>📞 {c.contact}</div>}
               {c.address && <div style={{ fontSize: 11, color: T.t2, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>🏠 {c.address}</div>}
               {last && <div style={{ fontSize: 11, color: T.t2, marginTop: 4 }}>💬 {last.slice(0, 60)}</div>}
@@ -4397,6 +4633,193 @@ function HomeCustomers() {
       <Sheet open={showAdd} onClose={() => setShowAdd(false)} title="Add Home Customer Lead">
         {leadFormFields(form, setForm, true)}
         <Btn label="Add Lead" full onClick={addLead} disabled={!form.name.trim()} />
+      </Sheet>
+
+      <Sheet open={showImport} onClose={() => setShowImport(false)} title="Bulk Import Home Customers">
+        <div style={{ fontSize: 12, color: T.t2, marginBottom: 12, lineHeight: 1.5 }}>
+          Paste rows straight from Excel or Google Sheets — with or without
+          a header row. Any of these columns are recognized in any order:{" "}
+          <b>Name, Phone/Contact, Area, Address, Map Link, Remark/Status, Telecaller</b>.
+          A row with only a phone number is fine too. Re-importing an
+          updated sheet is safe: rows are matched by phone number and merged
+          into the existing lead instead of duplicated.
+        </div>
+        <textarea value={importText} onChange={e => { setImportText(e.target.value); setImportPreview(null); }} rows={8}
+          placeholder={"Paste your data here… even just a list of phone numbers works, e.g.\n9876543210\n9123456780"}
+          style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 12, fontFamily: "monospace", outline: "none", width: "100%", boxSizing: "border-box", resize: "vertical", marginBottom: 12 }} />
+        <Dropdown label="Telecaller for this whole batch *" value={importDefaultTc} onChange={e => { setImportDefaultTc(e.target.value); setImportPreview(null); }} options={TELECALLERS} />
+        <div style={{ fontSize: 11, color: T.t3, marginTop: -8, marginBottom: 12, lineHeight: 1.4 }}>
+          Every row is marked as <b style={{ color: T.t1 }}>{importDefaultTc}</b>'s, unless the paste itself has a Telecaller column with different names per row.
+        </div>
+
+        {!importPreview ? (
+          <Btn label="Preview Import" full ghost onClick={runImportPreview} disabled={!importText.trim()} />
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+                <div style={{ fontSize: 18, fontWeight: 800, color: T.emerald }}>{importPreview.rows.length}</div>
+                <div style={{ fontSize: 9, color: T.t3, fontWeight: 700, textTransform: "uppercase" }}>Ready to Import</div>
+              </div>
+              {importPreview.skipped > 0 && (
+                <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: T.rose }}>{importPreview.skipped}</div>
+                  <div style={{ fontSize: 9, color: T.t3, fontWeight: 700, textTransform: "uppercase" }}>Skipped (blank row)</div>
+                </div>
+              )}
+            </div>
+            {importPreview.rows.length > 0 && (
+              <div style={{ maxHeight: 220, overflowY: "auto", border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 12 }}>
+                {importPreview.rows.slice(0, 8).map((row, i) => (
+                  <div key={i} style={{ padding: "8px 10px", borderBottom: i < Math.min(importPreview.rows.length, 8) - 1 ? `1px solid ${T.border}` : "none" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: T.t1 }}>{row.name || <span style={{ fontStyle: "italic", color: T.t3 }}>No name</span>} <span style={{ fontWeight: 400, color: T.t3 }}>{row.contact ? "· " + row.contact : ""}</span></div>
+                    <div style={{ fontSize: 10.5, color: T.t3, marginTop: 1 }}>{row.area || "No area"} {row.remark ? "· " + row.remark : ""} {row.telecaller ? "· " + row.telecaller : ""}</div>
+                  </div>
+                ))}
+                {importPreview.rows.length > 8 && <div style={{ padding: "8px 10px", fontSize: 11, color: T.t3, fontStyle: "italic" }}>+ {importPreview.rows.length - 8} more…</div>}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn label="Edit Data" ghost onClick={() => setImportPreview(null)} />
+              <Btn label={importing ? "Importing…" : `Import ${importPreview.rows.length} Lead${importPreview.rows.length === 1 ? "" : "s"}`} color={T.emerald}
+                onClick={commitImport} disabled={importing || !importPreview.rows.length} />
+            </div>
+          </>
+        )}
+      </Sheet>
+
+      <Sheet open={showSplit} onClose={() => setShowSplit(false)} title="🔀 Split Equally">
+        <div style={{ fontSize: 12, color: T.t2, marginBottom: 12, lineHeight: 1.5 }}>
+          Paste a fresh batch of numbers — bulk (one per line) or type them
+          in one by one — pick who's working today, and this splits the
+          batch evenly between them. Each new lead lands in the main list
+          exactly like any other — the telecaller filters by their own name
+          afterward to see their slice.
+        </div>
+        <textarea value={splitText} onChange={e => { setSplitText(e.target.value); setSplitPreview(null); }} rows={7}
+          placeholder={"9876543210\n9123456780\n9988776655\n…"}
+          style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 12, fontFamily: "monospace", outline: "none", width: "100%", boxSizing: "border-box", resize: "vertical", marginBottom: 12 }} />
+        {areaInput(splitArea, e => setSplitArea(e.target.value))}
+        <div style={{ fontSize: 11, color: T.t2, marginTop: 4, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Split Between</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+          {TELECALLERS.map(t => {
+            const active = splitTelecallers.has(t);
+            return (
+              <button key={t} onClick={() => { toggleSplitTelecaller(t); setSplitPreview(null); }} style={{
+                background: active ? T.indigo + "22" : T.surface, border: `1px solid ${active ? T.indigo : T.border}`,
+                borderRadius: 20, padding: "7px 13px", fontSize: 12, fontWeight: 700,
+                color: active ? T.indigo : T.t3, cursor: "pointer", fontFamily: FONT,
+              }}>{active ? "✓ " : ""}{t}</button>
+            );
+          })}
+        </div>
+
+        {!splitPreview ? (
+          <Btn label="🔀 Split Equally" full color={T.indigo} onClick={buildSplitPreview} disabled={!splitText.trim() || !splitTelecallers.size} />
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+                <div style={{ fontSize: 18, fontWeight: 800, color: T.emerald }}>{splitPreview.total}</div>
+                <div style={{ fontSize: 9, color: T.t3, fontWeight: 700, textTransform: "uppercase" }}>To Split</div>
+              </div>
+              {splitPreview.skipped > 0 && (
+                <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: T.rose }}>{splitPreview.skipped}</div>
+                  <div style={{ fontSize: 9, color: T.t3, fontWeight: 700, textTransform: "uppercase" }}>Already Exist</div>
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+              {splitPreview.buckets.map(b => {
+                const bc = telecallerColor(b.telecaller);
+                return (
+                  <div key={b.telecaller} style={{
+                    background: bc + "14", border: `1.5px solid ${bc}55`, borderRadius: 12, padding: "10px 12px",
+                    animation: isShuffling ? "shuffleBounce 0.38s ease" : "none",
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: bc }}>{b.telecaller}</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: bc, background: bc + "22", borderRadius: 20, padding: "2px 9px" }}>{b.contacts.length} number{b.contacts.length === 1 ? "" : "s"}</div>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: T.t3, lineHeight: 1.6 }}>
+                      {b.contacts.slice(0, 6).map(c => c.name || c.contact).join(" · ")}
+                      {b.contacts.length > 6 && ` +${b.contacts.length - 6} more`}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn label={isShuffling ? "🎲 Shuffling…" : "🔀 Shuffle"} ghost color={T.indigo} disabled={isShuffling} onClick={shuffleSplit} />
+              <Btn label="Edit Data" ghost onClick={() => setSplitPreview(null)} />
+              <Btn label={splitCommitting ? "Adding…" : `✅ Add ${splitPreview.total} — Split Evenly`} color={T.emerald}
+                onClick={commitSplit} disabled={splitCommitting || !splitPreview.total} />
+            </div>
+          </>
+        )}
+      </Sheet>
+
+      <Sheet open={showBulkMsg} onClose={() => setShowBulkMsg(false)} title="📇 Bulk Message / Export Contacts">
+        <div style={{ fontSize: 12, color: T.t3, marginBottom: 14, lineHeight: 1.5 }}>
+          {selectedIds.size
+            ? `Using ${bulkTargets.length} selected customer${bulkTargets.length === 1 ? "" : "s"} with a phone number.`
+            : `Using all ${bulkTargets.length} currently filtered customer${bulkTargets.length === 1 ? "" : "s"} with a phone number. Tap "☑️ Select" on the list to pick specific ones instead.`}
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+          <Btn label="⬇️ Download Contacts (vCard)" ghost onClick={exportContactsVCF} />
+          <Btn label="⬇️ Download Excel" ghost onClick={exportContactsExcel} />
+          <Btn label="📋 Copy All Numbers" ghost onClick={copyAllNumbers} />
+        </div>
+        <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>
+          Message (use {"{name}"} to personalize)
+        </div>
+        <textarea value={bulkMsgText} onChange={e => setBulkMsgText(e.target.value)} rows={4}
+          style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 13, fontFamily: FONT, outline: "none", width: "100%", boxSizing: "border-box", resize: "vertical", marginBottom: 14 }} />
+        <div style={{ fontSize: 11, color: T.t3, marginBottom: 8, lineHeight: 1.4 }}>
+          WhatsApp doesn't allow a true one-tap "send to everyone" from outside
+          its own app — tap <b style={{ color: T.t1 }}>Send</b> next to each name below
+          to open WhatsApp with the message ready to go, one chat at a time.
+        </div>
+        <div style={{ maxHeight: 280, overflowY: "auto", border: `1px solid ${T.border}`, borderRadius: 10 }}>
+          {bulkTargets.length === 0 && <div style={{ padding: 14, fontSize: 12, color: T.t3, textAlign: "center" }}>No contacts with a phone number in this selection.</div>}
+          {bulkTargets.map((c, i) => (
+            <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 12px", borderBottom: i < bulkTargets.length - 1 ? `1px solid ${T.border}` : "none" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: T.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
+                <div style={{ fontSize: 10.5, color: T.t3 }}>{c.contact}</div>
+              </div>
+              <button onClick={() => sendBulkOne(c)} style={{ background: "#25D36622", border: "1px solid #25D36644", borderRadius: 8, color: "#25D366", padding: "6px 12px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT, flexShrink: 0 }}>💬 Send</button>
+            </div>
+          ))}
+        </div>
+      </Sheet>
+
+      <Sheet open={!!pendingOpen} onClose={closeKeyPrompt} title="Enter Your Key">
+        <div style={{ fontSize: 12.5, color: T.t3, marginBottom: 14 }}>
+          {pendingOpen && `"${pendingOpen.name || "This lead"}" belongs to ${pendingOpen.telecaller || "an unassigned telecaller"}. Enter your key to open it.`}
+        </div>
+        <input
+          type="password"
+          value={openKeyValue}
+          onChange={e => { setOpenKeyValue(e.target.value); setOpenKeyError(""); }}
+          onKeyDown={e => { if (e.key === "Enter") submitOpenKey(); }}
+          autoFocus
+          placeholder="Secret key"
+          style={{
+            width: "100%", boxSizing: "border-box", background: T.surface,
+            border: `1.5px solid ${openKeyError ? T.rose : T.border}`, borderRadius: 12,
+            padding: "13px 14px", fontSize: 17, fontWeight: 800, color: T.t1,
+            textAlign: "center", letterSpacing: "0.05em", fontFamily: FONT, outline: "none",
+          }}
+        />
+        {openKeyError === "wrong" && <div style={{ color: T.rose, fontSize: 12, fontWeight: 700, marginTop: 9 }}>Wrong key — try again.</div>}
+        {openKeyError === "notyours" && pendingOpen && (
+          <div style={{ color: T.rose, fontSize: 12, fontWeight: 700, marginTop: 9 }}>This lead belongs to {pendingOpen.telecaller || "another telecaller"} — you can't open someone else's data.</div>
+        )}
+        <div style={{ marginTop: 14 }}>
+          <Btn label="Unlock" full onClick={submitOpenKey} disabled={!openKeyValue} />
+        </div>
       </Sheet>
     </div>
   );
