@@ -24,7 +24,7 @@ Result: **first load ~3–4× faster**, repeat visits instant from cache.
 ## Part 1 — Google Sheet (unchanged from v2)
 
 1. Create a Google Sheet named **Sridhi Ventures BOS Data**.
-2. Create tabs: `Leads`, `Samples`, `Expenses`, `RepeatCustomers`, `DailyOrders`, `TelecallerActivity`, `MilkDistributors`, `HubDistributors`.
+2. Create tabs: `Leads`, `Samples`, `Expenses`, `RepeatCustomers`, `DailyOrders`, `TelecallerActivity`, `MilkDistributors`, `HubDistributors`, `HomeCustomers` (auto-created on first save).
 3. Add the header row in each tab (see below).
 4. Copy the **Sheet ID** from the URL (`/d/<THIS PART>/edit`).
 
@@ -102,6 +102,11 @@ id  name  contact  area  address  mapLink  status  telecaller  currentBrand  tel
   its own PDF report: a Team Overview page (pipeline status breakdown,
   response analysis, by-telecaller table) plus a unified Activity Log page
   of every call and visit, filterable by day, week, month, or custom range.
+
+**HomeCustomers** *(ad-generated home/mixed leads, area-wise; tab is auto-created on first save)*
+```
+id  name  contact  area  address  mapLink  leadType  source  status  telecaller  distributor  remarks  lastRemarkAt  createdAt
+```
 
 **HubDistributors** *(hub-wise distributor tracker: one row per distributor, remark + status trail, up to 5 areas)*
 ```

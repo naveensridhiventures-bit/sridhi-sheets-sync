@@ -3773,6 +3773,635 @@ function ExistingCustomerPipeline() {
   );
 }
 
+// ─── HOME CUSTOMERS ───────────────────────────────────────────────────────
+// Ad-generated (Instagram boost → WhatsApp) home / mixed leads. Distributors
+// aren't hired for every area yet, so this is a clean, area-wise register:
+// capture the lead + address + map link now, keep status/remarks current,
+// and hand the area-wise PDF to each distributor once they're hired.
+const HOME_STATUSES = [
+  "New Lead", "Contacted", "Interested", "Waiting for Distributor",
+  "Handed to Distributor", "Ordered", "Not Interested", "Not Reachable",
+];
+const HOME_STATUS_COLOR = {
+  "New Lead": T.sky, "Contacted": T.indigo, "Interested": T.emerald,
+  "Waiting for Distributor": T.amber, "Handed to Distributor": T.accent,
+  "Ordered": T.emerald, "Not Interested": T.rose, "Not Reachable": T.t3,
+};
+const HOME_STATUS_RGB = {
+  "New Lead": [14, 130, 190], "Contacted": [76, 95, 224], "Interested": [16, 150, 100],
+  "Waiting for Distributor": [180, 110, 5], "Handed to Distributor": [13, 130, 120],
+  "Ordered": [23, 148, 74], "Not Interested": [200, 45, 60], "Not Reachable": [110, 118, 138],
+};
+const HOME_LEAD_TYPES = ["Home", "Mixed"];
+const HOME_SOURCES = ["Instagram Ad", "WhatsApp", "Referral", "Other"];
+const NO_AREA = "No Area";
+
+function homeId() {
+  return "hc_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+function phoneKey(p) {
+  return String(p || "").replace(/\D/g, "").slice(-10);
+}
+// Keeps area names consistent ("velachery", "Velachery " and "VELACHERY" all
+// become one area) — reuses the spelling already in the data when there is one.
+function normalizeAreaName(raw, knownAreas) {
+  const cleaned = String(raw || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+  const hit = (knownAreas || []).find(a => a.toLowerCase() === cleaned.toLowerCase());
+  if (hit) return hit;
+  return cleaned.split(" ").map(w => w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w).join(" ");
+}
+// Accepts a pasted Google Maps link, a bare "maps.app.goo.gl/..." link, or
+// plain "lat, long" coordinates, and returns a link that always opens.
+function normalizeMapLink(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  if (/^https?:\/\//i.test(s)) return s;
+  const coords = s.match(/^(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)$/);
+  if (coords) return `https://www.google.com/maps?q=${coords[1]},${coords[2]}`;
+  if (/^(www\.|maps\.|goo\.gl|maps\.app\.goo\.gl|google\.[a-z.]+\/maps)/i.test(s)) return "https://" + s;
+  return s;
+}
+function homeStamp(ts) {
+  const d = new Date(ts);
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " +
+    d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+}
+function homeLastRemarkText(c) {
+  const r = c.remarks || [];
+  return r.length ? remarkText(r[r.length - 1]) : "";
+}
+
+function HomeCustomers() {
+  const [rows, setRows, syncStatus, retrySync, syncError] = useSheetSynced("homeCustomers", "homeCustomers", []);
+  const [selectedId, setSelectedId] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [search, setSearch] = useState("");
+  const [areaFilter, setAreaFilter] = useState("All");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [typeFilter, setTypeFilter] = useState("All");
+  const [groupByArea, setGroupByArea] = useState(true);
+  const [newRemark, setNewRemark] = useState("");
+  const [remarkTag, setRemarkTag] = useState(null);
+  const [remarkTelecaller, setRemarkTelecaller] = useState(TELECALLERS[0]);
+  const [remarkDate, setRemarkDate] = useState(todayISO());
+  const emptyForm = () => ({ name: "", contact: "", area: "", address: "", mapLink: "", leadType: "Home", source: "Instagram Ad", telecaller: TELECALLERS[0], date: todayISO() });
+  const [form, setForm] = useState(emptyForm());
+  const [editForm, setEditForm] = useState(emptyForm());
+  const [distributorDraft, setDistributorDraft] = useState("");
+  const [busyPdf, setBusyPdf] = useState(false);
+
+  const all = rows || [];
+  const knownAreas = useMemo(() => {
+    const set = new Set();
+    all.forEach(c => { if (c.area) set.add(c.area); });
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [all]);
+
+  const areaCounts = useMemo(() => {
+    const m = {};
+    all.forEach(c => { const k = c.area || NO_AREA; m[k] = (m[k] || 0) + 1; });
+    return Object.entries(m).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [all]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const qDigits = q.replace(/\D/g, "");
+    return all
+      .filter(c => areaFilter === "All" || (c.area || NO_AREA) === areaFilter)
+      .filter(c => statusFilter === "All" || (c.status || HOME_STATUSES[0]) === statusFilter)
+      .filter(c => typeFilter === "All" || (c.leadType || "Home") === typeFilter)
+      .filter(c => !q || (c.name || "").toLowerCase().includes(q) || (c.area || "").toLowerCase().includes(q) ||
+        (c.address || "").toLowerCase().includes(q) || (qDigits.length >= 3 && phoneKey(c.contact).includes(qDigits)))
+      .sort((a, b) => (b.lastRemarkAt || b.createdAt || 0) - (a.lastRemarkAt || a.createdAt || 0));
+  }, [all, search, areaFilter, statusFilter, typeFilter]);
+
+  const kpi = useMemo(() => ({
+    total: all.length,
+    fresh: all.filter(c => (c.status || HOME_STATUSES[0]) === "New Lead").length,
+    waiting: all.filter(c => c.status === "Waiting for Distributor").length,
+    areas: areaCounts.filter(([a]) => a !== NO_AREA).length,
+  }), [all, areaCounts]);
+
+  const dateWithNow = (dateStr) => {
+    const now = new Date();
+    const d = new Date((dateStr || todayISO()) + "T00:00:00");
+    d.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+    return d.getTime();
+  };
+
+  const addLead = () => {
+    if (!form.name.trim()) return;
+    if (!form.telecaller) { alert("Please select a telecaller."); return; }
+    const key = phoneKey(form.contact);
+    if (key.length >= 10) {
+      const dup = all.find(c => phoneKey(c.contact) === key);
+      if (dup && !window.confirm(`This number is already saved as "${dup.name}"${dup.area ? " (" + dup.area + ")" : ""}.\n\nAdd it again anyway?`)) return;
+    }
+    const at = dateWithNow(form.date);
+    const firstEntry = { text: `[${homeStamp(at)} · ${form.telecaller}] Lead added (${form.source})`, note: `Lead added (${form.source})`, telecaller: form.telecaller, at };
+    setRows([{
+      id: homeId(),
+      name: form.name.trim(),
+      contact: form.contact.trim(),
+      area: normalizeAreaName(form.area, knownAreas),
+      address: form.address.trim(),
+      mapLink: normalizeMapLink(form.mapLink),
+      leadType: form.leadType,
+      source: form.source,
+      status: HOME_STATUSES[0],
+      telecaller: form.telecaller,
+      distributor: "",
+      remarks: [firstEntry],
+      lastRemarkAt: at,
+      createdAt: at,
+    }, ...all]);
+    setForm(emptyForm());
+    setShowAdd(false);
+  };
+
+  const openEdit = (c) => {
+    setEditForm({ name: c.name || "", contact: c.contact || "", area: c.area || "", address: c.address || "", mapLink: c.mapLink || "", leadType: c.leadType || "Home", source: c.source || "Instagram Ad", telecaller: c.telecaller || TELECALLERS[0], date: todayISO() });
+    setShowEdit(true);
+  };
+  const saveEdit = () => {
+    if (!editForm.name.trim()) return;
+    const now = Date.now();
+    setRows(all.map(c => c.id === selectedId ? {
+      ...c,
+      name: editForm.name.trim(),
+      contact: editForm.contact.trim(),
+      area: normalizeAreaName(editForm.area, knownAreas),
+      address: editForm.address.trim(),
+      mapLink: normalizeMapLink(editForm.mapLink),
+      leadType: editForm.leadType,
+      source: editForm.source,
+      telecaller: editForm.telecaller,
+      remarks: [...(c.remarks || []), `[${homeStamp(now)} · System] Details edited`],
+    } : c));
+    setShowEdit(false);
+  };
+
+  const setStatus = (id, status) => {
+    const now = Date.now();
+    setRows(all.map(c => c.id === id
+      ? { ...c, status, remarks: [...(c.remarks || []), `[${homeStamp(now)} · System] Status changed to "${status}"`], lastRemarkAt: now }
+      : c));
+  };
+
+  const saveDistributor = (id) => {
+    const name = distributorDraft.trim();
+    const now = Date.now();
+    setRows(all.map(c => c.id === id
+      ? { ...c, distributor: name, remarks: [...(c.remarks || []), `[${homeStamp(now)} · System] Distributor ${name ? "set to \"" + name + "\"" : "cleared"}`], lastRemarkAt: now }
+      : c));
+  };
+
+  const addRemark = (id) => {
+    const tagLabel = remarkTag ? remarkTag.label : "";
+    const noteText = newRemark.trim() || tagLabel;
+    if (!noteText) return;
+    if (!remarkTelecaller) { alert("Please select a telecaller."); return; }
+    const at = dateWithNow(remarkDate);
+    const text = `[${homeStamp(at)} · ${remarkTelecaller}${tagLabel ? " · " + tagLabel : ""}] ${noteText}`;
+    const entry = { text, note: noteText, telecaller: remarkTelecaller, at, tag: tagLabel || null, sentiment: remarkTag ? remarkTag.sentiment : "neutral" };
+    setRows(all.map(c => c.id === id ? { ...c, remarks: [...(c.remarks || []), entry], lastRemarkAt: at } : c));
+    setNewRemark(""); setRemarkTag(null); setRemarkDate(todayISO());
+  };
+
+  const deleteLead = (c) => {
+    if (!window.confirm(`Delete "${c.name}" permanently?\n\nThis removes their remark history too. This can't be undone.`)) return;
+    setRows(all.filter(x => x.id !== c.id));
+    setSelectedId(null);
+  };
+
+  const openMap = (c) => {
+    const url = normalizeMapLink(c.mapLink);
+    if (url) window.open(url, "_blank", "noopener");
+  };
+
+  const filterLabel = () => {
+    const bits = [];
+    if (areaFilter !== "All") bits.push(areaFilter);
+    if (statusFilter !== "All") bits.push(statusFilter);
+    if (typeFilter !== "All") bits.push(typeFilter + " leads");
+    return bits.join(" · ");
+  };
+  const fileTag = () => {
+    const t = [areaFilter, statusFilter].filter(x => x !== "All").join("_").replace(/[^a-zA-Z0-9_]/g, "");
+    return (t ? t + "_" : "") + new Date().toISOString().slice(0, 10);
+  };
+
+  // ── Excel export (whatever the current filters show) ─────────────────
+  const downloadExcel = () => {
+    const data = filtered.map(c => ({
+      "Name": c.name, "Contact": c.contact || "", "Area": c.area || "", "Address": c.address || "",
+      "Map Link": c.mapLink || "", "Lead Type": c.leadType || "Home", "Source": c.source || "",
+      "Status": c.status || HOME_STATUSES[0], "Telecaller": c.telecaller || "", "Distributor": c.distributor || "",
+      "Latest Remark": homeLastRemarkText(c), "All Remarks": (c.remarks || []).map(remarkText).join(" | "),
+      "Added On": c.createdAt ? new Date(c.createdAt).toLocaleDateString("en-IN") : "",
+      "Last Updated": c.lastRemarkAt ? new Date(c.lastRemarkAt).toLocaleString("en-IN") : "",
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Home Customers");
+    XLSX.writeFile(wb, `Home-Customers_${fileTag()}.xlsx`);
+  };
+
+  // ── PDF export ─────────────────────────────────────────────────────────
+  // Uses the same filters as the screen, so "Velachery + Interested" gives
+  // exactly that list. Grouped area-wise by default — one section per area
+  // with its own count — which doubles as the handoff sheet for a distributor.
+  const downloadPDF = async () => {
+    if (busyPdf) return;
+    if (!filtered.length) { alert("No leads match the current filters."); return; }
+    setBusyPdf(true);
+    try {
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+      const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 32;
+      const NAVY = [8, 40, 25], TEAL = [23, 148, 74], GRID = [214, 220, 214], INK = [26, 32, 46], SUBTLE = [110, 118, 138];
+      const tint = (c, k = 0.88) => c.map(v => Math.min(255, Math.round(v + (255 - v) * k)));
+      const colorFor = (s) => HOME_STATUS_RGB[s] || SUBTLE;
+      const scopeLine = filterLabel();
+
+      const header = () => {
+        const headerH = 70;
+        doc.setFillColor(...NAVY); doc.rect(0, 0, pageW, headerH, "F");
+        doc.setFillColor(...TEAL); doc.rect(0, headerH - 2, pageW, 2, "F");
+        const logoSize = 34, pad = 5, badge = logoSize + pad * 2;
+        const bx = margin, by = (headerH - badge) / 2 - 1;
+        doc.setFillColor(255, 255, 255); doc.roundedRect(bx, by, badge, badge, 8, 8, "F");
+        try { doc.addImage(SRIDHI_LOGO_PNG, "PNG", bx + pad, by + pad, logoSize, logoSize); } catch (e) { /* logo optional */ }
+        const tx = bx + badge + 14;
+        doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(15);
+        doc.text("SRIDHI VENTURES — Home Customer Leads", tx, 29);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(200, 214, 205);
+        doc.text(scopeLine ? `Filtered: ${scopeLine}` : "Area-wise lead register · ready for distributor handoff", tx, 44);
+        doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.setTextColor(...TEAL.map(v => Math.min(255, v + 70)));
+        doc.text(new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }), pageW - margin, 28, { align: "right" });
+        doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(200, 214, 205);
+        doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`, pageW - margin, 42, { align: "right" });
+      };
+      const footer = () => {
+        const n = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= n; i++) {
+          doc.setPage(i);
+          doc.setDrawColor(...GRID); doc.line(margin, pageH - 26, pageW - margin, pageH - 26);
+          doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...SUBTLE);
+          doc.text("Sridhi Ventures · Home Customer Leads · Confidential", margin, pageH - 13);
+          doc.text(`Page ${i} of ${n}`, pageW - margin, pageH - 13, { align: "right" });
+        }
+      };
+
+      header();
+
+      // Headline + status chips
+      let y = 92;
+      doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(...NAVY);
+      const areaSet = new Set(filtered.map(c => c.area || NO_AREA));
+      doc.text(`${filtered.length} LEAD${filtered.length === 1 ? "" : "S"}  ·  ${areaSet.size} AREA${areaSet.size === 1 ? "" : "S"}`, margin, y);
+      let chipX = margin; const chipY = y + 10;
+      HOME_STATUSES.forEach(s => {
+        const count = filtered.filter(c => (c.status || HOME_STATUSES[0]) === s).length;
+        if (!count) return;
+        const label = `${s}  ${count}`;
+        doc.setFont("helvetica", "bold"); doc.setFontSize(8.5);
+        const w = doc.getTextWidth(label) + 20;
+        if (chipX + w > pageW - margin) return;
+        const col = colorFor(s);
+        doc.setDrawColor(...col); doc.setFillColor(...tint(col)); doc.roundedRect(chipX, chipY, w, 20, 6, 6, "FD");
+        doc.setTextColor(...col); doc.text(label, chipX + 10, chipY + 14);
+        chipX += w + 8;
+      });
+      y = chipY + 36;
+
+      // Area spread — a compact bar chart (top 8 areas) so the shape of the
+      // demand is visible before any rows.
+      const spread = {};
+      filtered.forEach(c => { const k = c.area || NO_AREA; spread[k] = (spread[k] || 0) + 1; });
+      const spreadRows = Object.entries(spread).sort((a, b) => b[1] - a[1]).slice(0, 8);
+      if (groupByArea && spreadRows.length > 1) {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(...NAVY);
+        doc.text("LEADS BY AREA", margin, y);
+        y += 8;
+        const maxV = spreadRows[0][1];
+        const labelW = 120, barMax = pageW - margin * 2 - labelW - 40;
+        spreadRows.forEach(([area, count]) => {
+          doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(...INK);
+          doc.text(doc.splitTextToSize(area, labelW - 8)[0], margin, y + 9);
+          doc.setFillColor(...tint(TEAL, 0.85)); doc.roundedRect(margin + labelW, y, barMax, 11, 3, 3, "F");
+          doc.setFillColor(...TEAL); doc.roundedRect(margin + labelW, y, Math.max(6, (count / maxV) * barMax), 11, 3, 3, "F");
+          doc.setFont("helvetica", "bold"); doc.setTextColor(...NAVY);
+          doc.text(String(count), margin + labelW + barMax + 8, y + 9);
+          y += 15;
+        });
+        y += 10;
+      }
+
+      const showDistributor = filtered.some(c => c.distributor);
+      const head = ["#", "Customer", "Contact", "Address", "Status", "Latest Remark"];
+      if (showDistributor) head.push("Distributor");
+      head.push("Map");
+      const colCount = head.length;
+
+      const makeRow = (c, i) => {
+        const r = [String(i + 1), c.name + ((c.leadType || "Home") === "Mixed" ? "  (Mixed)" : ""), c.contact || "—", c.address || "—", c.status || HOME_STATUSES[0], homeLastRemarkText(c) || "—"];
+        if (showDistributor) r.push(c.distributor || "—");
+        r.push(normalizeMapLink(c.mapLink) ? "Open Map" : "—");
+        return r;
+      };
+      const linkByRow = new Map(); // body row index -> url
+      const body = [];
+      const pushLead = (c, i) => { if (normalizeMapLink(c.mapLink)) linkByRow.set(body.length, normalizeMapLink(c.mapLink)); body.push(makeRow(c, i)); };
+
+      if (groupByArea) {
+        const groups = {};
+        filtered.forEach(c => { const k = c.area || NO_AREA; (groups[k] = groups[k] || []).push(c); });
+        Object.keys(groups).sort((a, b) => (a === NO_AREA) - (b === NO_AREA) || a.localeCompare(b)).forEach(area => {
+          body.push([{ content: `${area.toUpperCase()}   ·   ${groups[area].length} lead${groups[area].length === 1 ? "" : "s"}`, colSpan: colCount, styles: { fillColor: TEAL, textColor: 255, fontStyle: "bold", fontSize: 9.5, cellPadding: { top: 6, bottom: 6, left: 8, right: 8 } } }]);
+          groups[area].forEach((c, i) => pushLead(c, i));
+        });
+      } else {
+        head.splice(3, 0, "Area");
+        // rebuild rows with an Area column when not grouped
+        filtered.forEach((c, i) => {
+          const r = makeRow(c, i); r.splice(3, 0, c.area || "—");
+          if (normalizeMapLink(c.mapLink)) linkByRow.set(body.length, normalizeMapLink(c.mapLink));
+          body.push(r);
+        });
+      }
+      const mapIdx = head.length - 1;
+
+      autoTable(doc, {
+        startY: y,
+        margin: { top: 90, bottom: 40, left: margin, right: margin },
+        head: [head],
+        body,
+        theme: "grid",
+        styles: { font: "helvetica", fontSize: 8.5, cellPadding: 6, lineColor: GRID, lineWidth: 0.6, textColor: INK, valign: "middle", overflow: "linebreak" },
+        headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 9 },
+        alternateRowStyles: { fillColor: [248, 250, 248] },
+        columnStyles: {
+          0: { cellWidth: 24, halign: "center", textColor: SUBTLE },
+          1: { fontStyle: "bold", cellWidth: 110 },
+          2: { cellWidth: 78 },
+          [head.indexOf("Status")]: { cellWidth: 92, fontStyle: "bold", halign: "center" },
+          [mapIdx]: { cellWidth: 56, halign: "center", fontStyle: "bold" },
+        },
+        didParseCell: (d) => {
+          if (d.section !== "body" || d.cell.colSpan > 1) return;
+          if (d.column.index === head.indexOf("Status")) {
+            const col = colorFor(d.cell.raw);
+            d.cell.styles.textColor = col; d.cell.styles.fillColor = tint(col, 0.9);
+          }
+          if (d.column.index === mapIdx && d.cell.raw === "Open Map") { d.cell.styles.textColor = [14, 100, 200]; }
+        },
+        didDrawCell: (d) => {
+          if (d.section === "body" && d.column.index === mapIdx && d.cell.raw === "Open Map") {
+            const url = linkByRow.get(d.row.index);
+            if (url) doc.link(d.cell.x, d.cell.y, d.cell.width, d.cell.height, { url });
+          }
+        },
+        didDrawPage: () => header(),
+      });
+
+      footer();
+      doc.save(`Home-Customers_${fileTag()}.pdf`);
+    } finally {
+      setBusyPdf(false);
+    }
+  };
+
+  const areaInput = (value, onChange) => (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Area</div>
+      <input list="home-areas" value={value} onChange={onChange} placeholder="e.g. Velachery — pick or type new" style={inputStyle} />
+      <datalist id="home-areas">{knownAreas.map(a => <option key={a} value={a} />)}</datalist>
+    </div>
+  );
+
+  const leadFormFields = (f, setF, withDate) => (
+    <>
+      <Field label="Customer Name" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="e.g. Priya Lakshmi" />
+      <Field label="WhatsApp / Contact No" value={f.contact} onChange={e => setF({ ...f, contact: e.target.value })} placeholder="98765 43210" />
+      {areaInput(f.area, e => setF({ ...f, area: e.target.value }))}
+      <Field label="Address" value={f.address} onChange={e => setF({ ...f, address: e.target.value })} placeholder="Door no, street, landmark" />
+      <Field label="Map Location URL" value={f.mapLink} onChange={e => setF({ ...f, mapLink: e.target.value })} placeholder="Paste Google Maps link (or lat, long)" />
+      <Dropdown label="Lead Type" value={f.leadType} onChange={e => setF({ ...f, leadType: e.target.value })} options={HOME_LEAD_TYPES} />
+      <Dropdown label="Source" value={f.source} onChange={e => setF({ ...f, source: e.target.value })} options={HOME_SOURCES} />
+      <Dropdown label="Telecaller (required)" value={f.telecaller} onChange={e => setF({ ...f, telecaller: e.target.value })} options={TELECALLERS} />
+      {withDate && <Field label="Date" type="date" value={f.date} onChange={e => setF({ ...f, date: e.target.value })} />}
+    </>
+  );
+
+  // ══ DETAIL VIEW ══════════════════════════════════════════════════════
+  const selected = selectedId ? all.find(x => x.id === selectedId) : null;
+  if (selected) {
+    const c = selected;
+    const st = c.status || HOME_STATUSES[0];
+    const tel = c.contact ? String(c.contact).replace(/[^0-9]/g, "") : "";
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingBottom: 80 }}>
+        <button onClick={() => setSelectedId(null)}
+          style={{ background: "none", border: "none", color: T.accent, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT, textAlign: "left", padding: "4px 0" }}>
+          ← Back to Home Customers
+        </button>
+
+        <Card accent={HOME_STATUS_COLOR[st]}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: T.t1 }}>{c.name}</div>
+              <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>{c.area || "No area yet"} · {c.leadType || "Home"} · {c.source || "—"}</div>
+              <div style={{ marginTop: 8 }}><Chip label={st} color={HOME_STATUS_COLOR[st] || T.t3} /></div>
+            </div>
+            <button onClick={() => openEdit(c)}
+              style={{ background: T.indigo + "18", border: `1px solid ${T.indigo}44`, borderRadius: 10, color: T.indigo, padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: FONT, flexShrink: 0 }}>✎ Edit</button>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            {[["Contact", c.contact], ["Address", c.address], ["Telecaller", c.telecaller], ["Distributor", c.distributor]].map(([k, v]) => v ? (
+              <div key={k} style={{ display: "flex", padding: "8px 0", borderBottom: `1px solid ${T.border}` }}>
+                <span style={{ fontSize: 11, color: T.t3, width: 90, flexShrink: 0, fontWeight: 600 }}>{k}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: T.t1 }}>{v}</span>
+              </div>
+            ) : null)}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+            {tel && <button onClick={() => { window.location.href = "tel:+91" + phoneKey(tel); }}
+              style={{ flex: 1, minWidth: 90, background: T.emerald + "22", border: `1px solid ${T.emerald}44`, borderRadius: 10, color: T.emerald, padding: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>📞 Call</button>}
+            {tel && <button onClick={() => window.open("https://wa.me/91" + phoneKey(tel), "_blank", "noopener")}
+              style={{ flex: 1, minWidth: 90, background: "#25D36622", border: "1px solid #25D36644", borderRadius: 10, color: "#25D366", padding: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>💬 WhatsApp</button>}
+            {c.mapLink
+              ? <button onClick={() => openMap(c)}
+                  style={{ flex: 1, minWidth: 90, background: T.sky + "22", border: `1px solid ${T.sky}44`, borderRadius: 10, color: T.sky, padding: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>📍 Open Map</button>
+              : <button onClick={() => openEdit(c)}
+                  style={{ flex: 1, minWidth: 90, background: "transparent", border: `1px dashed ${T.border}`, borderRadius: 10, color: T.t3, padding: 10, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>+ Add map link</button>}
+          </div>
+        </Card>
+
+        <Card>
+          <Label sub="Update where this lead stands">Status</Label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {HOME_STATUSES.map(s => {
+              const col = HOME_STATUS_COLOR[s];
+              return (
+                <button key={s} onClick={() => setStatus(c.id, s)}
+                  style={{ background: st === s ? col + "22" : T.surface, border: `1px solid ${st === s ? col : T.border}`, borderRadius: 10, padding: "9px 13px", fontSize: 12, fontWeight: 700, color: st === s ? col : T.t2, cursor: "pointer", fontFamily: FONT }}>{s}</button>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Assigned Distributor (once hired)</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={distributorDraft} onChange={e => setDistributorDraft(e.target.value)} placeholder={c.distributor || "Distributor name"} style={{ ...inputStyle, flex: 1 }} />
+              <Btn label="Save" small onClick={() => saveDistributor(c.id)} disabled={distributorDraft.trim() === (c.distributor || "")} />
+            </div>
+          </div>
+        </Card>
+
+        <Card>
+          <Label sub={`${(c.remarks || []).length} entries`}>Remarks</Label>
+          {(c.remarks || []).length === 0 && <div style={{ fontSize: 12, color: T.t3, marginBottom: 12 }}>No remarks yet.</div>}
+          {(c.remarks || []).slice().reverse().map((r, i, arr) => (
+            <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0", borderBottom: i < arr.length - 1 ? `1px solid ${T.border}` : "none" }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, marginTop: 5, flexShrink: 0, background: SENTIMENT_COLOR[remarkSentimentOf(r)] }} />
+              <span style={{ fontSize: 12, color: T.t2 }}>{remarkText(r)}</span>
+            </div>
+          ))}
+          <div style={{ marginTop: 12 }}>
+            <Dropdown label="Telecaller (required)" value={remarkTelecaller} onChange={e => setRemarkTelecaller(e.target.value)} options={TELECALLERS} />
+            <Field label="Call Date" type="date" value={remarkDate} onChange={e => setRemarkDate(e.target.value)} />
+          </div>
+          <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Quick Tag (optional)</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {REMARK_TAGS.map(tag => {
+              const active = remarkTag && remarkTag.label === tag.label;
+              const col = SENTIMENT_COLOR[tag.sentiment];
+              return (
+                <button key={tag.label} onClick={() => setRemarkTag(active ? null : tag)}
+                  style={{ background: active ? col + "22" : T.surface, border: `1px solid ${active ? col : T.border}`, borderRadius: 20, padding: "6px 12px", fontSize: 11, fontWeight: 700, color: active ? col : T.t2, cursor: "pointer", fontFamily: FONT }}>{tag.label}</button>
+              );
+            })}
+          </div>
+          <textarea value={newRemark} onChange={e => setNewRemark(e.target.value)} rows={3} placeholder="Add extra detail (optional if a tag is picked)…"
+            style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 13, fontFamily: FONT, outline: "none", width: "100%", boxSizing: "border-box", resize: "none", marginTop: 10 }} />
+          <div style={{ marginTop: 8 }}><Btn label="Save Remark" full onClick={() => addRemark(c.id)} disabled={!newRemark.trim() && !remarkTag} /></div>
+        </Card>
+
+        <Btn label="🗑️ Delete Lead" color={T.rose} ghost full onClick={() => deleteLead(c)} />
+
+        <Sheet open={showEdit} onClose={() => setShowEdit(false)} title="Edit Lead Details">
+          {leadFormFields(editForm, setEditForm, false)}
+          <Btn label="Save Changes" full onClick={saveEdit} disabled={!editForm.name.trim()} />
+        </Sheet>
+      </div>
+    );
+  }
+
+  // ══ LIST VIEW ════════════════════════════════════════════════════════
+  const pill = (active, color) => ({
+    background: active ? color : "transparent", color: active ? "#060B16" : T.t2,
+    border: `1px solid ${active ? color : T.border}`, borderRadius: 20, padding: "6px 12px",
+    fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT, whiteSpace: "nowrap", flexShrink: 0,
+  });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingBottom: 80 }}>
+      <Card accent={T.sky}>
+        <Label sub="Ad leads (Instagram → WhatsApp) — kept area-wise until distributors are hired">Home Customers</Label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          {[["Total", kpi.total, T.sky], ["New", kpi.fresh, T.indigo], ["Awaiting Distributor", kpi.waiting, T.amber], ["Areas", kpi.areas, T.emerald]].map(([label, n, col]) => (
+            <div key={label} style={{ flex: 1, minWidth: 70, background: col + "14", border: `1px solid ${col}44`, borderRadius: 12, padding: "9px 6px", textAlign: "center" }}>
+              <div style={{ fontSize: 19, fontWeight: 800, color: col }}>{n}</div>
+              <div style={{ fontSize: 9.5, color: col, fontWeight: 700, marginTop: 1, textTransform: "uppercase", letterSpacing: "0.03em" }}>{label}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <Btn label="+ Add Lead" onClick={() => { setForm(emptyForm()); setShowAdd(true); }} />
+          <Btn label={busyPdf ? "Preparing…" : "📄 PDF"} ghost onClick={downloadPDF} />
+          <Btn label="📊 Excel" ghost onClick={downloadExcel} />
+          <SyncBadge status={syncStatus} onRetry={retrySync} error={syncError} />
+        </div>
+      </Card>
+
+      <Card>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Search name, number, area, address…" style={{ ...inputStyle, marginBottom: 12 }} />
+
+        <div style={{ fontSize: 10.5, color: T.t3, fontWeight: 700, letterSpacing: "0.04em", marginBottom: 6 }}>AREA</div>
+        <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 6, marginBottom: 8 }}>
+          <button onClick={() => setAreaFilter("All")} style={pill(areaFilter === "All", T.sky)}>All · {all.length}</button>
+          {areaCounts.map(([a, n]) => (
+            <button key={a} onClick={() => setAreaFilter(areaFilter === a ? "All" : a)} style={pill(areaFilter === a, T.sky)}>{a} · {n}</button>
+          ))}
+        </div>
+
+        <div style={{ fontSize: 10.5, color: T.t3, fontWeight: 700, letterSpacing: "0.04em", marginBottom: 6 }}>STATUS</div>
+        <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 6, marginBottom: 8 }}>
+          <button onClick={() => setStatusFilter("All")} style={pill(statusFilter === "All", T.accent)}>All</button>
+          {HOME_STATUSES.map(s => {
+            const n = all.filter(c => (c.status || HOME_STATUSES[0]) === s).length;
+            return <button key={s} onClick={() => setStatusFilter(statusFilter === s ? "All" : s)} style={pill(statusFilter === s, HOME_STATUS_COLOR[s])}>{s} · {n}</button>;
+          })}
+        </div>
+
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10.5, color: T.t3, fontWeight: 700, letterSpacing: "0.04em" }}>TYPE</span>
+          {["All", ...HOME_LEAD_TYPES].map(t => <button key={t} onClick={() => setTypeFilter(t)} style={pill(typeFilter === t, T.indigo)}>{t}</button>)}
+          <span style={{ flex: 1 }} />
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: T.t2, fontWeight: 600, cursor: "pointer" }}>
+            <input type="checkbox" checked={groupByArea} onChange={e => setGroupByArea(e.target.checked)} /> PDF grouped by area
+          </label>
+        </div>
+      </Card>
+
+      <div style={{ fontSize: 11, color: T.t3, fontWeight: 600, padding: "0 4px" }}>
+        {filtered.length} lead{filtered.length === 1 ? "" : "s"}{filterLabel() ? " · " + filterLabel() : ""}{search ? ` · “${search}”` : ""} · PDF/Excel export exactly what's shown
+      </div>
+
+      {all.length === 0 && (
+        <div style={{ textAlign: "center", color: T.t3, fontSize: 13, padding: 40 }}>No home customers yet. Tap “+ Add Lead” to start.</div>
+      )}
+      {all.length > 0 && filtered.length === 0 && (
+        <div style={{ textAlign: "center", color: T.t3, fontSize: 13, padding: 30 }}>Nothing matches these filters.</div>
+      )}
+
+      {filtered.map(c => {
+        const st = c.status || HOME_STATUSES[0];
+        const last = homeLastRemarkText(c);
+        return (
+          <div key={c.id} onClick={() => { setSelectedId(c.id); setDistributorDraft(c.distributor || ""); }}
+            style={{ background: T.card, border: `1px solid ${T.border}`, borderLeft: `4px solid ${HOME_STATUS_COLOR[st] || T.border}`, borderRadius: 14, padding: 14, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: T.t1 }}>{c.name}{(c.leadType || "Home") === "Mixed" && <span style={{ marginLeft: 6 }}><Chip label="Mixed" color={T.indigo} small /></span>}</div>
+              <div style={{ fontSize: 11, color: T.t3, marginTop: 2 }}>{c.area || "No area yet"}{c.distributor ? ` · 🚚 ${c.distributor}` : ""}</div>
+              {c.contact && <div style={{ fontSize: 11, color: T.accent, marginTop: 2, fontWeight: 600 }}>📞 {c.contact}</div>}
+              {c.address && <div style={{ fontSize: 11, color: T.t2, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>🏠 {c.address}</div>}
+              {last && <div style={{ fontSize: 11, color: T.t2, marginTop: 4 }}>💬 {last.slice(0, 60)}</div>}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end", flexShrink: 0 }}>
+              <Chip label={st} color={HOME_STATUS_COLOR[st] || T.t3} />
+              {c.mapLink && (
+                <button onClick={e => { e.stopPropagation(); openMap(c); }}
+                  style={{ background: T.sky + "18", border: `1px solid ${T.sky}44`, borderRadius: 8, color: T.sky, padding: "3px 9px", fontSize: 10.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>📍 Map</button>
+              )}
+              <span style={{ fontSize: 10, color: T.t3 }}>{formatLastContact(c.lastRemarkAt || c.createdAt)}</span>
+            </div>
+          </div>
+        );
+      })}
+
+      <Sheet open={showAdd} onClose={() => setShowAdd(false)} title="Add Home Customer Lead">
+        {leadFormFields(form, setForm, true)}
+        <Btn label="Add Lead" full onClick={addLead} disabled={!form.name.trim()} />
+      </Sheet>
+    </div>
+  );
+}
+
 // ─── SAMPLES ──────────────────────────────────────────────────────────────
 function Samples() {
   const [samples, setSamples, samplesSyncStatus] = useSheetSynced("samples", "samples", INITIAL_SAMPLES);
@@ -9912,6 +10541,7 @@ const MORE_MENU = [
   { id:"repeat",    label:"Repeat Orders", icon:"🔁" },
   { id:"lostcustomers", label:"Lost Customers", icon:"🚫" },
   { id:"existingcustomers", label:"Existing Customers", icon:"🔄" },
+  { id:"homecustomers", label:"Home Customers", icon:"🏠" },
   { id:"expenses",  label:"Expenses",      icon:"💸" },
   { id:"marketing", label:"Marketing",     icon:"📢" },
   { id:"reports",   label:"Reports",       icon:"📈" },
@@ -9986,6 +10616,7 @@ function DIcon({ id, size = 18, color = "currentColor", strokeWidth = 1.8 }) {
     case "dispatch": return <svg {...p}><rect x="1" y="6" width="14" height="11" rx="1.5"/><path d="M15 10h4l3 3v4h-7z"/><circle cx="6" cy="19.5" r="1.6"/><circle cx="17.5" cy="19.5" r="1.6"/></svg>;
     case "samples": return <svg {...p}><path d="M10 2v6.2L4.5 18a2 2 0 0 0 1.7 3h11.6a2 2 0 0 0 1.7-3L14 8.2V2"/><path d="M8.5 2h7"/><path d="M7 15h10"/></svg>;
     case "milk": return <svg {...p}><path d="M9 2h6l1 4-1.5 2v10a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2V8L8 4z"/><path d="M8 12h8"/></svg>;
+    case "homecust": return <svg {...p}><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/></svg>;
     case "hub": return <svg {...p}><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M9 14h.01"/><path d="M15 14h.01"/></svg>;
     case "phone": return <svg {...p}><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.7a2 2 0 0 1-.4 2.1L8 9.9a16 16 0 0 0 6 6l1.4-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.5 2.7.6a2 2 0 0 1 1.8 2.1z"/></svg>;
     case "followups": return <svg {...p}><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/></svg>;
@@ -10024,6 +10655,7 @@ const DESKTOP_NAV = [
   { id: "hubdistributors", label: "Hub Distributors", icon: "hub", tag: "New" },
   { id: "lostcustomers", label: "Lost Customers", icon: "lostuser" },
   { id: "existingcustomers", label: "Existing Customers", icon: "existing" },
+  { id: "homecustomers", label: "Home Customers", icon: "homecust", tag: "New" },
   { id: "dailyorders", label: "Daily Orders", icon: "cart" },
   { id: "fieldsync", label: "Dispatch",     icon: "dispatch" },
   { id: "samples",   label: "Samples",      icon: "samples" },
@@ -11798,7 +12430,7 @@ export default function App() {
 
   useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; }, [activeTab]);
 
-  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", dailyorders:"Daily Orders", activity:"Telecaller Activity", milkdistributors:"Milk Distributors", hubdistributors:"Hub Distributors", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads", today:"Today Tasks", prospects:"Find Prospects", lostcustomers:"Lost Customers" };
+  const tabLabel = { dashboard:"Dashboard", leads:"Leads CRM", pipeline:"Pipeline", fieldsync:"Field Sync", samples:"Samples", repeat:"Repeat Orders", dailyorders:"Daily Orders", activity:"Telecaller Activity", milkdistributors:"Milk Distributors", hubdistributors:"Hub Distributors", homecustomers:"Home Customers", expenses:"Expenses", marketing:"Marketing", reports:"Reports", ai:"AI Assistant", whatsapp:"WA Templates", hrleads:"HR Leads", today:"Today Tasks", prospects:"Find Prospects", lostcustomers:"Lost Customers" };
 
   // ── INSTALL BANNER ──
   const InstallBanner = () => showInstall ? (
@@ -11896,6 +12528,7 @@ export default function App() {
       case "repeat":    return <RepeatOrders />;
       case "lostcustomers": return <LostCustomers />;
       case "existingcustomers": return <ExistingCustomerPipeline />;
+      case "homecustomers": return <HomeCustomers />;
       case "dailyorders": return <DailyOrders {...moduleProps} />;
       case "activity":  return <TelecallerActivity {...moduleProps} />;
       case "milkdistributors": return <MilkDistributors {...moduleProps} />;

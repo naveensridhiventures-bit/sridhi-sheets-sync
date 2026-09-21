@@ -37,6 +37,7 @@ TAB_CONFIG = {
     "existingCustomers": {"tab": "ExistingCustomers", "headers": ["id","name","contact","area","address","reason","status","remarks","lastRemarkAt","createdAt","telecaller"]},
     "telecallerActivity": {"tab": "TelecallerActivity", "headers": ["id","date","telecaller","type","customer","area","kg","amount","qty","unit","notes","createdAt"]},
     "milkDistributors": {"tab": "MilkDistributors", "headers": ["id","name","contact","area","address","mapLink","status","telecaller","currentBrand","telecallerRemarks","fieldSalesRemarks","createdAt","lastTelecallerRemarkAt","lastFieldSalesRemarkAt"]},
+    "homeCustomers": {"tab": "HomeCustomers", "headers": ["id","name","contact","area","address","mapLink","leadType","source","status","telecaller","distributor","remarks","lastRemarkAt","createdAt"]},
     "hubDistributors": {"tab": "HubDistributors", "headers": ["id","hub","name","contact","areas","address","mapLink","details","status","telecaller","remarks","createdAt","lastRemarkAt","scheduledVisitAt","scheduledVisitNote"]},
 }
 
@@ -63,6 +64,18 @@ def get_sheet_tabs(sheet_id, token):
     with urllib.request.urlopen(req, timeout=15) as resp:
         data = json.loads(resp.read())
     return [s["properties"]["title"] for s in data.get("sheets", [])]
+
+def ensure_tab(sheet_id, title, actual_tabs, token):
+    """Create the sheet tab on first save if it doesn't exist yet, so a new
+    module (HomeCustomers) works without anyone hand-creating the tab."""
+    if title in actual_tabs:
+        return
+    url = "https://sheets.googleapis.com/v4/spreadsheets/{}:batchUpdate".format(sheet_id)
+    payload = json.dumps({"requests": [{"addSheet": {"properties": {"title": title}}}]}).encode()
+    req = urllib.request.Request(url, data=payload, method="POST",
+        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        resp.read()
 
 def sheets_get(sheet_id, tab_name, token):
     # No trailing row number — an open-ended column range (A:Z) reads every
@@ -264,6 +277,17 @@ def _coerce(tab_key, row):
                 except: pass
             else:
                 row[f] = None
+    elif tab_key == "homeCustomers":
+        # Ad-generated home/mixed leads. id stays a string (client ids are
+        # strings like "hc_..."), remarks reuse the structured-JSON format.
+        row["id"] = str(row.get("id", ""))
+        row["remarks"] = [_deserialize_remark_obj(r) for r in row.get("remarks","").split(" || ") if r] if row.get("remarks") else []
+        for f in ("lastRemarkAt", "createdAt"):
+            if row.get(f, "") not in (None, ""):
+                try: row[f] = int(float(row[f]))
+                except: pass
+            else:
+                row[f] = None
     elif tab_key == "hubDistributors":
         # `areas` is a plain JSON array of up to 5 area names (no per-item
         # attribution needed, unlike remarks) so it's stored as one JSON
@@ -404,7 +428,7 @@ class handler(BaseHTTPRequestHandler):
                         cfg = TAB_CONFIG[tab]
                         if tab == "leads":
                             records = [_decoerce_leads(r) for r in records]
-                        elif tab == "existingCustomers":
+                        elif tab in ("existingCustomers", "homeCustomers"):
                             records = [_decoerce_existing_customer(r) for r in records]
                         elif tab == "milkDistributors":
                             records = [_decoerce_milk_distributor(r) for r in records]
@@ -414,6 +438,8 @@ class handler(BaseHTTPRequestHandler):
                         sheet_id = os.environ["GOOGLE_SHEET_ID"]
                         actual_tabs = get_sheet_tabs(sheet_id, token)
                         matched = next((t for t in actual_tabs if _norm_tab_name(t) == _norm_tab_name(cfg["tab"])), cfg["tab"])
+                        if tab == "homeCustomers":
+                            ensure_tab(os.environ["GOOGLE_SHEET_ID"], matched, actual_tabs, token)
                         existing = read_tab(matched, token)
                         merged = merge_records(existing, records, tab)
                         merged = _apply_deletes(merged, deleted_ids, tab)
@@ -455,7 +481,7 @@ class handler(BaseHTTPRequestHandler):
         cfg = TAB_CONFIG[tab]
         if tab == "leads":
             records = [_decoerce_leads(r) for r in records]
-        elif tab == "existingCustomers":
+        elif tab in ("existingCustomers", "homeCustomers"):
             records = [_decoerce_existing_customer(r) for r in records]
         elif tab == "milkDistributors":
             records = [_decoerce_milk_distributor(r) for r in records]
@@ -465,6 +491,8 @@ class handler(BaseHTTPRequestHandler):
             token = get_token()
             actual_tabs = get_sheet_tabs(os.environ["GOOGLE_SHEET_ID"], token)
             matched = next((t for t in actual_tabs if _norm_tab_name(t) == _norm_tab_name(cfg["tab"])), cfg["tab"])
+            if tab == "homeCustomers":
+                ensure_tab(os.environ["GOOGLE_SHEET_ID"], matched, actual_tabs, token)
             # Re-read fresh (not the 60s cache) right before merging+writing —
             # keeps the race window to milliseconds instead of minutes, and the
             # merge itself means even a same-instant collision can't drop rows.
