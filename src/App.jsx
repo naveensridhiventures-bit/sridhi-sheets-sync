@@ -1995,60 +1995,82 @@ function Leads() {
   const [callLogFor, setCallLogFor] = useState(null);
   const seenLeadIds = useRef(null);
 
-  // ── "Home Customer" tag search — catches it whether it's in the lead's
-  // name or tucked into any remark, so leads noted as home customers from
-  // any source (not just the dedicated Home Customers tab) are still
-  // findable here for a bulk WhatsApp send.
-  const [showHomeCustomerExport, setShowHomeCustomerExport] = useState(false);
-  const [hcMsgText, setHcMsgText] = useState("Hi {name}, this is Sridhi Ventures — ");
-  const [hcSelectedIds, setHcSelectedIds] = useState(() => new Set());
+  // ── Keyword search + bulk download / bulk message ──
+  // Type ANY word (e.g. "home") and every lead that has it anywhere — name,
+  // business, area, address, type, source, stage, telecaller, contact or any
+  // remark — is listed. Separate several words with commas to match any of
+  // them ("home, mess"). Then bulk-select and download or message them.
+  const [showKwExport, setShowKwExport] = useState(false);
+  const [kwQuery, setKwQuery] = useState("");
+  const [kwWholeWord, setKwWholeWord] = useState(false);
+  const [kwMsgText, setKwMsgText] = useState("Hi {name}, this is Sridhi Ventures — ");
+  const [kwSelectedIds, setKwSelectedIds] = useState(() => new Set());
   const remarkStr = (r) => typeof r === "string" ? r : (r && r.text) || "";
-  const homeCustomerLeads = useMemo(() => leads.filter(l =>
-    l && (
-      (l.name || "").toLowerCase().includes("home customer") ||
-      (l.remarks || []).some(r => remarkStr(r).toLowerCase().includes("home customer"))
-    )
-  ), [leads]);
-  const hcTargets = useMemo(() => {
-    const base = hcSelectedIds.size ? homeCustomerLeads.filter(l => hcSelectedIds.has(l.contact || l.id)) : homeCustomerLeads;
+  const kwTerms = useMemo(
+    () => kwQuery.split(",").map(t => t.trim().toLowerCase()).filter(Boolean),
+    [kwQuery]
+  );
+  const kwMatches = useMemo(() => {
+    if (!kwTerms.length) return [];
+    const escape = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const wordRes = kwWholeWord ? kwTerms.map(t => new RegExp("(^|[^a-z0-9])" + escape(t) + "([^a-z0-9]|$)", "i")) : null;
+    return leads.filter(l => {
+      if (!l) return false;
+      const hay = [
+        l.name, l.business, l.area, l.address, l.type, l.source, l.stage,
+        l.telecaller, l.contact, l.priority,
+        ...(Array.isArray(l.remarks) ? l.remarks.map(remarkStr) : [])
+      ].filter(Boolean).join(" \n ").toLowerCase();
+      return kwWholeWord ? wordRes.some(re => re.test(hay)) : kwTerms.some(t => hay.includes(t));
+    });
+  }, [leads, kwTerms, kwWholeWord]);
+  const kwKey = (l) => l.contact || l.id;
+  const kwTargets = useMemo(() => {
+    const base = kwSelectedIds.size ? kwMatches.filter(l => kwSelectedIds.has(kwKey(l))) : kwMatches;
     return base.filter(l => phoneKey(l.contact).length >= 10);
-  }, [homeCustomerLeads, hcSelectedIds]);
-  const toggleHcSelected = (key) => setHcSelectedIds(prev => {
+  }, [kwMatches, kwSelectedIds]);
+  const kwSelectedVisible = kwMatches.filter(l => kwSelectedIds.has(kwKey(l))).length;
+  const toggleKwSelected = (key) => setKwSelectedIds(prev => {
     const next = new Set(prev);
     if (next.has(key)) next.delete(key); else next.add(key);
     return next;
   });
-  const hcFileTag = () => new Date().toISOString().slice(0, 10);
-  const exportHCContactsVCF = () => {
-    if (!hcTargets.length) { alert("No matching contacts with a phone number."); return; }
-    const vcf = hcTargets.map(l => {
+  const kwSelectAll = () => setKwSelectedIds(new Set(kwMatches.map(kwKey)));
+  const kwClearSel = () => setKwSelectedIds(new Set());
+  const kwFileTag = () => {
+    const w = kwTerms.join("-").replace(/[^a-z0-9-]+/gi, "_").slice(0, 30) || "keyword";
+    return `${w}_${new Date().toISOString().slice(0, 10)}`;
+  };
+  const exportKwContactsVCF = () => {
+    if (!kwTargets.length) { alert("No matching contacts with a phone number."); return; }
+    const vcf = kwTargets.map(l => {
       const num = "+91" + phoneKey(l.contact);
       const addr = [l.address, l.area].filter(Boolean).join(", ");
       return `BEGIN:VCARD\nVERSION:3.0\nFN:${(l.name || "Unnamed").replace(/\r?\n/g, " ")}\nTEL;TYPE=CELL:${num}\nADR:;;${addr.replace(/,/g, "\\,")};;;;\nEND:VCARD`;
     }).join("\n");
     const blob = new Blob([vcf], { type: "text/vcard" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `Home-Customer-Contacts_${hcFileTag()}.vcf`; a.click();
+    const a = document.createElement("a"); a.href = url; a.download = `Contacts_${kwFileTag()}.vcf`; a.click();
     URL.revokeObjectURL(url);
   };
-  const exportHCContactsExcel = () => {
-    if (!hcTargets.length) { alert("No matching contacts with a phone number."); return; }
-    const data = hcTargets.map(l => ({ "Name": l.name, "Contact": "+91" + phoneKey(l.contact), "Area": l.area || "", "Stage": l.stage || "" }));
+  const exportKwContactsExcel = () => {
+    if (!kwTargets.length) { alert("No matching contacts with a phone number."); return; }
+    const data = kwTargets.map(l => ({ "Name": l.name, "Business": l.business || "", "Contact": "+91" + phoneKey(l.contact), "Area": l.area || "", "Type": l.type || "", "Stage": l.stage || "", "Telecaller": l.telecaller || "" }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Home Customer Contacts");
-    XLSX.writeFile(wb, `Home-Customer-Contacts_${hcFileTag()}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Contacts");
+    XLSX.writeFile(wb, `Contacts_${kwFileTag()}.xlsx`);
   };
-  const copyHCNumbers = () => {
-    if (!hcTargets.length) { alert("No matching contacts with a phone number."); return; }
-    const list = hcTargets.map(l => "+91" + phoneKey(l.contact)).join("\n");
+  const copyKwNumbers = () => {
+    if (!kwTargets.length) { alert("No matching contacts with a phone number."); return; }
+    const list = kwTargets.map(l => "+91" + phoneKey(l.contact)).join("\n");
     navigator.clipboard?.writeText(list).then(
-      () => alert(`Copied ${hcTargets.length} number${hcTargets.length === 1 ? "" : "s"} to clipboard.`),
+      () => alert(`Copied ${kwTargets.length} number${kwTargets.length === 1 ? "" : "s"} to clipboard.`),
       () => alert("Couldn't copy — your browser blocked clipboard access.")
     );
   };
-  const hcMessageFor = (l) => hcMsgText.replace(/\{name\}/gi, l.name || "there");
-  const sendHCOne = (l) => window.open(`https://wa.me/91${phoneKey(l.contact)}?text=${encodeURIComponent(hcMessageFor(l))}`, "_blank", "noopener");
+  const kwMessageFor = (l) => kwMsgText.replace(/\{name\}/gi, l.name || "there");
+  const sendKwOne = (l) => window.open(`https://wa.me/91${phoneKey(l.contact)}?text=${encodeURIComponent(kwMessageFor(l))}`, "_blank", "noopener");
 
   // ── Pop in a small toast whenever a lead appears that we haven't seen before ──
   useEffect(() => {
@@ -2500,18 +2522,16 @@ function Leads() {
         }}>+</button>
       </div>
 
-      {homeCustomerLeads.length > 0 && (
-        <button onClick={() => { setHcSelectedIds(new Set()); setShowHomeCustomerExport(true); }} style={{
-          display:"flex", alignItems:"center", justifyContent:"space-between", gap:10,
-          background:T.emerald+"14", border:`1px solid ${T.emerald}44`, borderRadius:12,
-          padding:"10px 14px", cursor:"pointer", fontFamily:FONT, textAlign:"left",
-        }}>
-          <span style={{ fontSize:12, fontWeight:700, color:T.emerald }}>
-            🏠 {homeCustomerLeads.length} lead{homeCustomerLeads.length===1?"":"s"} tagged "home customer" — download contacts / bulk message
-          </span>
-          <span style={{ fontSize:11, fontWeight:800, color:T.emerald }}>📇 Open →</span>
-        </button>
-      )}
+      <button onClick={() => { setKwSelectedIds(new Set()); if (!kwQuery && search.trim()) setKwQuery(search.trim()); setShowKwExport(true); }} style={{
+        display:"flex", alignItems:"center", justifyContent:"space-between", gap:10,
+        background:T.emerald+"14", border:`1px solid ${T.emerald}44`, borderRadius:12,
+        padding:"10px 14px", cursor:"pointer", fontFamily:FONT, textAlign:"left",
+      }}>
+        <span style={{ fontSize:12, fontWeight:700, color:T.emerald }}>
+          🔎 Keyword search — bulk download contacts / bulk message
+        </span>
+        <span style={{ fontSize:11, fontWeight:800, color:T.emerald }}>📇 Open →</span>
+      </button>
 
       <div style={{ display:"flex", gap:7, overflowX:"auto", paddingBottom:4 }}>
         {["All","Needs Follow-up","New Lead","Interested","Sample Requested","Positive Feedback","Negotiation","Order Received","Active Customer","Lost Customer"].map(s => {
@@ -2611,40 +2631,57 @@ function Leads() {
         </div>
       </Sheet>
 
-      <Sheet open={showHomeCustomerExport} onClose={() => setShowHomeCustomerExport(false)} title="🏠 Home Customer Contacts">
-        <div style={{ fontSize: 12, color: T.t3, marginBottom: 14, lineHeight: 1.5 }}>
-          {hcSelectedIds.size
-            ? `Using ${hcTargets.length} selected lead${hcTargets.length === 1 ? "" : "s"} with a phone number.`
-            : `Every lead here has "home customer" somewhere in its name or remarks — ${hcTargets.length} of them have a phone number. Tick specific ones below to narrow it down.`}
+      <Sheet open={showKwExport} onClose={() => setShowKwExport(false)} title="🔎 Keyword Search & Bulk Download">
+        <input value={kwQuery} onChange={e => { setKwQuery(e.target.value); setKwSelectedIds(new Set()); }}
+          placeholder='Type a keyword, e.g. home  (comma for several: home, mess)'
+          autoFocus
+          style={{ ...inputStyle, width: "100%", boxSizing: "border-box", marginBottom: 8 }} />
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: T.t2, marginBottom: 10, cursor: "pointer" }}>
+          <input type="checkbox" checked={kwWholeWord} onChange={e => setKwWholeWord(e.target.checked)} />
+          Whole word only (so "home" won't match "homeland")
+        </label>
+        <div style={{ fontSize: 12, color: T.t3, marginBottom: 12, lineHeight: 1.5 }}>
+          {!kwTerms.length
+            ? "Type a word above — every lead with that word in its name, business, area, address, type, source, stage or any remark will be listed."
+            : kwSelectedIds.size
+              ? `${kwSelectedVisible} selected of ${kwMatches.length} match${kwMatches.length === 1 ? "" : "es"} — downloads use the ${kwTargets.length} selected with a phone number.`
+              : `${kwMatches.length} lead${kwMatches.length === 1 ? "" : "s"} match — ${kwTargets.length} with a phone number. Downloads use ALL matches unless you tick specific ones.`}
         </div>
+        {kwTerms.length > 0 && kwMatches.length > 0 && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+            <Btn label={`☑️ Select All (${kwMatches.length})`} ghost onClick={kwSelectAll} />
+            <Btn label="Clear Selection" ghost onClick={kwClearSel} />
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-          <Btn label="⬇️ Download Contacts (vCard)" ghost onClick={exportHCContactsVCF} />
-          <Btn label="⬇️ Download Excel" ghost onClick={exportHCContactsExcel} />
-          <Btn label="📋 Copy All Numbers" ghost onClick={copyHCNumbers} />
+          <Btn label="⬇️ Download Contacts (vCard)" ghost onClick={exportKwContactsVCF} />
+          <Btn label="⬇️ Download Excel" ghost onClick={exportKwContactsExcel} />
+          <Btn label="📋 Copy Numbers" ghost onClick={copyKwNumbers} />
         </div>
         <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>
           Message (use {"{name}"} to personalize)
         </div>
-        <textarea value={hcMsgText} onChange={e => setHcMsgText(e.target.value)} rows={4}
+        <textarea value={kwMsgText} onChange={e => setKwMsgText(e.target.value)} rows={4}
           style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.t1, padding: "10px 12px", fontSize: 13, fontFamily: FONT, outline: "none", width: "100%", boxSizing: "border-box", resize: "vertical", marginBottom: 14 }} />
         <div style={{ fontSize: 11, color: T.t3, marginBottom: 8, lineHeight: 1.4 }}>
           WhatsApp doesn't allow a true one-tap "send to everyone" from outside
-          its own app — tick who you want, then tap <b style={{ color: T.t1 }}>Send</b> next
-          to each name to open WhatsApp with the message ready to go.
+          its own app — tap <b style={{ color: T.t1 }}>Send</b> next to each name
+          to open WhatsApp with the message ready to go.
         </div>
         <div style={{ maxHeight: 300, overflowY: "auto", border: `1px solid ${T.border}`, borderRadius: 10 }}>
-          {homeCustomerLeads.length === 0 && <div style={{ padding: 14, fontSize: 12, color: T.t3, textAlign: "center" }}>No leads tagged "home customer" yet.</div>}
-          {homeCustomerLeads.map((l, i) => {
-            const key = l.contact || l.id;
+          {kwTerms.length > 0 && kwMatches.length === 0 && <div style={{ padding: 14, fontSize: 12, color: T.t3, textAlign: "center" }}>No leads contain "{kwQuery.trim()}".</div>}
+          {!kwTerms.length && <div style={{ padding: 14, fontSize: 12, color: T.t3, textAlign: "center" }}>Matching leads will appear here.</div>}
+          {kwMatches.map((l, i) => {
+            const key = kwKey(l);
             const hasPhone = phoneKey(l.contact).length >= 10;
             return (
-              <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: i < homeCustomerLeads.length - 1 ? `1px solid ${T.border}` : "none" }}>
-                <input type="checkbox" checked={hcSelectedIds.has(key)} onChange={() => toggleHcSelected(key)} style={{ width: 16, height: 16, flexShrink: 0 }} />
+              <div key={key || i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: i < kwMatches.length - 1 ? `1px solid ${T.border}` : "none" }}>
+                <input type="checkbox" checked={kwSelectedIds.has(key)} onChange={() => toggleKwSelected(key)} style={{ width: 16, height: 16, flexShrink: 0 }} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 700, color: T.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name}</div>
-                  <div style={{ fontSize: 10.5, color: T.t3 }}>{l.contact || "No number"}{l.area ? " · " + l.area : ""}</div>
+                  <div style={{ fontSize: 10.5, color: T.t3 }}>{l.contact || "No number"}{l.area ? " · " + l.area : ""}{l.type ? " · " + l.type : ""}</div>
                 </div>
-                <button onClick={() => sendHCOne(l)} disabled={!hasPhone} style={{ background: hasPhone ? "#25D36622" : T.surface, border: `1px solid ${hasPhone ? "#25D36644" : T.border}`, borderRadius: 8, color: hasPhone ? "#25D366" : T.t3, padding: "6px 12px", fontSize: 11.5, fontWeight: 700, cursor: hasPhone ? "pointer" : "default", fontFamily: FONT, flexShrink: 0 }}>💬 Send</button>
+                <button onClick={() => sendKwOne(l)} disabled={!hasPhone} style={{ background: hasPhone ? "#25D36622" : T.surface, border: `1px solid ${hasPhone ? "#25D36644" : T.border}`, borderRadius: 8, color: hasPhone ? "#25D366" : T.t3, padding: "6px 12px", fontSize: 11.5, fontWeight: 700, cursor: hasPhone ? "pointer" : "default", fontFamily: FONT, flexShrink: 0 }}>💬 Send</button>
               </div>
             );
           })}
