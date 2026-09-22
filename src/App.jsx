@@ -4997,6 +4997,23 @@ const HIRING_TERMINAL = ["Rejected", "Not Interested"];
 const HIRING_SOURCES = ["Referral", "WhatsApp Group", "Naukri/Job Portal", "Walk-in", "Newspaper", "Other"];
 const HIRING_ROLE_OTHER = "Other (type new role)";
 
+// One-tap call-outcome presets — tapping one instantly logs that remark and,
+// where it makes sense (Interview Scheduled / Not Interested / Selected /
+// Joined), moves the candidate's pipeline stage in the same tap so a
+// telecaller doesn't have to log the remark AND separately hunt for the
+// matching stage button.
+const HIRING_QUICK_REMARKS = [
+  { label: "Interested",           tag: "Interested",           sentiment: "positive", stage: null },
+  { label: "Ring / No Response",   tag: "Ring No Response",     sentiment: "negative", stage: null },
+  { label: "Busy — Call Later",    tag: "Busy",                 sentiment: "neutral",  stage: null },
+  { label: "Interview Scheduled",  tag: "Interview Scheduled",  sentiment: "positive", stage: "Interview Scheduled" },
+  { label: "Selected",             tag: "Selected",             sentiment: "positive", stage: "Selected" },
+  { label: "Joined",               tag: "Joined",                sentiment: "positive", stage: "Joined" },
+  { label: "Not Interested",       tag: "Not Interested",       sentiment: "negative", stage: "Not Interested" },
+  { label: "Others",               tag: null,                   sentiment: "neutral",  stage: null },
+];
+
+
 function hiringId() { return "hi_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function hiringStageColor(stage) { return HIRING_STAGE_COLOR[stage] || T.t3; }
 function hiringStageRgb(stage) { return HIRING_STAGE_RGB[stage] || [110, 118, 138]; }
@@ -5099,6 +5116,7 @@ function Hiring() {
   const [followupFilter, setFollowupFilter] = useState("All"); // All | overdue | today | tomorrow | upcoming | none
   const [selectedId, setSelectedId] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showReport, setShowReport] = useState(false);
 
@@ -5108,6 +5126,7 @@ function Hiring() {
     assignedTo: TELECALLERS[TELECALLERS.length - 1], date: todayISO(),
   });
   const [form, setForm] = useState(emptyForm());
+  const [editForm, setEditForm] = useState(emptyForm());
   const [newRemark, setNewRemark] = useState("");
   const [scheduleDraft, setScheduleDraft] = useState("");
   const [scheduleNoteDraft, setScheduleNoteDraft] = useState("");
@@ -5245,17 +5264,30 @@ function Hiring() {
     updateCandidate(id, { remarks: [...(c.remarks || []), entry], lastRemarkAt: at });
   };
 
-  const setStage = (id, stage) => {
+  const setStage = (id, stage, remarkLabel) => {
     const c = all.find(x => x.id === id);
     if (!c) return;
     const patch = { stage };
     if (stage === "Joined") patch.joinedAt = Date.now();
     if (HIRING_TERMINAL.includes(stage) && !HIRING_TERMINAL.includes(c.stage)) {
-      const reason = window.prompt(`Reason for "${stage}"? (optional)`, "") || "";
-      patch.rejectedReason = reason;
+      // A quick-remark tap already carries its own reason (e.g. "Not
+      // Interested") — only interrupt with a prompt when the stage was
+      // changed some other way (the Move Stage buttons).
+      patch.rejectedReason = remarkLabel || window.prompt(`Reason for "${stage}"? (optional)`, "") || "";
     }
-    addRemarkTo(id, `Stage moved to "${stage}"`);
+    addRemarkTo(id, remarkLabel || `Stage moved to "${stage}"`);
     updateCandidate(id, patch);
+  };
+
+  // One-tap call-outcome buttons (Interested / Ring-No-Response / Not
+  // Interested / Interview Scheduled / Busy / Selected / Joined / Others).
+  // Logs the remark and — for outcomes that clearly mean a stage change —
+  // moves the pipeline stage in the same tap, in one combined history entry
+  // instead of two separate ones.
+  const applyQuickRemark = (id, item) => {
+    if (item.tag === null && item.label === "Others") { setNewRemark(""); return; } // just focus the free-text box
+    if (item.stage) { setStage(id, item.stage, item.label); return; }
+    addRemarkTo(id, item.label, item.tag);
   };
 
   const saveSchedule = (id) => {
@@ -5280,7 +5312,36 @@ function Hiring() {
     setNewRemark("");
   };
 
+  // ── Edit candidate details (name/contact/role/area/experience/salary/
+  // source/handled-by) — everything except stage and remarks, which have
+  // their own dedicated controls above. ──
+  const openEditCandidate = (c) => {
+    const knownRole = roleOptions.includes(c.role);
+    setEditForm({
+      name: c.name || "", contact: c.contact || "",
+      role: knownRole ? c.role : HIRING_ROLE_OTHER, customRole: knownRole ? "" : (c.role || ""),
+      area: c.area || "", experience: c.experience || "", expectedSalary: c.expectedSalary || "",
+      source: c.source || HIRING_SOURCES[0], assignedTo: c.assignedTo || TELECALLERS[TELECALLERS.length - 1],
+      date: todayISO(),
+    });
+    setShowEdit(true);
+  };
+  const saveEditCandidate = () => {
+    if (!selected) return;
+    if (!editForm.name.trim()) { alert("Enter the candidate's name."); return; }
+    const finalRole = editForm.role === HIRING_ROLE_OTHER ? editForm.customRole.trim() : editForm.role;
+    if (!finalRole) { alert("Pick a role, or type a new one."); return; }
+    updateCandidate(selected.id, {
+      name: editForm.name.trim(), contact: editForm.contact.trim(), role: finalRole,
+      area: editForm.area.trim(), experience: editForm.experience.trim(),
+      expectedSalary: editForm.expectedSalary.trim(), source: editForm.source, assignedTo: editForm.assignedTo,
+    });
+    addRemarkTo(selected.id, "Details updated");
+    setShowEdit(false);
+  };
+
   // ── Bulk import ──
+
   const runImportPreview = () => {
     const { rows: parsed, skipped } = parseHiringBulkImport(importText, importRole, importAssignedTo);
     setImportPreview({ rows: parsed, skipped });
@@ -5739,9 +5800,15 @@ function Hiring() {
       <Sheet open={!!selected} onClose={() => setSelectedId(null)} title={selected ? selected.name : ""}>
         {selected && (
           <>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-              <Chip label={selected.role || "—"} color={T.indigo} />
-              <Chip label={selected.stage || HIRING_STAGES[0]} color={hiringStageColor(selected.stage)} />
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 14 }}>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <Chip label={selected.role || "—"} color={T.indigo} />
+                <Chip label={selected.stage || HIRING_STAGES[0]} color={hiringStageColor(selected.stage)} />
+              </div>
+              <button onClick={() => openEditCandidate(selected)} style={{
+                background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, color: T.t2,
+                padding: "5px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: FONT, flexShrink: 0,
+              }}>✏️ Edit Details</button>
             </div>
             <div style={{ fontSize: 12.5, color: T.t2, lineHeight: 1.8, marginBottom: 14 }}>
               📞 {selected.contact || "—"}<br />
@@ -5774,7 +5841,17 @@ function Hiring() {
             <Rule />
             <div style={{ height: 14 }} />
             <div style={{ fontSize: 11, color: T.t2, marginBottom: 8, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Add Remark / Call Note</div>
-            <textarea value={newRemark} onChange={e => setNewRemark(e.target.value)} rows={2} placeholder="e.g. Called, asked to come Monday 10am"
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+              {HIRING_QUICK_REMARKS.map(item => (
+                <button key={item.label} onClick={() => applyQuickRemark(selected.id, item)} style={{
+                  padding: "6px 11px", borderRadius: 999, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+                  background: item.sentiment === "positive" ? T.emerald + "18" : item.sentiment === "negative" ? T.rose + "18" : T.cardHigh,
+                  color: item.sentiment === "positive" ? T.emerald : item.sentiment === "negative" ? T.rose : T.t2,
+                  border: `1px solid ${item.sentiment === "positive" ? T.emerald + "44" : item.sentiment === "negative" ? T.rose + "44" : T.border}`,
+                }}>{item.label}</button>
+              ))}
+            </div>
+            <textarea value={newRemark} onChange={e => setNewRemark(e.target.value)} rows={2} placeholder="Or type a custom note — e.g. Called, asked to come Monday 10am"
               style={{ ...inputStyle, resize: "vertical", marginBottom: 10 }} />
             <Btn small label="Save Remark" onClick={() => { addRemarkTo(selected.id, newRemark); setNewRemark(""); }} />
 
@@ -5796,6 +5873,24 @@ function Hiring() {
             }}>Remove Candidate</button>
           </>
         )}
+      </Sheet>
+
+      {/* ── Edit Candidate Details ── */}
+      <Sheet open={showEdit} onClose={() => setShowEdit(false)} title="Edit Candidate Details">
+        <Field label="Name" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} placeholder="Candidate's full name" />
+        <Field label="Contact" value={editForm.contact} onChange={e => setEditForm({ ...editForm, contact: e.target.value })} placeholder="10-digit phone number" />
+        <Dropdown label="Role Applying For" value={editForm.role}
+          onChange={e => setEditForm({ ...editForm, role: e.target.value })}
+          options={[...roleOptions, HIRING_ROLE_OTHER]} />
+        {editForm.role === HIRING_ROLE_OTHER && (
+          <Field label="New Role Name" value={editForm.customRole} onChange={e => setEditForm({ ...editForm, customRole: e.target.value })} placeholder="e.g. Warehouse Supervisor" />
+        )}
+        <Field label="Area / Location" value={editForm.area} onChange={e => setEditForm({ ...editForm, area: e.target.value })} placeholder="e.g. Ambattur" />
+        <Field label="Experience" value={editForm.experience} onChange={e => setEditForm({ ...editForm, experience: e.target.value })} placeholder="e.g. 2 years" />
+        <Field label="Expected Salary" value={editForm.expectedSalary} onChange={e => setEditForm({ ...editForm, expectedSalary: e.target.value })} placeholder="e.g. 15000" />
+        <Dropdown label="Source" value={editForm.source} onChange={e => setEditForm({ ...editForm, source: e.target.value })} options={HIRING_SOURCES} />
+        <Dropdown label="Handled By" value={editForm.assignedTo} onChange={e => setEditForm({ ...editForm, assignedTo: e.target.value })} options={TELECALLERS} />
+        <Btn full label="Save Changes" onClick={saveEditCandidate} />
       </Sheet>
     </div>
   );
