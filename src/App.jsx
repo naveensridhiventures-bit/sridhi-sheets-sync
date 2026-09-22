@@ -4975,6 +4975,832 @@ function HomeCustomers() {
 }
 
 // ─── SAMPLES ──────────────────────────────────────────────────────────────
+// ─── HIRING / CANDIDATE TRACKING ───────────────────────────────────────────
+// A telecaller-style CRM for recruitment: candidates flow through a pipeline
+// (New Applicant → Contacted → Interview Scheduled → Interviewed → Selected
+// → Joined, with Rejected/Not Interested/On Hold as side exits), same remark
+// timeline + scheduling pattern as Hub Distributors, so it needs no new UI
+// vocabulary to learn.
+const HIRING_ROLES_DEFAULT = ["Telecaller", "Driver", "Accountant", "Field Sales", "Packing Staff", "HR Executive", "Delivery Staff"];
+const HIRING_STAGES = ["New Applicant", "Contacted", "Interview Scheduled", "Interviewed", "Selected", "Joined", "On Hold", "Rejected", "Not Interested"];
+const HIRING_STAGE_COLOR = {
+  "New Applicant": T.sky, "Contacted": T.indigo, "Interview Scheduled": T.amber,
+  "Interviewed": T.orange, "Selected": T.emerald, "Joined": T.accent,
+  "On Hold": T.t3, "Rejected": T.rose, "Not Interested": T.t4,
+};
+const HIRING_STAGE_RGB = {
+  "New Applicant": [14, 130, 190], "Contacted": [76, 95, 224], "Interview Scheduled": [180, 110, 5],
+  "Interviewed": [217, 119, 6], "Selected": [16, 150, 100], "Joined": [23, 148, 74],
+  "On Hold": [138, 151, 168], "Rejected": [200, 45, 60], "Not Interested": [162, 176, 170],
+};
+const HIRING_TERMINAL = ["Rejected", "Not Interested"];
+const HIRING_SOURCES = ["Referral", "WhatsApp Group", "Naukri/Job Portal", "Walk-in", "Newspaper", "Other"];
+const HIRING_ROLE_OTHER = "Other (type new role)";
+
+function hiringId() { return "hi_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+function hiringStageColor(stage) { return HIRING_STAGE_COLOR[stage] || T.t3; }
+function hiringStageRgb(stage) { return HIRING_STAGE_RGB[stage] || [110, 118, 138]; }
+function hiringLastRemarkText(c) {
+  const r = c.remarks || [];
+  return r.length ? remarkText(r[r.length - 1]) : "";
+}
+
+// Parses a pasted batch of candidates (WhatsApp forward, Excel paste, or a
+// plain list of "Name - 9876543210" lines) into import-ready rows. Same
+// header-detection + freeform fallback approach as the other bulk-import
+// screens, so anyone who has already used Bulk Import elsewhere in the app
+// doesn't have to learn a new format.
+function parseHiringBulkImport(text, batchRole, batchAssignedTo) {
+  const lines = text.split(/\r?\n/).map(l => l.replace(/\s+$/, "")).filter(l => l.trim() !== "");
+  if (!lines.length) return { rows: [], skipped: 0 };
+
+  const hasTab = lines[0].includes("\t");
+  const hasComma = lines.some(l => l.includes(","));
+  const delim = hasTab ? "\t" : (hasComma ? "," : null);
+  const rawRows = lines.map(l => delim ? parseDelimitedLine(l, delim) : [l.trim()]);
+
+  const headerCandidate = rawRows[0].map(h => h.toLowerCase().trim());
+  const findCol = (...keywords) => headerCandidate.findIndex(h => keywords.some(k => h.includes(k)));
+  const looksLikeHeader = delim && (
+    findCol("phone", "contact", "number", "mobile") >= 0 || findCol("name") >= 0 || findCol("role", "position") >= 0
+  ) && rawRows[0].every(c => !/^\+?[\d\s-]{7,}$/.test(c.trim()));
+
+  let colMap = null, dataRows;
+  if (looksLikeHeader) {
+    colMap = {
+      name: findCol("name"),
+      contact: findCol("phone", "number", "contact", "mobile"),
+      role: findCol("role", "position", "applying", "post"),
+      area: findCol("area", "location"),
+      experience: findCol("experience", "exp"),
+      source: findCol("source", "reference"),
+      remark: findCol("remark", "note", "status"),
+    };
+    dataRows = rawRows.slice(1);
+  } else if (delim) {
+    // No header detected — fall back to a progressive column order so a
+    // short paste (even just Name, Contact) still works sensibly.
+    const order = ["name", "contact", "role", "area", "experience"];
+    colMap = {}; order.forEach((key, i) => { colMap[key] = i; });
+    colMap.source = -1; colMap.remark = -1;
+    dataRows = rawRows;
+  } else {
+    dataRows = rawRows; // single freeform column — parsed per-line below
+  }
+
+  const get = (row, idx) => (idx !== undefined && idx >= 0 && idx < row.length) ? row[idx].trim() : "";
+
+  const rows = [];
+  let skipped = 0;
+  dataRows.forEach(row => {
+    let name, contact, role, area, experience, source, remark;
+    if (colMap) {
+      name = get(row, colMap.name);
+      contact = get(row, colMap.contact);
+      role = get(row, colMap.role);
+      area = get(row, colMap.area);
+      experience = get(row, colMap.experience);
+      source = get(row, colMap.source);
+      remark = get(row, colMap.remark);
+      if (contact) {
+        const { phone, remainder } = extractPhoneAndRemainder(contact);
+        if (phone) {
+          contact = phone;
+          if (remainder && !name) name = remainder;
+        }
+      }
+    } else {
+      const val = row[0] || "";
+      const { phone, remainder } = extractPhoneAndRemainder(val);
+      contact = phone;
+      const split = classifyNameOrRemark(remainder);
+      name = split.name;
+      remark = split.remark;
+      role = ""; area = ""; experience = ""; source = "";
+    }
+    if (!name && !contact) { if (row.some(c => (c || "").trim())) skipped++; return; }
+    if (/^(candidate\s*)?name$/i.test(name) && !contact) { skipped++; return; } // stray header row
+    rows.push({
+      name: name || "", contact: contact || "",
+      role: role || batchRole || "", area: area || "", experience: experience || "",
+      source: source || "", remark: remark || "",
+      assignedTo: batchAssignedTo || "",
+    });
+  });
+  return { rows, skipped };
+}
+
+function Hiring() {
+  const [rows, setRows, syncStatus, retrySync, syncError] = useSheetSynced("hiring", "hiring", []);
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState("All");
+  const [stageFilter, setStageFilter] = useState("All");
+  const [assignedFilter, setAssignedFilter] = useState("All");
+  const [followupFilter, setFollowupFilter] = useState("All"); // All | overdue | today | tomorrow | upcoming | none
+  const [selectedId, setSelectedId] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+
+  const emptyForm = () => ({
+    name: "", contact: "", role: HIRING_ROLES_DEFAULT[0], customRole: "",
+    area: "", experience: "", expectedSalary: "", source: HIRING_SOURCES[0],
+    assignedTo: TELECALLERS[TELECALLERS.length - 1], date: todayISO(),
+  });
+  const [form, setForm] = useState(emptyForm());
+  const [newRemark, setNewRemark] = useState("");
+  const [scheduleDraft, setScheduleDraft] = useState("");
+  const [scheduleNoteDraft, setScheduleNoteDraft] = useState("");
+
+  // ── Bulk import ──
+  const [importText, setImportText] = useState("");
+  const [importRole, setImportRole] = useState("");
+  const [importAssignedTo, setImportAssignedTo] = useState(TELECALLERS[TELECALLERS.length - 1]);
+  const [importPreview, setImportPreview] = useState(null);
+  const [importing, setImporting] = useState(false);
+
+  // ── Report ──
+  const [reportKind, setReportKind] = useState("all"); // all | overview | scheduled | calling | joined
+  const [reportPreset, setReportPreset] = useState("This Month");
+  const [reportFrom, setReportFrom] = useState(() => { const d = new Date(); d.setDate(1); return localISO(d); });
+  const [reportTo, setReportTo] = useState(todayISO());
+  const [reportRole, setReportRole] = useState("All");
+  const [generatingReport, setGeneratingReport] = useState(false);
+
+  const applyReportPreset = (preset) => {
+    setReportPreset(preset);
+    const now = new Date();
+    if (preset === "Today") { setReportFrom(todayISO()); setReportTo(todayISO()); }
+    else if (preset === "This Week") {
+      const day = now.getDay() || 7;
+      const monday = new Date(now); monday.setDate(now.getDate() - day + 1);
+      setReportFrom(localISO(monday)); setReportTo(todayISO());
+    } else if (preset === "This Month") {
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      setReportFrom(localISO(first)); setReportTo(todayISO());
+    }
+  };
+
+  const all = rows || [];
+  const selected = all.find(c => c.id === selectedId) || null;
+
+  const roleOptions = useMemo(() => {
+    const set = new Set(HIRING_ROLES_DEFAULT);
+    all.forEach(c => { if (c.role) set.add(c.role); });
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [all]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const qDigits = q.replace(/\D/g, "");
+    return all
+      .filter(c => roleFilter === "All" || (c.role || "—") === roleFilter)
+      .filter(c => stageFilter === "All" || (c.stage || HIRING_STAGES[0]) === stageFilter)
+      .filter(c => assignedFilter === "All" || (c.assignedTo || "") === assignedFilter)
+      .filter(c => {
+        if (followupFilter === "All") return true;
+        const urg = hubVisitUrgency(c.scheduledAt);
+        if (followupFilter === "none") return !c.scheduledAt;
+        return urg === followupFilter;
+      })
+      .filter(c => !q || (c.name || "").toLowerCase().includes(q) || (c.role || "").toLowerCase().includes(q) ||
+        (c.area || "").toLowerCase().includes(q) || (qDigits.length >= 3 && phoneKey(c.contact).includes(qDigits)))
+      .sort((a, b) => {
+        // Overdue/today follow-ups first, then most recently touched.
+        const ua = hubVisitUrgency(a.scheduledAt), ub = hubVisitUrgency(b.scheduledAt);
+        const rank = (u) => u === "overdue" ? 0 : u === "today" ? 1 : u === "tomorrow" ? 2 : u === "upcoming" ? 3 : 4;
+        const ra = rank(ua), rb = rank(ub);
+        if (ra !== rb) return ra - rb;
+        return (b.lastRemarkAt || b.createdAt || 0) - (a.lastRemarkAt || a.createdAt || 0);
+      });
+  }, [all, search, roleFilter, stageFilter, assignedFilter, followupFilter]);
+
+  const dueList = useMemo(() => all
+    .filter(c => c.scheduledAt && !HIRING_TERMINAL.includes(c.stage) && c.stage !== "Joined")
+    .map(c => ({ c, urgency: hubVisitUrgency(c.scheduledAt) }))
+    .filter(x => x.urgency === "overdue" || x.urgency === "today")
+    .sort((a, b) => a.c.scheduledAt.localeCompare(b.c.scheduledAt)),
+    [all]);
+
+  const kpi = useMemo(() => {
+    const monthStart = (() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d.getTime(); })();
+    return {
+      total: all.length,
+      due: dueList.length,
+      joined: all.filter(c => c.stage === "Joined" && (c.joinedAt || 0) >= monthStart).length,
+      openRoles: new Set(all.filter(c => !HIRING_TERMINAL.includes(c.stage) && c.stage !== "Joined").map(c => c.role).filter(Boolean)).size,
+    };
+  }, [all, dueList]);
+
+  const dateWithNow = (dateStr) => {
+    const now = new Date();
+    const d = new Date((dateStr || todayISO()) + "T00:00:00");
+    d.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+    return d.getTime();
+  };
+
+  const addCandidate = () => {
+    if (!form.name.trim()) { alert("Enter the candidate's name."); return; }
+    const finalRole = form.role === HIRING_ROLE_OTHER ? form.customRole.trim() : form.role;
+    if (!finalRole) { alert("Pick a role, or type a new one."); return; }
+    const key = phoneKey(form.contact);
+    if (key.length >= 10) {
+      const dup = all.find(c => phoneKey(c.contact) === key);
+      if (dup && !window.confirm(`This number is already saved as "${dup.name}" (${dup.role}).\n\nAdd it again anyway?`)) return;
+    }
+    const at = dateWithNow(form.date);
+    const firstEntry = { text: `[${homeStamp(at)} · ${form.assignedTo}] Candidate added (${form.source})`, telecaller: form.assignedTo, at };
+    setRows([{
+      id: hiringId(),
+      name: form.name.trim(),
+      contact: form.contact.trim(),
+      role: finalRole,
+      area: form.area.trim(),
+      experience: form.experience.trim(),
+      expectedSalary: form.expectedSalary.trim(),
+      source: form.source,
+      stage: HIRING_STAGES[0],
+      assignedTo: form.assignedTo,
+      scheduledAt: "",
+      scheduledNote: "",
+      remarks: [firstEntry],
+      lastRemarkAt: at,
+      createdAt: at,
+      joinedAt: null,
+      rejectedReason: "",
+    }, ...all]);
+    setForm(emptyForm());
+    setShowAdd(false);
+  };
+
+  const updateCandidate = (id, patch) => setRows(all.map(c => c.id === id ? { ...c, ...patch } : c));
+
+  const addRemarkTo = (id, text, tag) => {
+    const t = (text || "").trim();
+    if (!t) return;
+    const c = all.find(x => x.id === id);
+    if (!c) return;
+    const at = Date.now();
+    const entry = { text: `[${homeStamp(at)} · ${c.assignedTo || "—"}] ${t}`, telecaller: c.assignedTo, at, tag: tag || null };
+    updateCandidate(id, { remarks: [...(c.remarks || []), entry], lastRemarkAt: at });
+  };
+
+  const setStage = (id, stage) => {
+    const c = all.find(x => x.id === id);
+    if (!c) return;
+    const patch = { stage };
+    if (stage === "Joined") patch.joinedAt = Date.now();
+    if (HIRING_TERMINAL.includes(stage) && !HIRING_TERMINAL.includes(c.stage)) {
+      const reason = window.prompt(`Reason for "${stage}"? (optional)`, "") || "";
+      patch.rejectedReason = reason;
+    }
+    addRemarkTo(id, `Stage moved to "${stage}"`);
+    updateCandidate(id, patch);
+  };
+
+  const saveSchedule = (id) => {
+    const c = all.find(x => x.id === id);
+    if (!c) return;
+    updateCandidate(id, { scheduledAt: scheduleDraft, scheduledNote: scheduleNoteDraft.trim() });
+    if (scheduleDraft) addRemarkTo(id, `Follow-up/interview scheduled for ${formatVisitDate(scheduleDraft)}${scheduleNoteDraft.trim() ? " — " + scheduleNoteDraft.trim() : ""}`);
+  };
+
+  const deleteCandidate = (id) => {
+    const c = all.find(x => x.id === id);
+    if (!c) return;
+    if (!window.confirm(`Remove "${c.name}" from the hiring tracker? This can't be undone.`)) return;
+    setRows(all.filter(x => x.id !== id));
+    setSelectedId(null);
+  };
+
+  const openDetail = (c) => {
+    setSelectedId(c.id);
+    setScheduleDraft(c.scheduledAt || "");
+    setScheduleNoteDraft(c.scheduledNote || "");
+    setNewRemark("");
+  };
+
+  // ── Bulk import ──
+  const runImportPreview = () => {
+    const { rows: parsed, skipped } = parseHiringBulkImport(importText, importRole, importAssignedTo);
+    setImportPreview({ rows: parsed, skipped });
+  };
+  const commitImport = () => {
+    if (!importPreview || !importPreview.rows.length) return;
+    setImporting(true);
+    const now = Date.now();
+    const existingKeys = new Set(all.map(c => phoneKey(c.contact)).filter(k => k.length >= 10));
+    const toAdd = [];
+    let dupCount = 0;
+    importPreview.rows.forEach((r, i) => {
+      const key = phoneKey(r.contact);
+      if (key.length >= 10 && existingKeys.has(key)) { dupCount++; return; }
+      if (key.length >= 10) existingKeys.add(key);
+      const at = now + i;
+      toAdd.push({
+        id: hiringId(), name: r.name, contact: r.contact,
+        role: r.role || importRole || HIRING_ROLES_DEFAULT[0],
+        area: r.area, experience: r.experience, expectedSalary: "",
+        source: r.source || HIRING_SOURCES[0], stage: HIRING_STAGES[0],
+        assignedTo: r.assignedTo || importAssignedTo,
+        scheduledAt: "", scheduledNote: "",
+        remarks: [{ text: `[${homeStamp(at)} · ${r.assignedTo || importAssignedTo}] Imported${r.remark ? " — " + r.remark : ""}`, telecaller: r.assignedTo || importAssignedTo, at }],
+        lastRemarkAt: at, createdAt: at, joinedAt: null, rejectedReason: "",
+      });
+    });
+    setRows([...toAdd, ...all]);
+    setImporting(false);
+    setShowImport(false);
+    setImportText(""); setImportPreview(null);
+    window.alert(`Imported ${toAdd.length} candidate${toAdd.length === 1 ? "" : "s"}.${dupCount ? ` Skipped ${dupCount} duplicate number${dupCount === 1 ? "" : "s"}.` : ""}`);
+  };
+
+  // ── PDF report — Overview / Scheduled / Calling Log / Joined, or all four
+  // combined, each its own clearly-labeled section/page so it reads as a
+  // real management report rather than a raw data dump. ──
+  const downloadHiringPDF = async () => {
+    if (generatingReport) return;
+    setGeneratingReport(true);
+    try {
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+      const NAVY = [8, 40, 25], TEAL = [23, 148, 74], TEAL_TINT = [229, 248, 238];
+      const AMBER = [180, 110, 5], INDIGO = [79, 70, 229], ROSE = [200, 45, 60];
+      const GRID = [214, 220, 214], INK = [26, 32, 46], SUBTLE = [110, 118, 138];
+      const tint = (rgb, amt = 0.88) => rgb.map(c => Math.min(255, c + (255 - c) * amt));
+      const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
+      const pageW = doc.internal.pageSize.getWidth(), pageH = doc.internal.pageSize.getHeight(), margin = 32;
+      const rangeLabel = reportFrom === reportTo ? formatDateReadable(reportFrom) : `${formatDateReadable(reportFrom)}  –  ${formatDateReadable(reportTo)}`;
+      const kindLabel = { all: "Overall Report", overview: "Overview", scheduled: "Scheduled Interviews", calling: "Calling Log", joined: "Joined Candidates" }[reportKind] || "Report";
+
+      const header = (title, subtitle) => {
+        const headerH = 74;
+        doc.setFillColor(...NAVY); doc.rect(0, 0, pageW, headerH, "F");
+        doc.setFillColor(...TEAL); doc.rect(0, headerH - 2, pageW, 2, "F");
+        const logoSize = 34, badgePad = 5, badgeSize = logoSize + badgePad * 2;
+        const badgeX = margin, badgeY = (headerH - badgeSize) / 2 - 1;
+        doc.setFillColor(255, 255, 255); doc.roundedRect(badgeX, badgeY, badgeSize, badgeSize, 8, 8, "F");
+        try { doc.addImage(SRIDHI_LOGO_PNG, "PNG", badgeX + badgePad, badgeY + badgePad, logoSize, logoSize); } catch (e) {}
+        const textX = badgeX + badgeSize + 14;
+        doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(15);
+        doc.text(title, textX, 30);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(200, 214, 205);
+        doc.text(subtitle || `${rangeLabel}${reportRole !== "All" ? " · " + reportRole : ""}`, textX, 46);
+        doc.setFontSize(8);
+        doc.text(`Generated ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`, pageW - margin, 30, { align: "right" });
+        return headerH + 20;
+      };
+      const sectionTitle = (text, y, color = NAVY) => {
+        doc.setFillColor(...color); doc.rect(margin, y - 9, 3, 12, "F");
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(...color);
+        doc.text(text, margin + 9, y);
+        return y + 12;
+      };
+      const footer = () => {
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+          doc.setPage(i);
+          doc.setDrawColor(...GRID); doc.line(margin, pageH - 26, pageW - margin, pageH - 26);
+          doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...SUBTLE);
+          doc.text("Sridhi Ventures · Hiring Report · Confidential — Internal Use", margin, pageH - 13);
+          doc.text(`Page ${i} of ${pageCount}`, pageW - margin, pageH - 13, { align: "right" });
+        }
+      };
+
+      let scoped = reportRole === "All" ? all : all.filter(c => c.role === reportRole);
+      const inRange = scoped.filter(c => localISO(c.createdAt || Date.now()) >= reportFrom && localISO(c.createdAt || Date.now()) <= reportTo);
+
+      // ═══ OVERVIEW ═══
+      if (reportKind === "all" || reportKind === "overview") {
+        let y = header(`Hiring — ${kindLabel}`);
+        const total = scoped.length;
+        const scheduled = scoped.filter(c => !!c.scheduledAt).length;
+        const selected = scoped.filter(c => c.stage === "Selected").length;
+        const joinedTotal = scoped.filter(c => c.stage === "Joined").length;
+        const rejected = scoped.filter(c => HIRING_TERMINAL.includes(c.stage)).length;
+        const chips = [
+          [`${total} Total Candidates`, TEAL, [229, 248, 238]],
+          [`${inRange.length} Added in Range`, NAVY, [222, 230, 226]],
+          [`${scheduled} Interviews Scheduled`, AMBER, [254, 246, 224]],
+          [`${selected} Selected`, INDIGO, [235, 234, 253]],
+          [`${joinedTotal} Joined`, TEAL, [229, 248, 238]],
+        ];
+        let cx = margin, cyRow = y;
+        chips.forEach(([label, color, tintC]) => {
+          doc.setFont("helvetica", "bold"); doc.setFontSize(9);
+          const w = doc.getTextWidth(label) + 20;
+          if (cx + w > pageW - margin) { cx = margin; cyRow += 28; }
+          doc.setFillColor(...tintC); doc.setDrawColor(...color);
+          doc.roundedRect(cx, cyRow, w, 23, 11.5, 11.5, "FD");
+          doc.setTextColor(...color); doc.text(label, cx + 10, cyRow + 15.5);
+          cx += w + 7;
+        });
+        y = cyRow + 40;
+
+        y = sectionTitle("PIPELINE STATUS", y); y += 4;
+        const perRow = 5, boxGap = 6;
+        const sbw = (pageW - margin * 2 - (perRow - 1) * boxGap) / perRow;
+        HIRING_STAGES.forEach((s, i) => {
+          const row = Math.floor(i / perRow), col = i % perRow;
+          const bx = margin + col * (sbw + boxGap), by2 = y + row * 46;
+          const rgb = hiringStageRgb(s);
+          const count = scoped.filter(c => (c.stage || HIRING_STAGES[0]) === s).length;
+          doc.setFillColor(...tint(rgb)); doc.setDrawColor(...rgb);
+          doc.roundedRect(bx, by2, sbw, 42, 6, 6, "FD");
+          doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.setTextColor(...rgb);
+          doc.text(String(count), bx + 6, by2 + 18);
+          doc.setFont("helvetica", "normal"); doc.setFontSize(5.8); doc.setTextColor(...SUBTLE);
+          doc.text(s.toUpperCase(), bx + 6, by2 + 30, { maxWidth: sbw - 8 });
+        });
+        y += 46 * Math.ceil(HIRING_STAGES.length / perRow) + 10;
+
+        // Conversion funnel — samples/interviews counted as positive movement,
+        // not just an eventual Join, so early-stage hiring effort still shows.
+        y = sectionTitle("CONVERSION FUNNEL", y); y += 4;
+        const funnelStages = [
+          ["Applied", total],
+          ["Interview Stage", scoped.filter(c => ["Interview Scheduled", "Interviewed", "Selected", "Joined"].includes(c.stage)).length],
+          ["Selected", selected + joinedTotal],
+          ["Joined", joinedTotal],
+        ];
+        const fBoxW = (pageW - margin * 2 - 3 * 8) / 4;
+        funnelStages.forEach(([label, count], i) => {
+          const bx = margin + i * (fBoxW + 8);
+          const pct = total ? Math.round((count / total) * 100) : 0;
+          doc.setFillColor(...TEAL_TINT); doc.setDrawColor(...TEAL);
+          doc.roundedRect(bx, y, fBoxW, 44, 8, 8, "FD");
+          doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(...TEAL);
+          doc.text(String(count), bx + 10, y + 24);
+          doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); doc.setTextColor(...INK);
+          doc.text(label.toUpperCase(), bx + 10, y + 36);
+          doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(...SUBTLE);
+          doc.text(`${pct}% of total`, bx + fBoxW - 8, y + 36, { align: "right" });
+        });
+        y += 44 + 22;
+
+        y = sectionTitle("BY ROLE", y);
+        const roleRows = roleOptions.map(r => {
+          const rC = scoped.filter(c => c.role === r);
+          if (!rC.length) return null;
+          return [r, rC.length, rC.filter(c => c.stage === "Joined").length, rC.filter(c => !HIRING_TERMINAL.includes(c.stage) && c.stage !== "Joined").length];
+        }).filter(Boolean);
+        autoTable(doc, {
+          startY: y + 6, margin: { top: 94, bottom: 40 },
+          head: [["Role", "Candidates", "Joined", "Still Open"]],
+          body: roleRows.length ? roleRows : [["—", "—", "—", "—"]], theme: "grid",
+          styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5.5, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+          headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+          alternateRowStyles: { fillColor: [248, 250, 248] },
+          columnStyles: { 0: { fontStyle: "bold" } },
+        });
+        y = doc.lastAutoTable.finalY + 20;
+
+        if (reportKind === "all") { doc.addPage(); }
+      }
+
+      // ═══ SCHEDULED INTERVIEWS ═══
+      if (reportKind === "all" || reportKind === "scheduled") {
+        let y = header("Hiring — Scheduled Interviews / Follow-ups", `${rangeLabel}${reportRole !== "All" ? " · " + reportRole : ""}`);
+        const schedRows = scoped
+          .filter(c => !!c.scheduledAt)
+          .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+          .map(c => {
+            const urg = hubVisitUrgency(c.scheduledAt);
+            const label = urg === "overdue" ? "OVERDUE" : urg === "today" ? "TODAY" : urg === "tomorrow" ? "TOMORROW" : "UPCOMING";
+            return [formatVisitDate(c.scheduledAt), label, c.name, c.role || "—", c.contact || "—", c.assignedTo || "—", c.scheduledNote || "—"];
+          });
+        y = sectionTitle(`${schedRows.length} scheduled`, y);
+        autoTable(doc, {
+          startY: y + 6, margin: { top: 94, bottom: 40 },
+          head: [["Date", "", "Candidate", "Role", "Contact", "Handled By", "Note"]],
+          body: schedRows.length ? schedRows : [["—", "—", "No interviews scheduled", "—", "—", "—", "—"]], theme: "grid",
+          styles: { font: "helvetica", fontSize: 8.2, cellPadding: 5, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+          headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+          alternateRowStyles: { fillColor: [248, 250, 248] },
+          didParseCell: (data) => {
+            if (data.section === "body" && data.column.index === 1) {
+              const v = data.cell.raw;
+              data.cell.styles.textColor = v === "OVERDUE" ? ROSE : v === "TODAY" ? AMBER : SUBTLE;
+              data.cell.styles.fontStyle = "bold";
+            }
+          },
+        });
+        if (reportKind === "all") { doc.addPage(); }
+      }
+
+      // ═══ CALLING LOG ═══
+      if (reportKind === "all" || reportKind === "calling") {
+        let y = header("Hiring — Calling / Remarks Log", `${rangeLabel}${reportRole !== "All" ? " · " + reportRole : ""}`);
+        const entries = [];
+        scoped.forEach(c => {
+          (c.remarks || []).forEach(r => {
+            const at = typeof r === "object" ? r.at : null;
+            if (!at) return;
+            const dateStr = localISO(at);
+            if (dateStr < reportFrom || dateStr > reportTo) return;
+            entries.push({ at, dateStr, name: c.name, role: c.role || "—", by: (typeof r === "object" ? r.telecaller : null) || "—", note: remarkText(r) || "—" });
+          });
+        });
+        entries.sort((a, b) => a.at - b.at);
+        y = sectionTitle(`${entries.length} entries logged`, y);
+        const callRows = entries.map(e => [formatDateReadable(e.dateStr), e.name, e.role, e.by, e.note]);
+        autoTable(doc, {
+          startY: y + 6, margin: { top: 94, bottom: 40 },
+          head: [["Date", "Candidate", "Role", "By", "Note"]],
+          body: callRows.length ? callRows : [["—", "No calls logged in this range", "—", "—", "—"]], theme: "grid",
+          styles: { font: "helvetica", fontSize: 8.2, cellPadding: 5, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+          headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+          alternateRowStyles: { fillColor: [248, 250, 248] },
+          columnStyles: { 4: { cellWidth: 200 } },
+        });
+        if (reportKind === "all") { doc.addPage(); }
+      }
+
+      // ═══ JOINED ═══
+      if (reportKind === "all" || reportKind === "joined") {
+        let y = header("Hiring — Joined Candidates", `${rangeLabel}${reportRole !== "All" ? " · " + reportRole : ""}`);
+        const joinedRows = scoped
+          .filter(c => c.stage === "Joined" && c.joinedAt && localISO(c.joinedAt) >= reportFrom && localISO(c.joinedAt) <= reportTo)
+          .sort((a, b) => (b.joinedAt || 0) - (a.joinedAt || 0));
+        y = sectionTitle(`${joinedRows.length} joined in this range`, y, TEAL);
+        const jRows = joinedRows.map(c => [formatDateReadable(localISO(c.joinedAt)), c.name, c.role || "—", c.contact || "—", c.area || "—", c.assignedTo || "—"]);
+        autoTable(doc, {
+          startY: y + 6, margin: { top: 94, bottom: 40 },
+          head: [["Joined On", "Name", "Role", "Contact", "Area", "Handled By"]],
+          body: jRows.length ? jRows : [["—", "No one joined in this range", "—", "—", "—", "—"]], theme: "grid",
+          styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5.5, lineColor: GRID, lineWidth: 0.6, textColor: INK },
+          headStyles: { fillColor: TEAL, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+          alternateRowStyles: { fillColor: TEAL_TINT },
+          columnStyles: { 1: { fontStyle: "bold" } },
+        });
+      }
+
+      footer();
+      doc.save(`Hiring_${kindLabel.replace(/\s+/g, "")}_${reportFrom}_to_${reportTo}.pdf`);
+      setShowReport(false);
+    } catch (e) {
+      alert("Couldn't generate the report: " + (e && e.message ? e.message : e));
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: T.t1, letterSpacing: "-0.02em" }}>Hiring</div>
+          <div style={{ fontSize: 12, color: T.t3, marginTop: 2 }}>Candidate tracking, follow-ups & reports for Telecaller / Driver / Accountant / Field Sales & more</div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <SyncBadge status={syncStatus} onRetry={retrySync} error={syncError} />
+          <Btn small label="📥 Bulk Import" ghost onClick={() => { setImportText(""); setImportPreview(null); setImportRole(""); setShowImport(true); }} />
+          <Btn small label="📄 Report" ghost color={T.indigo} onClick={() => setShowReport(true)} />
+          <Btn small label="+ Add Candidate" onClick={() => { setForm(emptyForm()); setShowAdd(true); }} />
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <MobileStatCard icon="🧑‍💼" title="Total Candidates" value={kpi.total} color={T.accent} />
+        <MobileStatCard icon="⏰" title="Follow-ups Due" value={kpi.due} sub={kpi.due ? "Overdue + Today" : "All caught up"} color={kpi.due ? T.rose : T.emerald} />
+        <MobileStatCard icon="🎉" title="Joined This Month" value={kpi.joined} color={T.emerald} />
+        <MobileStatCard icon="📌" title="Open Roles" value={kpi.openRoles} color={T.indigo} />
+      </div>
+
+      {dueList.length > 0 && (
+        <Card accent={T.rose} style={{ padding: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: T.rose, marginBottom: 8 }}>⏰ Follow-ups due now ({dueList.length})</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {dueList.slice(0, 5).map(({ c, urgency }) => {
+              const style = hubVisitUrgencyStyle(urgency);
+              return (
+                <div key={c.id} onClick={() => openDetail(c)} style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "8px 10px", borderRadius: 10, background: T.cardHigh, cursor: "pointer",
+                }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: T.t1 }}>{c.name} <span style={{ fontWeight: 500, color: T.t3 }}>· {c.role}</span></div>
+                  <Chip small label={`${style.emoji} ${style.label}`} color={style.color === "#FCA5A5" ? T.rose : style.color} />
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      <Card noPad style={{ padding: 14 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, role, area, phone…"
+            style={{ ...inputStyle, flex: "1 1 200px" }} />
+          <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} style={{ ...inputStyle, width: "auto", flex: "0 0 auto" }}>
+            <option value="All">All Roles</option>
+            {roleOptions.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+          <select value={stageFilter} onChange={e => setStageFilter(e.target.value)} style={{ ...inputStyle, width: "auto", flex: "0 0 auto" }}>
+            <option value="All">All Stages</option>
+            {HIRING_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select value={assignedFilter} onChange={e => setAssignedFilter(e.target.value)} style={{ ...inputStyle, width: "auto", flex: "0 0 auto" }}>
+            <option value="All">Everyone</option>
+            {TELECALLERS.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {[["All", "All"], ["overdue", "Overdue"], ["today", "Today"], ["tomorrow", "Tomorrow"], ["upcoming", "Upcoming"], ["none", "No Follow-up"]].map(([id, label]) => (
+            <button key={id} onClick={() => setFollowupFilter(id)} style={{
+              padding: "6px 12px", borderRadius: 999, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+              background: followupFilter === id ? T.accent : "transparent",
+              color: followupFilter === id ? "#FFFFFF" : T.t2,
+              border: `1px solid ${followupFilter === id ? T.accent : T.border}`,
+            }}>{label}</button>
+          ))}
+        </div>
+      </Card>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {filtered.length === 0 && (
+          <Card style={{ textAlign: "center", padding: 30, color: T.t3, fontSize: 13 }}>No candidates match these filters.</Card>
+        )}
+        {filtered.map(c => {
+          const urg = hubVisitUrgency(c.scheduledAt);
+          const urgStyle = urg ? hubVisitUrgencyStyle(urg) : null;
+          return (
+            <Card key={c.id} noPad style={{ padding: 14, cursor: "pointer" }} onClick={() => openDetail(c)}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: T.t1 }}>{c.name || "—"}</span>
+                    <Chip small label={c.role || "—"} color={T.indigo} />
+                    <Chip small label={c.stage || HIRING_STAGES[0]} color={hiringStageColor(c.stage)} />
+                  </div>
+                  <div style={{ fontSize: 11.5, color: T.t3, marginTop: 4 }}>
+                    {c.contact ? "📞 " + c.contact : ""}{c.area ? "  ·  📍 " + c.area : ""}{c.assignedTo ? "  ·  " + c.assignedTo : ""}
+                  </div>
+                  {hiringLastRemarkText(c) && (
+                    <div style={{ fontSize: 11.5, color: T.t2, marginTop: 6, fontStyle: "italic" }}>"{hiringLastRemarkText(c)}"</div>
+                  )}
+                </div>
+                {urgStyle && (
+                  <Chip small label={`${urgStyle.emoji} ${urgStyle.label} · ${formatVisitDate(c.scheduledAt)}`} color={urgStyle.color === "#FCA5A5" ? T.rose : urgStyle.color} />
+                )}
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* ── Add Candidate ── */}
+      <Sheet open={showAdd} onClose={() => setShowAdd(false)} title="Add Candidate">
+        <Field label="Name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Candidate's full name" />
+        <Field label="Contact" value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder="10-digit phone number" />
+        <Dropdown label="Role Applying For" value={form.role}
+          onChange={e => setForm({ ...form, role: e.target.value })}
+          options={[...roleOptions, HIRING_ROLE_OTHER]} />
+        {form.role === HIRING_ROLE_OTHER && (
+          <Field label="New Role Name" value={form.customRole} onChange={e => setForm({ ...form, customRole: e.target.value })} placeholder="e.g. Warehouse Supervisor" />
+        )}
+        <Field label="Area / Location" value={form.area} onChange={e => setForm({ ...form, area: e.target.value })} placeholder="e.g. Ambattur" />
+        <Field label="Experience" value={form.experience} onChange={e => setForm({ ...form, experience: e.target.value })} placeholder="e.g. 2 years" />
+        <Field label="Expected Salary" value={form.expectedSalary} onChange={e => setForm({ ...form, expectedSalary: e.target.value })} placeholder="e.g. 15000" />
+        <Dropdown label="Source" value={form.source} onChange={e => setForm({ ...form, source: e.target.value })} options={HIRING_SOURCES} />
+        <Dropdown label="Handled By" value={form.assignedTo} onChange={e => setForm({ ...form, assignedTo: e.target.value })} options={TELECALLERS} />
+        <Btn full label="Add Candidate" onClick={addCandidate} />
+      </Sheet>
+
+      {/* ── Bulk Import ── */}
+      <Sheet open={showImport} onClose={() => setShowImport(false)} title="Bulk Import Candidates">
+        <div style={{ fontSize: 11.5, color: T.t3, marginBottom: 10, lineHeight: 1.5 }}>
+          Paste a list from Excel/WhatsApp — Name, Phone, Role (one per line, or copy straight from a spreadsheet). Rows without a role use the default below.
+        </div>
+        <Dropdown label="Default Role (if not in the paste)" value={importRole || roleOptions[0]} onChange={e => setImportRole(e.target.value)} options={roleOptions} />
+        <Dropdown label="Handled By" value={importAssignedTo} onChange={e => setImportAssignedTo(e.target.value)} options={TELECALLERS} />
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Paste List</div>
+          <textarea value={importText} onChange={e => { setImportText(e.target.value); setImportPreview(null); }} rows={8}
+            placeholder={"Ramesh Kumar, 9876543210, Driver\nPriya S, 9123456780, Telecaller"}
+            style={{ ...inputStyle, resize: "vertical", fontFamily: "monospace", fontSize: 12 }} />
+        </div>
+        {!importPreview ? (
+          <Btn full label="Preview Import" ghost onClick={runImportPreview} disabled={!importText.trim()} />
+        ) : (
+          <>
+            <div style={{ fontSize: 12.5, color: T.t2, marginBottom: 10 }}>
+              Found <b style={{ color: T.emerald }}>{importPreview.rows.length}</b> candidate{importPreview.rows.length === 1 ? "" : "s"} to import
+              {importPreview.skipped ? `, skipped ${importPreview.skipped} unreadable line${importPreview.skipped === 1 ? "" : "s"}` : ""}.
+            </div>
+            <div style={{ maxHeight: 180, overflowY: "auto", border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 12 }}>
+              {importPreview.rows.map((r, i) => (
+                <div key={i} style={{ padding: "8px 10px", fontSize: 12, borderBottom: i < importPreview.rows.length - 1 ? `1px solid ${T.border}` : "none" }}>
+                  <b>{r.name || "(no name)"}</b> — {r.contact || "no phone"} — {r.role || importRole}
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn label="Back" ghost onClick={() => setImportPreview(null)} />
+              <Btn full label={importing ? "Importing…" : `Import ${importPreview.rows.length} Candidates`} disabled={importing || !importPreview.rows.length} onClick={commitImport} />
+            </div>
+          </>
+        )}
+      </Sheet>
+
+      {/* ── Report ── */}
+      <Sheet open={showReport} onClose={() => setShowReport(false)} title="Hiring Report">
+        <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Report Type</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+          {[["all", "Overall (Combined)"], ["overview", "Overview Only"], ["scheduled", "Scheduled"], ["calling", "Calling Log"], ["joined", "Joined"]].map(([id, label]) => (
+            <button key={id} onClick={() => setReportKind(id)} style={{
+              padding: "7px 12px", borderRadius: 10, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+              background: reportKind === id ? T.indigo : "transparent",
+              color: reportKind === id ? "#FFFFFF" : T.t2,
+              border: `1px solid ${reportKind === id ? T.indigo : T.border}`,
+            }}>{label}</button>
+          ))}
+        </div>
+        <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Date Range</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+          {["Today", "This Week", "This Month", "Custom"].map(p => (
+            <button key={p} onClick={() => applyReportPreset(p)} style={{
+              padding: "7px 12px", borderRadius: 10, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+              background: reportPreset === p ? T.amber : "transparent",
+              color: reportPreset === p ? "#FFFFFF" : T.t2,
+              border: `1px solid ${reportPreset === p ? T.amber : T.border}`,
+            }}>{p}</button>
+          ))}
+        </div>
+        {reportPreset === "Custom" && (
+          <div style={{ display: "flex", gap: 10 }}>
+            <Field label="From" type="date" value={reportFrom} onChange={e => setReportFrom(e.target.value)} />
+            <Field label="To" type="date" value={reportTo} onChange={e => setReportTo(e.target.value)} />
+          </div>
+        )}
+        <Dropdown label="Role" value={reportRole} onChange={e => setReportRole(e.target.value)} options={["All", ...roleOptions]} />
+        <Btn full label={generatingReport ? "Generating…" : "Download PDF Report"} disabled={generatingReport} onClick={downloadHiringPDF} />
+      </Sheet>
+
+      {/* ── Candidate Detail ── */}
+      <Sheet open={!!selected} onClose={() => setSelectedId(null)} title={selected ? selected.name : ""}>
+        {selected && (
+          <>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+              <Chip label={selected.role || "—"} color={T.indigo} />
+              <Chip label={selected.stage || HIRING_STAGES[0]} color={hiringStageColor(selected.stage)} />
+            </div>
+            <div style={{ fontSize: 12.5, color: T.t2, lineHeight: 1.8, marginBottom: 14 }}>
+              📞 {selected.contact || "—"}<br />
+              📍 {selected.area || "—"} · 🧾 {selected.experience || "—"} exp · ₹{selected.expectedSalary || "—"}<br />
+              🗂️ Source: {selected.source || "—"} · Handled by {selected.assignedTo || "—"}
+              {selected.stage === "Joined" && selected.joinedAt ? <><br />🎉 Joined {homeStamp(selected.joinedAt)}</> : null}
+              {HIRING_TERMINAL.includes(selected.stage) && selected.rejectedReason ? <><br />📝 {selected.rejectedReason}</> : null}
+            </div>
+
+            <div style={{ fontSize: 11, color: T.t2, marginBottom: 6, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Move Stage</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+              {HIRING_STAGES.map(s => (
+                <button key={s} onClick={() => setStage(selected.id, s)} style={{
+                  padding: "6px 11px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+                  background: selected.stage === s ? hiringStageColor(s) : "transparent",
+                  color: selected.stage === s ? "#FFFFFF" : hiringStageColor(s),
+                  border: `1px solid ${hiringStageColor(s)}55`,
+                }}>{s}</button>
+              ))}
+            </div>
+
+            <Rule />
+            <div style={{ height: 14 }} />
+            <div style={{ fontSize: 11, color: T.t2, marginBottom: 8, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Schedule Interview / Follow-up</div>
+            <CalendarDatePicker label="" value={scheduleDraft} onChange={setScheduleDraft} min={todayISO()} />
+            <Field label="Note (optional)" value={scheduleNoteDraft} onChange={e => setScheduleNoteDraft(e.target.value)} placeholder="e.g. Telephonic round, 11am" />
+            <Btn small label="Save Schedule" ghost onClick={() => saveSchedule(selected.id)} />
+
+            <div style={{ height: 18 }} />
+            <Rule />
+            <div style={{ height: 14 }} />
+            <div style={{ fontSize: 11, color: T.t2, marginBottom: 8, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>Add Remark / Call Note</div>
+            <textarea value={newRemark} onChange={e => setNewRemark(e.target.value)} rows={2} placeholder="e.g. Called, asked to come Monday 10am"
+              style={{ ...inputStyle, resize: "vertical", marginBottom: 10 }} />
+            <Btn small label="Save Remark" onClick={() => { addRemarkTo(selected.id, newRemark); setNewRemark(""); }} />
+
+            <div style={{ height: 18 }} />
+            <div style={{ fontSize: 11, color: T.t2, marginBottom: 8, fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>History</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 220, overflowY: "auto" }}>
+              {(selected.remarks || []).slice().reverse().map((r, i) => (
+                <div key={i} style={{ fontSize: 11.5, color: T.t2, padding: "8px 10px", background: T.cardHigh, borderRadius: 8 }}>
+                  {remarkText(r)}
+                </div>
+              ))}
+              {(!selected.remarks || !selected.remarks.length) && <div style={{ fontSize: 12, color: T.t3 }}>No history yet.</div>}
+            </div>
+
+            <div style={{ height: 18 }} />
+            <button onClick={() => deleteCandidate(selected.id)} style={{
+              width: "100%", background: "transparent", border: `1px solid ${T.rose}55`, color: T.rose,
+              borderRadius: 12, padding: "10px", fontWeight: 700, fontSize: 12.5, cursor: "pointer", fontFamily: FONT,
+            }}>Remove Candidate</button>
+          </>
+        )}
+      </Sheet>
+    </div>
+  );
+}
+
 function Samples() {
   const [samples, setSamples, samplesSyncStatus] = useSheetSynced("samples", "samples", INITIAL_SAMPLES);
   const [leads, setLeads] = useSheetSynced("leads","leads",[]);
@@ -11120,6 +11946,7 @@ const MORE_MENU = [
   { id:"today",     label:"Today Tasks",    icon:"📅"  },
   { id:"prospects",  label:"Find Prospects", icon:"🗺️"  },
   { id:"hrleads",   label:"HR Leads",       icon:"📋"  },
+  { id:"hiring",    label:"Hiring",         icon:"🧑‍💼" },
   { id:"whatsapp",  label:"WA Templates",  icon:"💬"  },
   { id:"ai",        label:"AI Assistant",  icon:"✦"  },
 ];
@@ -11214,6 +12041,7 @@ function DIcon({ id, size = 18, color = "currentColor", strokeWidth = 1.8 }) {
     case "marketing": return <svg {...p}><path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M16 8a5 5 0 0 1 0 8"/><path d="M19 5a9 9 0 0 1 0 14"/></svg>;
     case "compass": return <svg {...p}><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>;
     case "clipboard": return <svg {...p}><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3"/><path d="M9 12h6"/><path d="M9 16h6"/><path d="M9 8h1"/></svg>;
+    case "hiring": return <svg {...p}><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/><path d="M3 12h18"/></svg>;
     default: return null;
   }
 }
@@ -11236,6 +12064,7 @@ const DESKTOP_NAV = [
   { id: "today",     label: "Telecalling",  icon: "phone" },
   { id: "prospects", label: "Find Prospects", icon: "compass", tag: "New" },
   { id: "hrleads",   label: "HR Leads",     icon: "clipboard" },
+  { id: "hiring",    label: "Hiring",       icon: "hiring", tag: "New" },
   { id: "whatsapp",  label: "Follow-ups",   icon: "followups" },
   { id: "marketing", label: "Marketing",    icon: "marketing" },
   { id: "expenses",  label: "Expenses",     icon: "expenses" },
@@ -13113,6 +13942,7 @@ export default function App() {
       case "today":     return <TodayTasks />;
       case "prospects":  return <ProspectFinder />;
       case "hrleads":   return <HRLeads />;
+      case "hiring":    return <Hiring />;
       case "whatsapp":  return <WhatsAppTemplates />;
       case "ai":        return <AIAssistant />;
       case "settings":  return <SettingsPlaceholder />;

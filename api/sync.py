@@ -39,6 +39,7 @@ TAB_CONFIG = {
     "milkDistributors": {"tab": "MilkDistributors", "headers": ["id","name","contact","area","address","mapLink","status","telecaller","currentBrand","telecallerRemarks","fieldSalesRemarks","createdAt","lastTelecallerRemarkAt","lastFieldSalesRemarkAt"]},
     "homeCustomers": {"tab": "HomeCustomers", "headers": ["id","name","contact","area","address","mapLink","leadType","source","status","telecaller","distributor","remarks","lastRemarkAt","createdAt"]},
     "hubDistributors": {"tab": "HubDistributors", "headers": ["id","hub","name","contact","areas","address","mapLink","details","status","telecaller","remarks","createdAt","lastRemarkAt","scheduledVisitAt","scheduledVisitNote"]},
+    "hiring": {"tab": "Hiring", "headers": ["id","name","contact","role","area","experience","expectedSalary","source","stage","assignedTo","scheduledAt","scheduledNote","remarks","lastRemarkAt","createdAt","joinedAt","rejectedReason"]},
 }
 
 _cache = {}
