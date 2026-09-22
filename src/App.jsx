@@ -4,31 +4,35 @@ import { SRIDHI_LOGO_PNG } from "./lib/logo.js";
 import * as XLSX from "xlsx";
 
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────
+// Light, professional palette — soft mint-grey app background, crisp white
+// cards, a forest-teal brand accent (matches the Sridhi Ventures print/PDF
+// branding), and saturated-but-readable status colors that stay legible as
+// solid text on a white card (not just as translucent tints).
 const T = {
-  bg:       "#0A0E1A",
-  surface:  "#0F1524",
-  card:     "#131B2E",
-  cardHigh: "#1A2438",
-  glass:    "rgba(19,27,46,0.85)",
+  bg:       "#F3F6F4",
+  surface:  "#FFFFFF",
+  card:     "#FFFFFF",
+  cardHigh: "#F2F7F4",
+  glass:    "rgba(255,255,255,0.88)",
 
-  border:   "#212D47",
-  borderHi: "#2E3D5C",
+  border:   "#E1E8E3",
+  borderHi: "#C7D3CB",
 
-  accent:    "#1FE0B8",
-  accentSub: "rgba(31,224,184,0.12)",
-  accentGlow:"rgba(31,224,184,0.38)",
+  accent:    "#0E9F6E",
+  accentSub: "rgba(14,159,110,0.10)",
+  accentGlow:"rgba(14,159,110,0.32)",
 
-  emerald:  "#22D98A",
-  amber:    "#FBBF24",
-  rose:     "#FB7185",
-  indigo:   "#818CF8",
-  sky:      "#38BDF8",
-  orange:   "#FB923C",
+  emerald:  "#059669",
+  amber:    "#B45309",
+  rose:     "#DC2626",
+  indigo:   "#4F46E5",
+  sky:      "#0284C7",
+  orange:   "#EA580C",
 
-  t1: "#F1F5F9",
-  t2: "#94A3B8",
-  t3: "#64748B",
-  t4: "#3B4A6B",
+  t1: "#0F172A",
+  t2: "#5B6B7C",
+  t3: "#8A97A8",
+  t4: "#A2B0AA",
 };
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
@@ -917,7 +921,7 @@ function CalendarDatePicker({ label, value, onChange, min }) {
                 <button type="button" key={i} disabled={isDisabled} onClick={() => { onChange(ds); setOpen(false); }} style={{
                   aspectRatio: "1", border: isToday && !isSelected ? `1px solid ${T.accent}88` : "1px solid transparent", borderRadius: 8,
                   background: isSelected ? T.accent : "transparent",
-                  color: isDisabled ? T.t4 : isSelected ? "#060B16" : T.t1,
+                  color: isDisabled ? T.t4 : isSelected ? "#FFFFFF" : T.t1,
                   fontSize: 12.5, fontWeight: isSelected || isToday ? 800 : 500,
                   cursor: isDisabled ? "not-allowed" : "pointer", fontFamily: FONT,
                   opacity: isDisabled ? 0.35 : 1,
@@ -939,7 +943,7 @@ function Btn({ label, color=T.accent, onClick, full, ghost, small, disabled }) {
   return (
     <button onClick={disabled ? undefined : onClick} disabled={disabled} style={{
       background: ghost ? "transparent" : color,
-      color: ghost ? color : "#060B16",
+      color: ghost ? color : "#FFFFFF",
       border: `1px solid ${ghost ? color+"55" : color}`,
       borderRadius:12, padding: small ? "8px 14px" : "12px 20px",
       fontWeight:700, fontSize: small ? 12 : 13, cursor: disabled ? "not-allowed" : "pointer",
@@ -1118,7 +1122,7 @@ function ProspectFinder() {
           )}
           <button onClick={confirmAdd} disabled={!form.name}
             style={{ flex:2, background: form.name ? T.accent : T.border, border:"none", borderRadius:12,
-              color: form.name ? "#060B16" : T.t3, padding:"12px", fontSize:14, fontWeight:800,
+              color: form.name ? "#FFFFFF" : T.t3, padding:"12px", fontSize:14, fontWeight:800,
               cursor: form.name ? "pointer" : "default", fontFamily:FONT }}>
             ✓ Add to CRM Pipeline
           </button>
@@ -1163,7 +1167,7 @@ function ProspectFinder() {
         </div>
         <button onClick={search} disabled={loading}
           style={{ background: loading ? T.border : T.accent, border:"none", borderRadius:12,
-            color: loading ? T.t3 : "#060B16", padding:"13px", fontSize:14, fontWeight:800,
+            color: loading ? T.t3 : "#FFFFFF", padding:"13px", fontSize:14, fontWeight:800,
             cursor: loading ? "default" : "pointer", fontFamily:FONT }}>
           {loading ? "🔍 Searching..." : "🔍 Find Prospects"}
         </button>
@@ -1203,7 +1207,7 @@ function ProspectFinder() {
                     </div>
                   ) : (
                     <button onClick={() => startFill(r)}
-                      style={{ background:T.accent, border:"none", borderRadius:8, color:"#060B16", padding:"6px 12px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
+                      style={{ background:T.accent, border:"none", borderRadius:8, color:"#FFFFFF", padding:"6px 12px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
                       + Add Lead
                     </button>
                   )}
@@ -1813,7 +1817,7 @@ function HRLeads() {
         </div>
         <button onClick={confirmImport} disabled={!form.name}
           style={{ background: form.name ? T.accent : T.border, border:"none", borderRadius:14,
-            color: form.name ? "#060B16" : T.t3, padding:"14px", fontSize:14, fontWeight:800,
+            color: form.name ? "#FFFFFF" : T.t3, padding:"14px", fontSize:14, fontWeight:800,
             cursor: form.name ? "pointer" : "default", fontFamily:FONT }}>
           ✓ Add to CRM Pipeline
         </button>
@@ -1869,7 +1873,7 @@ function HRLeads() {
                   color:T.accent, padding:"5px 12px", fontSize:11, fontWeight:700 }}>✓ Done</div>
               ) : (
                 <button onClick={() => startImport(num)}
-                  style={{ background:T.accent, border:"none", borderRadius:10, color:"#060B16",
+                  style={{ background:T.accent, border:"none", borderRadius:10, color:"#FFFFFF",
                     padding:"8px 14px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
                   Fill & Add
                 </button>
@@ -2289,7 +2293,7 @@ function Leads() {
                   outline:"none", width:"100%", boxSizing:"border-box", marginBottom:10 }} />
               <button onClick={() => confirmDelivery("porter")} disabled={!porterAmt}
                 style={{ background: porterAmt ? T.amber : T.border, border:"none", borderRadius:12,
-                  color: porterAmt ? "#060B16" : T.t3, padding:"12px", fontSize:13, fontWeight:800,
+                  color: porterAmt ? "#FFFFFF" : T.t3, padding:"12px", fontSize:13, fontWeight:800,
                   cursor: porterAmt ? "pointer" : "default", fontFamily:FONT, width:"100%" }}>
                 🛵 Confirm Porter — ₹{porterAmt || "0"} (logged to expenses)
               </button>
@@ -2304,7 +2308,7 @@ function Leads() {
               </div>
               <button onClick={() => confirmDelivery("company")}
                 style={{ background:T.emerald, border:"none", borderRadius:12,
-                  color:"#060B16", padding:"12px", fontSize:13, fontWeight:800,
+                  color:"#FFFFFF", padding:"12px", fontSize:13, fontWeight:800,
                   cursor:"pointer", fontFamily:FONT, width:"100%" }}>
                 🚗 Confirm Company Vehicle
               </button>
@@ -2496,7 +2500,7 @@ function Leads() {
             <div style={{ fontSize:11, color:T.t3, marginTop:1 }}>{newLeadToast.area || newLeadToast.source || "Tap to view and call"}</div>
           </div>
           <button onClick={(e) => { e.stopPropagation(); const p=(newLeadToast.contact||"").replace(/[^0-9]/g,""); if(p) window.location.href="tel:+91"+p; }}
-            style={{ background:T.emerald, border:"none", borderRadius:10, color:"#060B16", width:34, height:34, fontSize:15, cursor:"pointer", flexShrink:0 }}>📞</button>
+            style={{ background:T.emerald, border:"none", borderRadius:10, color:"#FFFFFF", width:34, height:34, fontSize:15, cursor:"pointer", flexShrink:0 }}>📞</button>
         </div>
       )}
       {overdueCount > 0 && (
@@ -2516,7 +2520,7 @@ function Leads() {
           placeholder="Search by name, area, contact…"
           style={{ ...inputStyle, flex:1 }} />
         <button onClick={() => setShowAdd(true)} style={{
-          background:T.accent, color:"#060B16", border:"none",
+          background:T.accent, color:"#FFFFFF", border:"none",
           borderRadius:12, width:42, height:42, fontWeight:800, fontSize:20, cursor:"pointer",
           display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0,
         }}>+</button>
@@ -2903,7 +2907,7 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
               </select>
             </div>
             <button onClick={() => { setAllLeads(allLeads.map(l => l.id===lead.id ? {...l,...editForm} : l)); setShowEdit(false); }}
-              style={{ background:T.accent, border:"none", borderRadius:12, color:"#060B16", padding:"12px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT, width:"100%" }}>
+              style={{ background:T.accent, border:"none", borderRadius:12, color:"#FFFFFF", padding:"12px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT, width:"100%" }}>
               ✓ Save Changes
             </button>
           </Card>
@@ -2970,7 +2974,7 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
             style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"10px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box", resize:"none", marginTop:8 }} />
           <div style={{ marginTop:8 }}>
             <button onClick={() => addRemarkP(lead.id)}
-              style={{ background:T.accent, border:"none", borderRadius:12, color:"#060B16", padding:"11px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT, width:"100%" }}>
+              style={{ background:T.accent, border:"none", borderRadius:12, color:"#FFFFFF", padding:"11px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT, width:"100%" }}>
               Save Remark
             </button>
           </div>
@@ -2990,7 +2994,7 @@ ${stageSections || `<div style="text-align:center;color:#999;padding:40px">No le
         <div style={{ display:"flex", gap:10, marginTop:8 }}>
           <button onClick={downloadPipelineExcel} disabled={exporting}
             style={{ flex:1, background:"linear-gradient(135deg,#10B981,#00C9A7)", border:"none", borderRadius:14,
-              color:"#060B16", padding:"13px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT,
+              color:"#FFFFFF", padding:"13px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT,
               display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
             {exporting ? "⏳ Preparing..." : "📊 Excel"}
           </button>
@@ -3142,7 +3146,7 @@ function LostCustomers() {
                 placeholder="e.g. Switched to a local supplier, moved out of area..."
                 style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, color:T.t1, padding:"10px 12px", fontSize:13, fontFamily:FONT, outline:"none", width:"100%", boxSizing:"border-box", resize:"none" }} />
               <button onClick={() => selectReason(lead.id, "Others", customReason)}
-                style={{ marginTop:8, background:T.accent, border:"none", borderRadius:12, color:"#060B16", padding:"11px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT, width:"100%" }}>
+                style={{ marginTop:8, background:T.accent, border:"none", borderRadius:12, color:"#FFFFFF", padding:"11px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT, width:"100%" }}>
                 Save Reason
               </button>
             </div>
@@ -3849,7 +3853,7 @@ function ExistingCustomerPipeline() {
           {["Today", "This Week", "This Month", "Custom"].map(p => (
             <button key={p} onClick={() => applyReportPreset(p)} style={{
               background: reportPreset === p ? T.amber : "transparent",
-              color: reportPreset === p ? "#1A1200" : T.t2,
+              color: reportPreset === p ? "#FFFFFF" : T.t2,
               border: `1px solid ${reportPreset === p ? T.amber : T.border}`,
               borderRadius: 10, padding: "8px 13px", fontSize: 12, fontWeight: 700,
               cursor: "pointer", fontFamily: FONT,
@@ -4669,7 +4673,7 @@ function HomeCustomers() {
 
   // ══ LIST VIEW ════════════════════════════════════════════════════════
   const pill = (active, color) => ({
-    background: active ? color : "transparent", color: active ? "#060B16" : T.t2,
+    background: active ? color : "transparent", color: active ? "#FFFFFF" : T.t2,
     border: `1px solid ${active ? color : T.border}`, borderRadius: 20, padding: "6px 12px",
     fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT, whiteSpace: "nowrap", flexShrink: 0,
   });
@@ -5818,7 +5822,7 @@ function TelecallerActivity({ embedded = false } = {}) {
                   padding: "7px 13px", borderRadius: 20, cursor: "pointer", fontFamily: FONT,
                   fontWeight: 700, fontSize: 11.5,
                   background: reportPreset === p ? T.amber : "transparent",
-                  color: reportPreset === p ? "#1A1200" : T.t2,
+                  color: reportPreset === p ? "#FFFFFF" : T.t2,
                   border: `1px solid ${reportPreset === p ? T.amber : T.border}`,
                 }}>{p}</button>
               ))}
@@ -6410,7 +6414,7 @@ function MilkDistributors({ embedded = false } = {}) {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
           {["Today", "This Week", "This Month", "Custom"].map(p => (
             <button key={p} onClick={() => applyReportPreset(p)} style={{
-              background: reportPreset === p ? T.amber : "transparent", color: reportPreset === p ? "#1A1200" : T.t2,
+              background: reportPreset === p ? T.amber : "transparent", color: reportPreset === p ? "#FFFFFF" : T.t2,
               border: `1px solid ${reportPreset === p ? T.amber : T.border}`, borderRadius: 10, padding: "8px 13px",
               fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
             }}>{p}</button>
@@ -7954,7 +7958,7 @@ function HubDistributors({ embedded = false } = {}) {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
           {["Today", "This Week", "This Month", "Custom"].map(p => (
             <button key={p} onClick={() => applyReportPreset(p)} style={{
-              background: reportPreset === p ? T.amber : "transparent", color: reportPreset === p ? "#1A1200" : T.t2,
+              background: reportPreset === p ? T.amber : "transparent", color: reportPreset === p ? "#FFFFFF" : T.t2,
               border: `1px solid ${reportPreset === p ? T.amber : T.border}`, borderRadius: 10, padding: "8px 13px",
               fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: FONT,
             }}>{p}</button>
@@ -9835,7 +9839,7 @@ function DailyOrders({ embedded = false } = {}) {
           ].map(p => (
             <button key={p.id} onClick={() => applyPreset(p.id)} style={{
               background: reportPreset === p.id ? T.accent : "transparent",
-              color: reportPreset === p.id ? "#060B16" : T.t2,
+              color: reportPreset === p.id ? "#FFFFFF" : T.t2,
               border: `1px solid ${reportPreset === p.id ? T.accent : T.border}`,
               borderRadius: 20, padding: "7px 14px", fontSize: 12, fontWeight: 700,
               cursor: "pointer", fontFamily: FONT, transition: "background 0.12s, color 0.12s",
@@ -9867,7 +9871,7 @@ function DailyOrders({ embedded = false } = {}) {
           </div>
           <button onClick={() => setAcctDate(todayISO())} style={{
             background: acctDate === todayISO() ? T.amber : "transparent",
-            color: acctDate === todayISO() ? "#1A1200" : T.t2,
+            color: acctDate === todayISO() ? "#FFFFFF" : T.t2,
             border: `1px solid ${acctDate === todayISO() ? T.amber : T.border}`,
             borderRadius: 10, padding: "10px 14px", fontSize: 12, fontWeight: 700,
             cursor: "pointer", fontFamily: FONT, height: 44,
@@ -10681,7 +10685,7 @@ function Reports() {
           ].map(p => (
             <button key={p.id} onClick={() => setLeadsPreset(p.id)} style={{
               background: leadsPreset === p.id ? T.accent : "transparent",
-              color: leadsPreset === p.id ? "#060B16" : T.t2,
+              color: leadsPreset === p.id ? "#FFFFFF" : T.t2,
               border: `1px solid ${leadsPreset === p.id ? T.accent : T.border}`,
               borderRadius: 20, padding: "7px 14px", fontSize: 12, fontWeight: 700,
               cursor: "pointer", fontFamily: FONT, transition: "background 0.12s, color 0.12s",
@@ -10691,7 +10695,7 @@ function Reports() {
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
           <button onClick={downloadPDF} disabled={exporting}
             style={{ background:"linear-gradient(135deg,#00C9A7,#10B981)", border:"none", borderRadius:14,
-              color:"#060B16", padding:"14px", fontSize:14, fontWeight:800, cursor:"pointer", fontFamily:FONT,
+              color:"#FFFFFF", padding:"14px", fontSize:14, fontWeight:800, cursor:"pointer", fontFamily:FONT,
               display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
             {exporting ? "⏳ Generating..." : "📑 Download PDF Report"}
           </button>
@@ -10808,7 +10812,7 @@ function AIAssistant() {
               maxWidth:"86%", padding:"12px 15px",
               borderRadius:m.role==="user"?"18px 18px 4px 18px":"18px 18px 18px 4px",
               background:m.role==="user" ? T.accent : T.card,
-              color:m.role==="user" ? "#060B16" : T.t1,
+              color:m.role==="user" ? "#FFFFFF" : T.t1,
               border:m.role==="assistant"?`1px solid ${T.border}`:"none",
               fontSize:13, lineHeight:1.6, fontWeight:m.role==="user"?600:400,
             }}>{m.content}</div>
@@ -10846,7 +10850,7 @@ function AIAssistant() {
         <button onClick={send} disabled={loading || !input.trim()}
           style={{
             background: input.trim()&&!loading ? T.accent : T.border,
-            color: input.trim()&&!loading ? "#060B16" : T.t2,
+            color: input.trim()&&!loading ? "#FFFFFF" : T.t2,
             border:"none", borderRadius:12, width:42, height:42, flexShrink:0,
             fontWeight:800, fontSize:16, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
           }}>→</button>
@@ -10952,7 +10956,7 @@ function WAEditForm({ initial, onSave, onCancel }) {
       </div>
       <button onClick={() => onSave(form)} disabled={!form.name || !form.message}
         style={{ background: form.name && form.message ? T.accent : T.border, border:"none", borderRadius:14,
-          color: form.name && form.message ? "#060B16" : T.t3, padding:"14px", fontSize:14, fontWeight:800,
+          color: form.name && form.message ? "#FFFFFF" : T.t3, padding:"14px", fontSize:14, fontWeight:800,
           cursor: form.name && form.message ? "pointer" : "default", fontFamily:FONT }}>
         Save Template
       </button>
@@ -11046,7 +11050,7 @@ function WhatsAppTemplates() {
           <div style={{ fontSize:11, color:T.t3, marginTop:2 }}>{templates.length} templates · tap to send</div>
         </div>
         <button onClick={() => { setEditing(null); setView("edit"); }}
-          style={{ background:T.accent, border:"none", borderRadius:12, color:"#060B16", padding:"8px 16px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
+          style={{ background:T.accent, border:"none", borderRadius:12, color:"#FFFFFF", padding:"8px 16px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:FONT }}>
           + New
         </button>
       </div>
@@ -11056,7 +11060,7 @@ function WhatsAppTemplates() {
         {["All Stages","New Lead","Sample Requested","Order Received","Active Customer"].map(s => (
           <button key={s} onClick={() => setFilterStage(s)}
             style={{ background: filterStage===s ? T.accent : T.card, border:`1px solid ${filterStage===s ? T.accent : T.border}`,
-              borderRadius:20, color: filterStage===s ? "#060B16" : T.t2, padding:"5px 12px", fontSize:11,
+              borderRadius:20, color: filterStage===s ? "#FFFFFF" : T.t2, padding:"5px 12px", fontSize:11,
               fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0, fontFamily:FONT }}>
             {s}
           </button>
@@ -11126,30 +11130,32 @@ const MORE_MENU = [
 // screens. The mobile app above is completely untouched.
 // ══════════════════════════════════════════════════════════════════════════
 
+// Desktop shell — same light, professional palette as the mobile design
+// system (T) above, tuned for the wider sidebar/topbar/card layout.
 const DT = {
-  bg:        "#0A0F1D",
-  sidebar:   "#0B1120",
-  surface:   "#111A2E",
-  card:      "#121C33",
-  cardHi:    "#182544",
-  border:    "#1E2B47",
-  borderHi:  "#2A3B60",
+  bg:        "#F4F7F5",
+  sidebar:   "#FFFFFF",
+  surface:   "#FFFFFF",
+  card:      "#FFFFFF",
+  cardHi:    "#F1F6F3",
+  border:    "#E3EAE5",
+  borderHi:  "#CBD8D1",
 
-  t1: "#F1F5F9",
-  t2: "#94A3B8",
-  t3: "#5F7290",
+  t1: "#101828",
+  t2: "#5B6472",
+  t3: "#8894A0",
 
-  accent:     "#14C9A6",
-  accentSoft: "rgba(20,201,166,0.14)",
-  accentGlow: "rgba(20,201,166,0.35)",
+  accent:     "#0E9F6E",
+  accentSoft: "rgba(14,159,110,0.10)",
+  accentGlow: "rgba(14,159,110,0.30)",
 
-  emerald: "#22C580",
-  amber:   "#F5A524",
-  rose:    "#F76E7E",
-  indigo:  "#4C5FE0",
-  sky:     "#3AAEE0",
-  orange:  "#F0904A",
-  purple:  "#9B6BF2",
+  emerald: "#059669",
+  amber:   "#B45309",
+  rose:    "#DC2626",
+  indigo:  "#4F46E5",
+  sky:     "#0284C7",
+  orange:  "#EA580C",
+  purple:  "#7C3AED",
 };
 
 function useIsDesktop() {
@@ -13023,7 +13029,7 @@ export default function App() {
             color:T.t3, padding:"6px 10px", fontSize:11, cursor:"pointer", fontFamily:FONT }}>Later</button>
         <button onClick={handleInstall}
           style={{ background:T.accent, border:"none", borderRadius:8,
-            color:"#060B16", padding:"6px 12px", fontSize:11, fontWeight:800,
+            color:"#FFFFFF", padding:"6px 12px", fontSize:11, fontWeight:800,
             cursor:"pointer", fontFamily:FONT }}>Install</button>
       </div>
     </div>
@@ -13133,7 +13139,7 @@ export default function App() {
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
         ::-webkit-scrollbar { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-thumb { background: ${T.border}; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: ${T.borderHi}; border-radius: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
         select option { background: ${T.card}; color: ${T.t1}; }
         @keyframes pulse { 0%,100% { opacity:0.25; transform:scale(0.8); } 50% { opacity:1; transform:scale(1.1); } }
